@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            background-color: #f6f9fc;
+        }
+        .container { 
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .header { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+        .header h1 { 
+            margin: 0;
+            font-size: 28px;
+            font-weight: 700;
+        }
+        .header p { 
+            margin: 10px 0 0 0;
+            font-size: 16px;
+            opacity: 0.95;
+        }
+        .content { 
+            padding: 40px 30px;
+        }
+        .greeting { 
+            font-size: 18px;
+            color: #1a202c;
+            margin-bottom: 20px;
+        }
+        .success-message { 
+            background: #d1fae5;
+            border-left: 4px solid #10b981;
+            padding: 16px 20px;
+            margin: 25px 0;
+            border-radius: 4px;
+        }
+        .success-message p { 
+            margin: 0;
+            color: #065f46;
+            font-weight: 500;
+        }
+        .info-box { 
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 8px;
+        }
+        .info-box .label { 
+            color: #64748b;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+        .info-box .value { 
+            color: #1a202c;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+        .info-box .value:last-child { 
+            margin-bottom: 0;
+        }
+        .cta-button { 
+            display: inline-block;
+            padding: 14px 32px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white !important;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 16px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(102, 126, 234, 0.25);
+            transition: transform 0.2s;
+        }
+        .cta-button:hover { 
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(102, 126, 234, 0.35);
+        }
+        .feature-list { 
+            background: #fefce8;
+            border-left: 4px solid #eab308;
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 4px;
+        }
+        .feature-list h3 { 
+            margin: 0 0 15px 0;
+            color: #713f12;
+            font-size: 16px;
+        }
+        .feature-list ul { 
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .feature-list ul li { 
+            padding: 8px 0;
+            color: #854d0e;
+            position: relative;
+            padding-left: 25px;
+        }
+        .feature-list ul li:before { 
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #eab308;
+            font-weight: bold;
+            font-size: 18px;
+        }
+        .steps { 
+            background: #eff6ff;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 25px 0;
+        }
+        .steps h3 { 
+            margin: 0 0 15px 0;
+            color: #1e40af;
+            font-size: 16px;
+        }
+        .steps ol { 
+            margin: 0;
+            padding-left: 20px;
+            color: #1e3a8a;
+        }
+        .steps ol li { 
+            padding: 6px 0;
+        }
+        .help-section { 
+            background: #f1f5f9;
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .help-section p { 
+            margin: 0 0 10px 0;
+            color: #475569;
+        }
+        .help-section a { 
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .footer { 
+            background: #f8fafc;
+            padding: 30px;
+            text-align: center;
+            border-top: 1px solid #e2e8f0;
+        }
+        .footer p { 
+            margin: 5px 0;
+            color: #64748b;
+            font-size: 13px;
+        }
+        .footer .company { 
+            font-weight: 600;
+            color: #475569;
+            font-size: 14px;
+        }
+        @media only screen and (max-width: 600px) {
+            .content { padding: 30px 20px; }
+            .header { padding: 30px 20px; }
+            .header h1 { font-size: 24px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎉 Welcome to AgileMind!</h1>
+            <p>Your workspace is ready to transform team collaboration</p>
+        </div>
+        
+        <div class="content">
+            <div class="greeting">
+                Hello there! 👋
+            </div>
+            
+            <p>Congratulations! Your AgileMind workspace for <strong>{{company_name}}</strong> has been successfully created and is ready to use.</p>
+            
+            <div class="success-message">
+                <p>✨ Your account is now active and you have full Super Administrator access!</p>
+            </div>
+            
+            <div class="info-box">
+                <div class="label">Company Name</div>
+                <div class="value">{{company_name}}</div>
+                
+                <div class="label">Your Email Address</div>
+                <div class="value">{{email}}</div>
+                
+                <div class="label">Workspace ID</div>
+                <div class="value">{{tenant_id}}</div>
+                
+                <div class="label">Your Role</div>
+                <div class="value">🔐 Super Administrator</div>
+            </div>
+            
+            <div style="text-align: center; margin: 35px 0;">
+                <a href="{{login_url}}" class="cta-button">
+                    Access Your Dashboard →
+                </a>
+            </div>
+            
+            <div class="feature-list">
+                <h3>🎯 What You Can Do as Super Admin</h3>
+                <ul>
+                    <li>Create custom roles tailored to your team structure</li>
+                    <li>Invite and manage team members</li>
+                    <li>Configure workspace settings and preferences</li>
+                    <li>Access all features including sprints, tasks, and retrospectives</li>
+                    <li>Monitor team activity and project progress</li>
+                    <li>Export data and generate comprehensive reports</li>
+                </ul>
+            </div>
+            
+            <div class="steps">
+                <h3>🚀 Quick Start Guide</h3>
+                <ol>
+                    <li><strong>Log in</strong> to your workspace using the button above</li>
+                    <li><strong>Complete your profile</strong> with your name and details</li>
+                    <li><strong>Create team roles</strong> (e.g., Project Manager, Developer, Designer)</li>
+                    <li><strong>Invite your team</strong> members with their email addresses</li>
+                    <li><strong>Set up your first project</strong> and start collaborating</li>
+                </ol>
+            </div>
+            
+            <div class="help-section">
+                <p><strong>Need assistance getting started?</strong></p>
+                <p>Our support team is here to help you every step of the way.</p>
+                <p>
+                    📚 <a href="#">Documentation</a> &nbsp;|&nbsp;
+                    💬 <a href="mailto:support@agilemind.com">Contact Support</a> &nbsp;|&nbsp;
+                    🎥 <a href="#">Video Tutorials</a>
+                </p>
+            </div>
+            
+            <p style="margin-top: 30px; color: #64748b; font-size: 14px;">
+                We're excited to have you on board! If you have any questions or feedback, 
+                don't hesitate to reach out to our team.
+            </p>
+        </div>
+        
+        <div class="footer">
+            <p class="company">The AgileMind Team</p>
+            <p>Empowering teams to collaborate better, every day</p>
+            <p style="margin-top: 15px;">&copy; 2025 AgileMind Platform. All rights reserved.</p>
+            <p>
+                <a href="#" style="color: #667eea; text-decoration: none;">Privacy Policy</a> &nbsp;|&nbsp;
+                <a href="#" style="color: #667eea; text-decoration: none;">Terms of Service</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
