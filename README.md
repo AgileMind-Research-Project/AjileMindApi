@@ -1,284 +1,295 @@
-# AgileMind – Backend Server (Node.js + Express)
+# AgileMind Backend - FastAPI Application
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)](https://nodejs.org/)
-[![Express](https://img.shields.io/badge/Express-4.x-orange)](https://expressjs.com/)
-[![SaaS](https://img.shields.io/badge/SaaS-Multi--tenant-brightgreen)](https://en.wikipedia.org/wiki/Software_as_a_service)
+## Overview
+This is the backend service for AgileMind, a cloud-native, AI-powered SaaS platform for Agile project management. Built with FastAPI (Python 3.11+), it provides RESTful APIs, WebSocket support, and AI/ML capabilities.
 
-**AgileMind** is an AI-powered, cloud-native SaaS platform that automates Agile ceremonies (sprint planning, daily standups, retrospectives) and provides intelligent project governance. This repository contains the **Node.js + Express backend** responsible for user management, multi-tenant isolation, project story CRUD, JWT authentication, Redis-based logout, AI proxy integration, and secure API exposure.
+## Technology Stack
+- **Framework:** FastAPI 0.104+
+- **Language:** Python 3.11+
+- **ORM:** SQLAlchemy 2.0
+- **Migration:** Alembic
+- **Validation:** Pydantic v2
+- **Authentication:** JWT (python-jose)
+- **Database:** MySQL 8.0+ (with asyncmy)
+- **Cache:** Redis 7.0+
+- **Task Queue:** Celery + RabbitMQ
+- **AI/ML:** OpenAI API, spaCy, scikit-learn
+- **Testing:** Pytest
 
-> 📌 **Aligned with IT4010 Research Project – 2025 (Project ID: 25-26J-508)**  
-> *"Transforming Agile from reactive to proactive through Cross-Component Intelligence and Conversational Feedback Loops."*
+## Project Structure
 
----
+```
+agile-mind-backend/
+├── app/
+│   ├── api/              # API endpoints
+│   ├── core/             # Core configurations
+│   ├── models/           # Database models
+│   ├── schemas/          # Pydantic schemas
+│   ├── services/         # Business logic
+│   ├── ai/               # AI/ML components
+│   ├── integrations/     # External API integrations
+│   ├── db/               # Database setup
+│   ├── tasks/            # Celery background tasks
+│   └── utils/            # Utility functions
+├── tests/                # Test suite
+├── alembic/              # Database migrations
+├── requirements.txt      # Python dependencies
+├── Dockerfile            # Docker configuration
+└── README.md            # This file
+```
 
-## ✨ Features
-
-- ✅ **Multi-tenant SaaS architecture** with `X-Tenant-ID` header isolation
-- 🔐 **Secure authentication**: JWT (15m expiry) + Refresh Token (7d) + Redis blacklist
-- 🗃️ **Project Story Management**: Create, Read, Update, Delete (CRUD) with tenant scoping
-- 🤖 **AI Proxy**: Forward meeting transcripts to Python AI Engine for NLP processing
-- 📊 **Swagger API Docs**: Auto-generated OpenAPI 3.0 documentation
-- 🛡️ **Security Hardening**: Helmet, CORS, Rate Limiting, bcrypt, SQL injection protection (Sequelize ORM)
-- 📦 **Docker & Docker Compose**: Ready for local development and production deployment
-- 📝 **Structured Logging**: Winston-based JSON logging with file + console output
-- 🌐 **Enterprise Compliance**: Follows ISO/IEC 27001:2022 principles (audit-ready design)
-
----
-
-## 🗂️ Tech Stack
-
-| Layer | Technology |
-|------|------------|
-| Runtime | Node.js 18+ |
-| Framework | Express.js |
-| Database | MySQL 8.0 |
-| ORM | Sequelize |
-| Auth | JWT + bcrypt + Redis |
-| Caching/Logout | Redis |
-| AI Integration | Axios (HTTP proxy to Python AI Engine) |
-| Logging | Winston |
-| API Docs | Swagger UI + swagger-jsdoc |
-| Containerization | Docker, Docker Compose |
-
----
-
-## 🚀 Quick Start (Local Development)
+## Installation
 
 ### Prerequisites
-- Node.js ≥ 18
-- npm ≥ 9
-- Docker & Docker Compose (optional but recommended)
+- Python 3.11+
+- MySQL 8.0+
+- Redis 7.0+
+- RabbitMQ (for Celery)
 
-### 1. Clone & Install
-```bash
-git clone https://github.com/your-org/agilemind-backend.git
-cd agilemind-backend
-npm install
-```
+### Setup
 
-### 2. Environment Setup
-Create a `.env` file in the `backend/` root:
-```env
-NODE_ENV=development
-PORT=5000
+1. **Create virtual environment:**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
 
-# JWT Secrets (use strong random strings in production!)
-JWT_SECRET=your_strong_256bit_jwt_secret_here_2025!
-REFRESH_SECRET=your_strong_refresh_secret_here_2025!
+2. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-# MySQL
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=your_mysql_password
-DB_NAME=agilemind_saas
+3. **Configure environment:**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
 
-# Redis
-REDIS_URL=redis://localhost:6379
+4. **Run database migrations:**
+   ```bash
+   alembic upgrade head
+   ```
 
-# AI Engine (Python microservice)
-AI_SERVICE_URL=http://localhost:8000
+5. **Start development server:**
+   ```bash
+   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   ```
 
-# Frontend
-FRONTEND_URL=http://localhost:3000
-```
-
-### 3. Start Services (with Docker Compose)
-```bash
-# Starts MySQL, Redis, and Backend
-docker-compose up --build
-```
-
-> 💡 **Note**: The `ai-engine` service must be running separately (see `ai-engine/` repo).
-
-### 4. Manual Start (without Docker)
-```bash
-# Ensure MySQL & Redis are running locally
-npm run dev  # Uses nodemon for auto-restart
-```
-
-### 5. Access APIs
-- **Base URL**: `http://localhost:5000/api`
-- **Swagger Docs**: `http://localhost:5000/api-docs`
-- **Auth Endpoints**: `/api/auth/register`, `/api/auth/login`
-- **Story Endpoints**: `/api/stories`
-- **AI Endpoints**: `/api/ai/standup`
-
----
-
-## 🔐 Authentication Flow
-
-1. **Register**:  
-   `POST /api/auth/register`  
-   Headers: `X-Tenant-ID: <UUID>`  
-   Body: `{ "email": "...", "password": "..." }`
-
-2. **Login**:  
-   `POST /api/auth/login` → Returns `accessToken` + `refreshToken` (in HTTP-only cookie)
-
-3. **Access Protected Routes**:  
-   Include `Authorization: Bearer <accessToken>` header
-
-4. **Logout**:  
-   `POST /api/auth/logout` → Revokes refresh token via Redis blacklist
-
----
-
-## 🏗️ Project Structure
-
-```
-src/
-├── config/          # DB, Redis, env
-├── controllers/     # Auth, Story, AI logic
-├── middleware/      # Auth, tenant, security
-├── models/          # Sequelize models (User, ProjectStory)
-├── routes/          # API route definitions
-├── services/        # AI proxy, external integrations
-├── utils/           # Logger, helpers
-├── swagger/         # OpenAPI spec
-└── app.js           # Express app factory
-server.js            # Entry point
-```
-
----
-
-## 🧪 Testing & Quality
+## Running with Docker
 
 ```bash
-npm run lint        # ESLint checks
-npm run lint:fix    # Auto-fix lint issues
-npm run format      # Prettier code formatting
+# Build and run
+docker-compose up -d backend
+
+# View logs
+docker-compose logs -f backend
 ```
 
-> ✅ **Code Quality**: Enforced via ESLint + Prettier  
-> ✅ **Error Handling**: Centralized + logged via Winston  
-> ✅ **Input Validation**: Sequelize model constraints + manual checks
+## API Documentation
 
----
+Once running, access:
+- **Swagger UI:** http://localhost:8000/docs
+- **ReDoc:** http://localhost:8000/redoc
+- **OpenAPI JSON:** http://localhost:8000/openapi.json
 
-## 📦 Deployment
+## Key Features
 
-### Docker (Production)
-```dockerfile
-# Multi-stage build recommended for production
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-USER node
-CMD ["node", "server.js"]
-```
+### 1. Multi-Tenant Architecture
+- Row-level security with `tenant_id`
+- JWT-based authentication
+- Automatic tenant context injection
 
-### Environment Variables (Production)
-- Use **strong secrets** for `JWT_SECRET` and `REFRESH_SECRET`
-- Set `NODE_ENV=production`
-- Restrict `FRONTEND_URL` to your domain (e.g., `https://app.agilemind.com`)
-- Use managed MySQL/Redis services (AWS RDS, ElastiCache, etc.)
+### 2. Four Major Capability Areas
 
----
+#### Planning & Task Automation
+- Sprint planning endpoints
+- AI-powered task generation
+- Capacity planning algorithms
+- Historical performance analysis
 
-Got it ✅
-Since your README already has **MySQL** and **AI Engine** sections, I’ll generate a **Redis section** in the same style. This will explain **what Redis is used for (token blacklist / caching)**, how to run it (Docker / local / cloud), and how to configure it.
+#### Daily Scrum Assistant
+- Meeting transcription processing
+- Blocker detection using NLP
+- Knowledge transfer mapping
+- Jira synchronization
 
-Here’s the **Redis section** you can directly add into your `README.md`:
+#### Retrospective & Documentation
+- Feedback aggregation
+- Release notes generation
+- Bug pattern analysis
+- Historical context retrieval
 
----
+#### Project Governance
+- Risk analytics
+- CI/CD pipeline monitoring
+- Delay analytics
+- Budget tracking
 
-## 🔄 Redis Setup
+### 3. AI/ML Core Intelligence
+- Natural Language Processing
+- Predictive analytics
+- Anomaly detection
+- Task recommendation engine
 
-Redis is used in **AgileMind** for:
+### 4. External Integrations
+- Jira API integration
+- Microsoft Teams webhooks
+- GitHub/GitLab CI/CD
+- Custom webhook support
 
-* **Token Blacklist** → Secure logout by invalidating JWT refresh tokens
-* **Session Caching** → Store temporary auth/session data for performance
-* **Scalability** → Enables horizontal scaling without losing session data
-
-### 1. Run Redis with Docker
+## Database Migrations
 
 ```bash
-docker run --name redis-server -p 6379:6379 -d redis
+# Create new migration
+alembic revision --autogenerate -m "Description"
+
+# Apply migrations
+alembic upgrade head
+
+# Rollback migration
+alembic downgrade -1
+
+# View migration history
+alembic history
 ```
 
-This starts a Redis container on port `6379`.
-
-### 2. Verify Redis is Running
+## Testing
 
 ```bash
-docker ps    # check container is up
-docker logs redis-server
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=app tests/
+
+# Run specific test file
+pytest tests/test_auth.py
+
+# Run with verbose output
+pytest -v
 ```
 
-Or connect with CLI:
+## Background Tasks (Celery)
 
 ```bash
-docker exec -it redis-server redis-cli ping
-# Should return: PONG
+# Start Celery worker
+celery -A app.tasks.celery_app worker --loglevel=info
+
+# Start Celery beat (scheduler)
+celery -A app.tasks.celery_app beat --loglevel=info
+
+# Monitor tasks
+celery -A app.tasks.celery_app flower
 ```
 
-### 3. Environment Variables
+## Environment Variables
 
-In your `.env`:
+Key environment variables (see `.env.example` for complete list):
 
 ```env
-# Redis
-REDIS_URL=redis://localhost:6379
+DATABASE_URL=mysql+asyncmy://user:pass@localhost:3306/agilemind_db
+REDIS_URL=redis://localhost:6379/0
+JWT_SECRET=your-secret-key
+OPENAI_API_KEY=your-openai-key
+JIRA_CLIENT_ID=your-jira-client-id
+TEAMS_CLIENT_ID=your-teams-client-id
 ```
 
-If running inside **Docker Compose**, use the service name instead:
+## Component Documentation
 
-```env
-REDIS_URL=redis://redis:6379
-```
+Each component has its own README.md:
+- [API Routes](./app/api/README.md)
+- [Core Configuration](./app/core/README.md)
+- [Database Models](./app/models/README.md)
+- [Pydantic Schemas](./app/schemas/README.md)
+- [Business Services](./app/services/README.md)
+- [AI/ML Components](./app/ai/README.md)
+- [External Integrations](./app/integrations/README.md)
+- [Background Tasks](./app/tasks/README.md)
 
-### 4. Cloud Deployment (Production)
+## API Endpoints Overview
 
-For production, it is recommended to use a **managed Redis service**:
+### Authentication
+- `POST /api/v1/auth/register` - Register new user
+- `POST /api/v1/auth/login` - User login
+- `POST /api/v1/auth/refresh` - Refresh token
 
-* [Redis Cloud (Free Tier)](https://redis.com/try-free/)
-* AWS ElastiCache for Redis
-* Azure Cache for Redis
-* Google Memorystore
+### Tenants
+- `GET /api/v1/tenants` - List tenants
+- `POST /api/v1/tenants` - Create tenant
+- `GET /api/v1/tenants/{id}` - Get tenant details
 
-Update `.env`:
+### Sprints
+- `GET /api/v1/sprints` - List sprints
+- `POST /api/v1/sprints` - Create sprint
+- `POST /api/v1/sprints/{id}/tasks/generate` - AI task generation
 
-```env
-REDIS_URL=redis://:<password>@<redis-host>:6379
-```
+### Meetings
+- `POST /api/v1/meetings/transcribe` - Process meeting audio
+- `GET /api/v1/meetings/{id}/blockers` - Detected blockers
 
-### 5. Integration in Backend
+### Governance
+- `GET /api/v1/governance/dashboard` - Dashboard data
+- `GET /api/v1/governance/risks` - Risk analysis
 
-Redis is initialized in `src/config/redis.js` and injected into **Auth Service**:
+## Development Guidelines
 
-* On **logout** → access/refresh tokens are stored in Redis blacklist
-* On **login** → system checks if token is blacklisted before allowing access
+1. **Code Style:** Follow PEP 8
+2. **Type Hints:** Use Python type hints everywhere
+3. **Documentation:** Add docstrings to all functions
+4. **Testing:** Write tests for new features
+5. **Async:** Use async/await for I/O operations
+6. **Logging:** Use structured logging
+7. **Error Handling:** Use custom exceptions
+
+## Performance Optimization
+
+- Database query optimization with indexes
+- Redis caching for frequently accessed data
+- Async database operations
+- Connection pooling
+- Query result pagination
+- Background task processing
+
+## Security
+
+- JWT token authentication
+- Password hashing with bcrypt
+- SQL injection prevention (SQLAlchemy ORM)
+- CORS configuration
+- Rate limiting per tenant
+- Input validation with Pydantic
+- Secure environment variable handling
+
+## Monitoring & Logging
+
+- Structured JSON logging
+- Request/response logging
+- Error tracking (Sentry integration ready)
+- Performance metrics
+- Health check endpoint: `/api/health`
+
+## Contributing
+
+1. Create feature branch
+2. Write tests
+3. Ensure all tests pass
+4. Update documentation
+5. Submit pull request
+
+## License
+
+Proprietary - AgileMind Platform
+
+## Support
+
+- **Documentation:** See component-specific READMEs
+- **API Docs:** http://localhost:8000/docs
+- **Issues:** GitHub Issues
+- **Email:** support@agilemind.io
 
 ---
 
-⚡ With Redis enabled, **AgileMind** ensures secure logout, scalable token management, and faster auth verification.
-
----
-
-👉 Do you want me to also **add a docker-compose.yml service block** for Redis (so it spins up together with MySQL + backend)?
-
-## 📄 License
-
-This project is licensed under the **MIT License** – see [LICENSE](LICENSE) for details.
-
----
-
-## 🙌 Contributors
-
-- **Jayawardhana L S** (IT22563200) – Planning & Task Automation
-- **Weerapperuma B E** (IT22584236) – Daily Scrum Assistant
-- **Kappagoda K M L P K** (IT22579140) – Retrospective Automation
-- **Ishani S G C** (IT22617378) – Project Governance Dashboard
-
-Supervised by:  
-- Mr. Vishan Jayasinghearachchi  
-- Ms. Poojani Gunathilake
-
----
-
-> **AgileMind**: *From Zero to Hero in Agile Transformation* 🚀  
-> *"Let the AI handle the admin — you focus on building great software."*
+**Version:** 1.0.0  
+**Last Updated:** November 11, 2025  
+**Python Version:** 3.11+
