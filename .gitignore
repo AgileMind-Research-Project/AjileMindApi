@@ -63,3 +63,4 @@ htmlcov/
 # OS
 Thumbs.db
 .DS_Store
+gitcom.sh
