@@ -7,13 +7,10 @@ Password hashing, validation, and policy enforcement.
 import re
 import secrets
 import string
-from passlib.context import CryptContext
+import bcrypt
 from typing import Tuple, List
 from app.core.config import settings
 from app.core.logger import logger
-
-# Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:
@@ -25,8 +22,17 @@ def hash_password(password: str) -> str:
     
     Returns:
         Hashed password
+    
+    Note:
+        Bcrypt has a 72-byte limit. Passwords are truncated to 72 bytes
+        before hashing to comply with this limitation.
     """
-    return pwd_context.hash(password)
+    # Truncate password to 72 bytes (bcrypt limitation)
+    password_bytes = password.encode('utf-8')[:72]
+    # Generate salt and hash the password
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password_bytes, salt)
+    return hashed.decode('utf-8')
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -39,8 +45,18 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     
     Returns:
         True if password matches, False otherwise
+    
+    Note:
+        Truncates password to 72 bytes before verification to match hashing behavior.
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        # Truncate password to 72 bytes (bcrypt limitation)
+        password_bytes = plain_password.encode('utf-8')[:72]
+        hashed_bytes = hashed_password.encode('utf-8')
+        return bcrypt.checkpw(password_bytes, hashed_bytes)
+    except Exception as e:
+        logger.error(f"Password verification error: {str(e)}")
+        return False
 
 
 def validate_password(password: str) -> Tuple[bool, List[str]]:
