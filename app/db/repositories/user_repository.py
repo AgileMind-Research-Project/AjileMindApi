@@ -47,7 +47,7 @@ class UserRepository:
         user_id = f"usr-{uuid.uuid4().hex[:16]}"
         
         query = """
-            INSERT INTO USERS (
+            INSERT INTO users (
                 USER_ID, TENANT_ID, EMAIL, PASSWORD_HASH, FIRST_NAME, LAST_NAME,
                 ROLE, STATUS, PASSWORD_CHANGE_REQUIRED, CREATED_AT, UPDATED_AT
             )
@@ -106,8 +106,8 @@ class UserRepository:
                     u.CREATED_AT as created_at,
                     u.UPDATED_AT as updated_at,
                     t.COMPANY_NAME as tenant_name
-                FROM USERS u
-                LEFT JOIN TENANTS t ON u.TENANT_ID = t.TENANT_ID
+                FROM users u
+                LEFT JOIN tenants t ON u.TENANT_ID = t.TENANT_ID
                 WHERE u.EMAIL = %s AND u.TENANT_ID = %s
             """
             params = (email, tenant_id)
@@ -127,8 +127,8 @@ class UserRepository:
                     u.CREATED_AT as created_at,
                     u.UPDATED_AT as updated_at,
                     t.COMPANY_NAME as tenant_name
-                FROM USERS u
-                LEFT JOIN TENANTS t ON u.TENANT_ID = t.TENANT_ID
+                FROM users u
+                LEFT JOIN tenants t ON u.TENANT_ID = t.TENANT_ID
                 WHERE u.EMAIL = %s
             """
             params = (email,)
@@ -161,8 +161,8 @@ class UserRepository:
                 u.CREATED_AT as created_at,
                 u.UPDATED_AT as updated_at,
                 t.COMPANY_NAME as tenant_name
-            FROM USERS u
-            LEFT JOIN TENANTS t ON u.TENANT_ID = t.TENANT_ID
+            FROM users u
+            LEFT JOIN tenants t ON u.TENANT_ID = t.TENANT_ID
             WHERE u.USER_ID = %s
         """
         
@@ -182,7 +182,7 @@ class UserRepository:
         """
         query = """
             SELECT COUNT(*) as count
-            FROM USERS
+            FROM users
             WHERE EMAIL = %s AND TENANT_ID = %s
         """
         
@@ -209,14 +209,14 @@ class UserRepository:
         try:
             if clear_password_change_required:
                 query = """
-                    UPDATE USERS
+                    UPDATE users
                     SET PASSWORD_HASH = %s, PASSWORD_CHANGE_REQUIRED = FALSE,
                         STATUS = 'ACTIVE', UPDATED_AT = NOW()
                     WHERE USER_ID = %s
                 """
             else:
                 query = """
-                    UPDATE USERS
+                    UPDATE users
                     SET PASSWORD_HASH = %s, UPDATED_AT = NOW()
                     WHERE USER_ID = %s
                 """
@@ -240,7 +240,7 @@ class UserRepository:
             True if updated
         """
         query = """
-            UPDATE USERS
+            UPDATE users
             SET LAST_LOGIN_AT = NOW()
             WHERE USER_ID = %s
         """
@@ -296,7 +296,7 @@ class UserRepository:
                 u.STATUS as status,
                 u.LAST_LOGIN_AT as last_login_at,
                 u.CREATED_AT as created_at
-            FROM USERS u
+            FROM users u
             WHERE {where_sql}
             ORDER BY u.CREATED_AT DESC
             LIMIT %s OFFSET %s
@@ -311,7 +311,7 @@ class UserRepository:
         # Get total count
         count_query = f"""
             SELECT COUNT(*) as total
-            FROM USERS u
+            FROM users u
             WHERE {where_sql}
         """
         
@@ -372,7 +372,7 @@ class UserRepository:
         params.append(user_id)
         
         query = f"""
-            UPDATE USERS
+            UPDATE users
             SET {', '.join(updates)}
             WHERE USER_ID = %s
         """
@@ -393,7 +393,7 @@ class UserRepository:
         """
         # Soft delete - set status to SUSPENDED
         query = """
-            UPDATE USERS
+            UPDATE users
             SET STATUS = 'SUSPENDED', UPDATED_AT = NOW()
             WHERE USER_ID = %s
         """

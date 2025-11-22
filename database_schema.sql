@@ -4,14 +4,14 @@
 -- ============================================
 
 -- Create database
-CREATE DATABASE IF NOT EXISTS agile_mind_db
+CREATE DATABASE IF NOT EXISTS agilemind_db
 CHARACTER SET utf8mb4
 COLLATE utf8mb4_unicode_ci;
 
-USE agile_mind_db;
+USE agilemind_db;
 
 -- ============================================
--- 1. TENANTS TABLE
+-- 1. tenants TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS tenants (
     tenant_id VARCHAR(50) PRIMARY KEY COMMENT 'Unique tenant identifier',
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS tenants (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Tenant organizations';
 
 -- ============================================
--- 2. USERS TABLE
+-- 2. users TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS users (
     user_id VARCHAR(50) PRIMARY KEY COMMENT 'Unique user identifier',
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Audit trail for security and compliance';
 
 -- ============================================
--- 5. ROLES TABLE (Optional - for custom roles)
+-- 5. roles TABLE (Optional - for custom roles)
 -- ============================================
 CREATE TABLE IF NOT EXISTS roles (
     role_id VARCHAR(50) PRIMARY KEY COMMENT 'Unique role identifier',
@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS roles (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='User roles and permissions';
 
 -- ============================================
--- INSERT DEFAULT SYSTEM ROLES
+-- INSERT DEFAULT SYSTEM roles
 -- ============================================
 INSERT INTO roles (role_id, tenant_id, name, display_name, description, permissions, is_system_role)
 VALUES
@@ -228,7 +228,7 @@ SELECT
     UPDATE_TIME,
     TABLE_COMMENT
 FROM information_schema.TABLES
-WHERE TABLE_SCHEMA = 'agile_mind_db'
+WHERE TABLE_SCHEMA = 'agilemind_db'
 ORDER BY TABLE_NAME;
 
 -- Check if sample data was inserted
@@ -242,13 +242,13 @@ SELECT 'Roles', COUNT(*) FROM roles;
 -- GRANTS (Adjust username/password as needed)
 -- ============================================
 -- CREATE USER IF NOT EXISTS 'agile_mind_user'@'%' IDENTIFIED BY 'your_password_here';
--- GRANT SELECT, INSERT, UPDATE, DELETE ON agile_mind_db.* TO 'agile_mind_user'@'%';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON agilemind_db.* TO 'agile_mind_user'@'%';
 -- FLUSH PRIVILEGES;
 
 -- ============================================
 -- BACKUP RECOMMENDATION
 -- ============================================
--- mysqldump -u root -p agile_mind_db > agile_mind_backup_$(date +%Y%m%d_%H%M%S).sql
+-- mysqldump -u root -p agilemind_db > agile_mind_backup_$(date +%Y%m%d_%H%M%S).sql
 
 -- ============================================
 -- NOTES

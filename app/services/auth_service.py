@@ -41,8 +41,8 @@ class AuthService:
             role_id: Role ID to use
         """
         query = """
-            INSERT INTO ROLES (ROLE_ID, TENANT_ID, NAME, DESCRIPTION, CREATED_AT, UPDATED_AT)
-            VALUES (%s, %s, %s, %s, NOW(), NOW())
+            INSERT INTO roles (ROLE_ID, TENANT_ID, NAME, DISPLAY_NAME, DESCRIPTION, PERMISSIONS, IS_SYSTEM_ROLE, CREATED_AT, UPDATED_AT)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
         """
         
         await self.db.execute_query(
@@ -50,8 +50,11 @@ class AuthService:
             (
                 role_id,
                 tenant_id,
-                "Super Admin",
-                "Full system access with all permissions"
+                "SUPER_ADMIN",
+                "Super Administrator",
+                "Full system access with all permissions",
+                '["*"]',  # JSON array of permissions
+                False  # Not a system role (tenant-specific)
             ),
             commit=True
         )

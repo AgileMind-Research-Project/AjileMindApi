@@ -35,7 +35,7 @@ class TenantRepository:
         tenant_id = f"tn-{uuid.uuid4().hex[:16]}"
         
         query = """
-            INSERT INTO TENANTS (TENANT_ID, COMPANY_NAME, STATUS, CREATED_AT, UPDATED_AT)
+            INSERT INTO tenants (TENANT_ID, COMPANY_NAME, STATUS, CREATED_AT, UPDATED_AT)
             VALUES (%s, %s, %s, NOW(), NOW())
         """
         
@@ -71,7 +71,7 @@ class TenantRepository:
                 STATUS as status,
                 CREATED_AT as created_at,
                 UPDATED_AT as updated_at
-            FROM TENANTS
+            FROM tenants
             WHERE TENANT_ID = %s
         """
         
@@ -88,7 +88,7 @@ class TenantRepository:
         Returns:
             True if exists
         """
-        query = "SELECT COUNT(*) as count FROM TENANTS WHERE TENANT_ID = %s"
+        query = "SELECT COUNT(*) as count FROM tenants WHERE TENANT_ID = %s"
         result = await self.db.execute_query(query, (tenant_id,), fetch_one=True)
         return result and result['count'] > 0
     
@@ -104,7 +104,7 @@ class TenantRepository:
             True if updated
         """
         query = """
-            UPDATE TENANTS
+            UPDATE tenants
             SET STATUS = %s, UPDATED_AT = NOW()
             WHERE TENANT_ID = %s
         """

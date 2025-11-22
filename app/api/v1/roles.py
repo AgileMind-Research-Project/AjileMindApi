@@ -107,7 +107,7 @@ async def get_roles(
                 NAME as role_name,
                 DESCRIPTION as description,
                 CREATED_AT as created_at
-            FROM ROLES
+            FROM roles
             WHERE TENANT_ID IS NULL OR TENANT_ID = %s
             ORDER BY CREATED_AT DESC
         """
@@ -160,7 +160,7 @@ async def create_role(
         # Check if role name already exists
         check_query = """
             SELECT ROLE_ID as role_id 
-            FROM ROLES 
+            FROM roles 
             WHERE NAME = %s AND (TENANT_ID = %s OR TENANT_ID IS NULL)
         """
         existing = await database.execute_query(
@@ -180,7 +180,7 @@ async def create_role(
         
         # Insert new role
         insert_query = """
-            INSERT INTO ROLES (
+            INSERT INTO roles (
                 ROLE_ID, TENANT_ID, NAME, DESCRIPTION
             ) VALUES (%s, %s, %s, %s)
         """
@@ -203,7 +203,7 @@ async def create_role(
                 NAME as role_name,
                 DESCRIPTION as description,
                 CREATED_AT as created_at 
-            FROM ROLES 
+            FROM roles 
             WHERE ROLE_ID = %s""",
             (role_id,),
             fetch_one=True
@@ -246,7 +246,7 @@ async def update_role(
         # Check if role exists
         check_query = """
             SELECT ROLE_ID as role_id, NAME as name
-            FROM ROLES 
+            FROM roles 
             WHERE ROLE_ID = %s AND TENANT_ID = %s
         """
         existing_role = await database.execute_query(
@@ -263,7 +263,7 @@ async def update_role(
         
         # Update role (only description, no permission level)
         update_query = """
-            UPDATE ROLES 
+            UPDATE roles 
             SET DESCRIPTION = %s, UPDATED_AT = %s
             WHERE ROLE_ID = %s
         """
@@ -285,7 +285,7 @@ async def update_role(
                 NAME as role_name,
                 DESCRIPTION as description,
                 CREATED_AT as created_at 
-            FROM ROLES 
+            FROM roles 
             WHERE ROLE_ID = %s""",
             (role_id,),
             fetch_one=True
@@ -327,7 +327,7 @@ async def delete_role(
         # Check if role exists
         check_query = """
             SELECT ROLE_ID as role_id
-            FROM ROLES 
+            FROM roles 
             WHERE ROLE_ID = %s AND TENANT_ID = %s
         """
         existing_role = await database.execute_query(
@@ -343,7 +343,7 @@ async def delete_role(
             )
         
         # Check if any users have this role
-        users_count_query = "SELECT COUNT(*) as count FROM USERS WHERE ROLE_ID = %s"
+        users_count_query = "SELECT COUNT(*) as count FROM users WHERE ROLE_ID = %s"
         users_count = await database.execute_query(
             users_count_query,
             (role_id,),
@@ -357,7 +357,7 @@ async def delete_role(
             )
         
         # Delete role
-        delete_query = "DELETE FROM ROLES WHERE ROLE_ID = %s"
+        delete_query = "DELETE FROM roles WHERE ROLE_ID = %s"
         await database.execute_query(delete_query, (role_id,), commit=True)
         
         logger.info(f"Deleted role {role_id} by user {current_user['user_id']}")
@@ -398,8 +398,8 @@ async def get_user_role(
                 r.ROLE_ID as role_id,
                 r.NAME as role_name,
                 r.DISPLAY_NAME as role_display_name
-            FROM USERS u
-            LEFT JOIN ROLES r ON u.ROLE_ID = r.ROLE_ID
+            FROM users u
+            LEFT JOIN roles r ON u.ROLE_ID = r.ROLE_ID
             WHERE u.USER_ID = %s AND u.TENANT_ID = %s
         """
         
@@ -450,7 +450,7 @@ async def update_user_role(
     """Update user's role"""
     try:
         # Check if user exists
-        user_query = "SELECT USER_ID as user_id, EMAIL as email FROM USERS WHERE USER_ID = %s AND TENANT_ID = %s"
+        user_query = "SELECT USER_ID as user_id, EMAIL as email FROM users WHERE USER_ID = %s AND TENANT_ID = %s"
         user = await database.execute_query(
             user_query,
             (user_id, current_user["tenant_id"]),
@@ -466,7 +466,7 @@ async def update_user_role(
         # Check if role exists
         role_query = """
             SELECT ROLE_ID as role_id, NAME as name 
-            FROM ROLES 
+            FROM roles 
             WHERE ROLE_ID = %s AND (TENANT_ID = %s OR TENANT_ID IS NULL)
         """
         role = await database.execute_query(
@@ -483,7 +483,7 @@ async def update_user_role(
         
         # Update user role
         update_query = """
-            UPDATE USERS 
+            UPDATE users 
             SET ROLE_ID = %s, UPDATED_AT = %s
             WHERE USER_ID = %s
         """
