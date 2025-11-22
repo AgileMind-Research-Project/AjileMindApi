@@ -67,8 +67,8 @@ agile-mind-backend/
 
 4. **Run database migrations:**
    ```bash
-   alembic upgrade head
-   ```
+(fix this
+)   ```
 
 5. **Start development server:**
    ```bash

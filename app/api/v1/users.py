@@ -107,9 +107,9 @@ async def invite_user(
                 detail="User with this email already exists"
             )
         
-        # Validate role exists (check against ROLES table which uses UPPERCASE)
+        # Validate role exists (check against roles table which uses UPPERCASE)
         role_query = """
-            SELECT NAME FROM ROLES 
+            SELECT NAME FROM roles 
             WHERE NAME = %s AND (TENANT_ID IS NULL OR TENANT_ID = %s)
         """
         role = await database.execute_query(

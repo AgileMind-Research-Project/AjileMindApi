@@ -68,7 +68,7 @@ class AuditRepository:
                 al.*,
                 u.EMAIL as user_email
             FROM AUDIT_LOGS al
-            LEFT JOIN USERS u ON al.USER_ID = u.USER_ID
+            LEFT JOIN users u ON al.USER_ID = u.USER_ID
             WHERE al.LOG_ID = %s
         """
         
@@ -150,7 +150,7 @@ class AuditRepository:
                 al.*,
                 u.EMAIL as user_email
             FROM AUDIT_LOGS al
-            LEFT JOIN USERS u ON al.USER_ID = u.USER_ID
+            LEFT JOIN users u ON al.USER_ID = u.USER_ID
             WHERE {where_clause}
             ORDER BY al.CREATED_AT DESC
             LIMIT %s OFFSET %s
@@ -226,7 +226,7 @@ class AuditRepository:
         """Get audit settings for tenant"""
         query = """
             SELECT AUDIT_LOGGING_ENABLED, AUDIT_RETENTION_DAYS
-            FROM TENANTS
+            FROM tenants
             WHERE TENANT_ID = %s
         """
         
@@ -251,7 +251,7 @@ class AuditRepository:
     ) -> Dict[str, Any]:
         """Update audit settings"""
         query = """
-            UPDATE TENANTS
+            UPDATE tenants
             SET 
                 AUDIT_LOGGING_ENABLED = %s,
                 AUDIT_RETENTION_DAYS = %s,
