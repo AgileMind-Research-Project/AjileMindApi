@@ -22,7 +22,7 @@ class JiraService:
     
     async def save_credentials(
         self,
-        tenant_id: str,
+        tenant_name: str,
         jira_url: str,
         email: str,
         api_token: str
@@ -31,7 +31,7 @@ class JiraService:
         Save Jira credentials for a tenant.
         
         Args:
-            tenant_id: Tenant ID
+            tenant_name: Tenant domain name
             jira_url: Jira Cloud URL
             email: Jira account email
             api_token: Jira API token
@@ -51,11 +51,11 @@ class JiraService:
         # Check if credentials already exist
         check_query = """
             SELECT id FROM jira_integrations
-            WHERE tenant_id = %s
+            WHERE tenant_name = %s
         """
         existing = await self.db.execute_query(
             check_query,
-            (tenant_id,),
+            (tenant_name,),
             fetch_one=True
         )
         
@@ -65,27 +65,27 @@ class JiraService:
                 UPDATE jira_integrations
                 SET jira_url = %s, email = %s, api_token = %s, 
                     is_active = 1, updated_at = NOW()
-                WHERE tenant_id = %s
+                WHERE tenant_name = %s
             """
             await self.db.execute_query(
                 update_query,
-                (jira_url, email, api_token, tenant_id),
+                (jira_url, email, api_token, tenant_name),
                 commit=True
             )
-            logger.info(f"Updated Jira credentials for tenant {tenant_id}")
+            logger.info(f"Updated Jira credentials for tenant {tenant_name}")
         else:
             # Insert new credentials
             insert_query = """
                 INSERT INTO jira_integrations 
-                (tenant_id, jira_url, email, api_token, is_active, created_at, updated_at)
+                (tenant_name, jira_url, email, api_token, is_active, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, 1, NOW(), NOW())
             """
             await self.db.execute_query(
                 insert_query,
-                (tenant_id, jira_url, email, api_token),
+                (tenant_name, jira_url, email, api_token),
                 commit=True
             )
-            logger.info(f"Saved Jira credentials for tenant {tenant_id}")
+            logger.info(f"Saved Jira credentials for tenant {tenant_name}")
         
         return {
             "jira_url": jira_url,
@@ -121,16 +121,16 @@ class JiraService:
             logger.error(f"Error verifying Jira credentials: {str(e)}")
             return False
     
-    async def get_credentials(self, tenant_id: str) -> Optional[Dict[str, Any]]:
+    async def get_credentials(self, tenant_name: str) -> Optional[Dict[str, Any]]:
         """Get Jira credentials for a tenant"""
         query = """
             SELECT jira_url, email, api_token, is_active
             FROM jira_integrations
-            WHERE tenant_id = %s AND is_active = 1
+            WHERE tenant_name = %s AND is_active = 1
         """
         credentials = await self.db.execute_query(
             query,
-            (tenant_id,),
+            (tenant_name,),
             fetch_one=True
         )
         
@@ -138,7 +138,7 @@ class JiraService:
     
     async def create_issue(
         self,
-        tenant_id: str,
+        tenant_name: str,
         project_key: str,
         summary: str,
         description: Optional[str] = None,
@@ -151,7 +151,7 @@ class JiraService:
         Create a Jira issue.
         
         Args:
-            tenant_id: Tenant ID
+            tenant_name: Tenant domain name
             project_key: Jira project key
             summary: Issue summary
             description: Issue description
@@ -164,7 +164,7 @@ class JiraService:
             Created issue data
         """
         # Get credentials
-        creds = await self.get_credentials(tenant_id)
+        creds = await self.get_credentials(tenant_name)
         
         if not creds:
             raise HTTPException(
@@ -221,7 +221,7 @@ class JiraService:
                 ) as response:
                     if response.status == 201:
                         result = await response.json()
-                        logger.info(f"Created Jira issue {result['key']} for tenant {tenant_id}")
+                        logger.info(f"Created Jira issue {result['key']} for tenant {tenant_name}")
                         
                         return {
                             "issue_key": result["key"],
@@ -243,9 +243,9 @@ class JiraService:
                 detail=f"Failed to connect to Jira: {str(e)}"
             )
     
-    async def get_projects(self, tenant_id: str) -> List[Dict[str, Any]]:
+    async def get_projects(self, tenant_name: str) -> List[Dict[str, Any]]:
         """Get list of Jira projects"""
-        creds = await self.get_credentials(tenant_id)
+        creds = await self.get_credentials(tenant_name)
         
         if not creds:
             raise HTTPException(

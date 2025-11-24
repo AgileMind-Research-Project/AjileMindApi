@@ -82,16 +82,21 @@ async def connect_jira(
     ```
     """
     try:
-        tenant_id = current_user["tenant_id"]
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
         
         result = await jira_service.save_credentials(
-            tenant_id=tenant_id,
+            tenant_name=tenant_name,
             jira_url=str(request.jira_url),
             email=request.email,
             api_token=request.api_token
         )
         
-        logger.info(f"Jira connected for tenant {tenant_id} by {current_user['email']}")
+        logger.info(f"Jira connected for tenant {tenant_name} by {current_user['email']}")
         
         return {
             "success": True,
@@ -125,9 +130,14 @@ async def get_jira_projects(
     Returns project key, name, and type information.
     """
     try:
-        tenant_id = current_user["tenant_id"]
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
         
-        projects = await jira_service.get_projects(tenant_id)
+        projects = await jira_service.get_projects(tenant_name)
         
         return {
             "success": True,
@@ -187,10 +197,15 @@ async def create_jira_issue(
     ```
     """
     try:
-        tenant_id = current_user["tenant_id"]
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
         
         result = await jira_service.create_issue(
-            tenant_id=tenant_id,
+            tenant_name=tenant_name,
             project_key=request.project_key,
             summary=request.summary,
             description=request.description,
@@ -235,9 +250,14 @@ async def get_jira_status(
     Returns whether Jira is connected and basic configuration info.
     """
     try:
-        tenant_id = current_user["tenant_id"]
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
         
-        credentials = await jira_service.get_credentials(tenant_id)
+        credentials = await jira_service.get_credentials(tenant_name)
         
         if credentials:
             return {
@@ -283,21 +303,26 @@ async def disconnect_jira(
     Requires Admin or Super Admin access.
     """
     try:
-        tenant_id = current_user["tenant_id"]
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
         
         query = """
             UPDATE jira_integrations
             SET is_active = 0, updated_at = NOW()
-            WHERE tenant_id = %s
+            WHERE tenant_name = %s
         """
         
         await database.execute_query(
             query,
-            (tenant_id,),
+            (tenant_name,),
             commit=True
         )
         
-        logger.info(f"Jira disconnected for tenant {tenant_id} by {current_user['email']}")
+        logger.info(f"Jira disconnected for tenant {tenant_name} by {current_user['email']}")
         
         return {
             "success": True,
