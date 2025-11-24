@@ -13,7 +13,6 @@ from app.db.database import db, Database
 from app.core.logger import logger
 from app.utils.jwt import get_current_user_from_token
 from app.utils.password import hash_password
-from app.db.repositories.user_repository import UserRepository
 from app.services.email_service import email_service
 from pydantic import BaseModel, EmailStr, Field
 
@@ -88,16 +87,22 @@ async def invite_user(
     The user will be required to change their password on first login.
     """
     try:
-        tenant_id = current_user["tenant_id"]
+        # Get tenant domain from JWT
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
         
-        # Check if user already exists
-        check_query = """
-            SELECT user_id FROM users 
-            WHERE email = %s AND tenant_id = %s
+        # Check if user already exists in domain table
+        check_query = f"""
+            SELECT user_id FROM `{tenant_name}` 
+            WHERE email = %s
         """
         existing_user = await database.execute_query(
             check_query,
-            (request.email, tenant_id),
+            (request.email,),
             fetch_one=True
         )
         
@@ -107,14 +112,14 @@ async def invite_user(
                 detail="User with this email already exists"
             )
         
-        # Validate role exists (check against roles table which uses UPPERCASE)
+        # Validate role exists (check against system roles table)
         role_query = """
             SELECT NAME FROM roles 
-            WHERE NAME = %s AND (TENANT_ID IS NULL OR TENANT_ID = %s)
+            WHERE NAME = %s
         """
         role = await database.execute_query(
             role_query,
-            (request.role, tenant_id),
+            (request.role,),
             fetch_one=True
         )
         
@@ -134,11 +139,10 @@ async def invite_user(
         # Generate user ID
         user_id = f"usr-{uuid.uuid4().hex[:16]}"
         
-        # Create user
-        insert_query = """
-            INSERT INTO users (
+        # Create user in domain table
+        insert_query = f"""
+            INSERT INTO `{tenant_name}` (
                 user_id,
-                tenant_id,
                 email,
                 password_hash,
                 first_name,
@@ -148,7 +152,7 @@ async def invite_user(
                 password_change_required,
                 created_at,
                 updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         now = datetime.utcnow()
@@ -157,7 +161,6 @@ async def invite_user(
             insert_query,
             (
                 user_id,
-                tenant_id,
                 request.email,
                 password_hash,
                 request.first_name,
@@ -173,17 +176,20 @@ async def invite_user(
         
         logger.info(f"User invited: {request.email} by {current_user['email']}")
         
-        # Get tenant name for email
-        tenant_query = """
-            SELECT company_name FROM tenants 
-            WHERE tenant_id = %s
-        """
-        tenant = await database.execute_query(
-            tenant_query,
-            (tenant_id,),
-            fetch_one=True
-        )
-        company_name = tenant.get("company_name", "Your Company") if tenant else "Your Company"
+        # Get company name from tenant_info table in tenant database
+        try:
+            tenant_info_query = f"""
+                SELECT tenant_name FROM `{tenant_name}`.tenant_info 
+                LIMIT 1
+            """
+            tenant_info = await database.execute_query(
+                tenant_info_query,
+                fetch_one=True
+            )
+            company_name = tenant_info.get("tenant_name", tenant_name.title()) if tenant_info else tenant_name.title()
+        except Exception:
+            # Fallback to domain name if tenant_info doesn't exist
+            company_name = tenant_name.title()
         
         # Send welcome email with credentials
         email_sent = email_service.send_user_welcome_email(
@@ -234,26 +240,30 @@ async def list_users(
 ) -> Dict[str, Any]:
     """Get all users for the tenant"""
     try:
-        tenant_id = current_user["tenant_id"]
+        # Get tenant domain from JWT
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
         
-        query = """
+        query = f"""
             SELECT 
-                u.user_id,
-                u.email,
-                u.first_name,
-                u.last_name,
-                u.role,
-                u.status,
-                u.password_change_required,
-                u.created_at
-            FROM users u
-            WHERE u.tenant_id = %s
-            ORDER BY u.created_at DESC
+                user_id,
+                email,
+                first_name,
+                last_name,
+                role,
+                status,
+                password_change_required,
+                created_at
+            FROM `{tenant_name}`
+            ORDER BY created_at DESC
         """
         
         users = await database.execute_query(
             query,
-            (tenant_id,),
             fetch_all=True
         )
         
@@ -271,7 +281,7 @@ async def list_users(
                 "created_at": user["created_at"].isoformat() if user["created_at"] else ""
             })
         
-        logger.info(f"Retrieved {len(result)} users for tenant {tenant_id}")
+        logger.info(f"Retrieved {len(result)} users for tenant {tenant_name}")
         
         return {
             "success": True,

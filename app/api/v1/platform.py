@@ -53,7 +53,7 @@ async def register_tenant(
     - password_confirmation: Must match password
     
     **Returns:**
-    - tenant_id: Unique tenant identifier
+    - tenant_name: Tenant domain identifier
     - company_name: Registered company name
     - user: Super admin user profile
     - tokens: JWT access and refresh tokens
@@ -71,7 +71,7 @@ async def register_tenant(
             password=request.password
         )
         
-        logger.info(f"Tenant registered successfully: {request.company_name} ({result['tenant_id']})")
+        logger.info(f"Tenant registered successfully: {request.company_name} ({result['tenant_name']})")
         
         return {
             "success": True,

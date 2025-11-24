@@ -1,0 +1,510 @@
+# Multi-Tenant Architecture Diagrams
+
+## System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         CLIENT APPLICATION                           │
+│                    (AjileMindWeb - Next.js)                         │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               │ HTTP Requests
+                               │ Authorization: Bearer {JWT}
+                               │
+┌──────────────────────────────▼──────────────────────────────────────┐
+│                          API GATEWAY                                 │
+│                    (FastAPI - main.py)                              │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                ┌──────────────┼──────────────┐
+                │              │              │
+┌───────────────▼─────┐ ┌─────▼─────┐ ┌─────▼──────────┐
+│  Auth Endpoints     │ │  User      │ │  Other         │
+│  /auth/register     │ │  Endpoints │ │  Endpoints     │
+│  /auth/login        │ │            │ │                │
+│  /auth/invite       │ │            │ │                │
+└───────────┬─────────┘ └────────────┘ └────────────────┘
+            │
+            │ Extract domain from email
+            │
+┌───────────▼──────────────────────────────────────────────────────────┐
+│                    DOMAIN EXTRACTOR                                   │
+│                (domain_extractor.py)                                 │
+│                                                                       │
+│  Examples:                                                            │
+│  • admin@my.sliit.lk            → "sliit"                           │
+│  • user@axixtadigitalalabs.com  → "axixtadigitalalabs"              │
+│  • john@mail.company.com        → "company"                         │
+└───────────┬───────────────────────────────────────────────────────────┘
+            │
+            │ Domain = "sliit"
+            │
+┌───────────▼──────────────────────────────────────────────────────────┐
+│              TENANT USER REPOSITORY                                   │
+│           (tenant_user_repository.py)                                │
+│                                                                       │
+│  • create_tenant_user_table(domain)                                  │
+│  • create_tenant_user(domain, email, ...)                           │
+│  • get_user_by_email(domain, email)                                 │
+│  • update_password(domain, user_id, ...)                            │
+└───────────┬───────────────────────────────────────────────────────────┘
+            │
+            │ Query: tenant_{domain}_users
+            │
+┌───────────▼──────────────────────────────────────────────────────────┐
+│                        MySQL DATABASE                                 │
+│                                                                       │
+│  ┌─────────────────────────────────────────────────────────┐        │
+│  │  tenant_sliit_users                                     │        │
+│  │  ─────────────────────────────────────────────────────  │        │
+│  │  user_id | email           | role       | user_data    │        │
+│  │  usr-abc | admin@...lk     | SUPER_ADMIN| {...}        │        │
+│  │  usr-def | john@...lk      | DEVELOPER  | {...}        │        │
+│  └─────────────────────────────────────────────────────────┘        │
+│                                                                       │
+│  ┌─────────────────────────────────────────────────────────┐        │
+│  │  tenant_axixtadigitalalabs_users                        │        │
+│  │  ─────────────────────────────────────────────────────  │        │
+│  │  user_id | email           | role       | user_data    │        │
+│  │  usr-xyz | admin@...com    | SUPER_ADMIN| {...}        │        │
+│  │  usr-uvw | jane@...com     | ADMIN      | {...}        │        │
+│  └─────────────────────────────────────────────────────────┘        │
+│                                                                       │
+│  ┌─────────────────────────────────────────────────────────┐        │
+│  │  tenant_company_users                                   │        │
+│  │  ─────────────────────────────────────────────────────  │        │
+│  │  user_id | email           | role       | user_data    │        │
+│  │  usr-pqr | admin@...com    | SUPER_ADMIN| {...}        │        │
+│  └─────────────────────────────────────────────────────────┘        │
+│                                                                       │
+└───────────────────────────────────────────────────────────────────────┘
+```
+
+## Registration Flow
+
+```
+┌──────────────┐
+│    USER      │
+│ Submits Form │
+└──────┬───────┘
+       │
+       │ POST /auth/register
+       │ {
+       │   "company_name": "SLIIT",
+       │   "email": "admin@my.sliit.lk",
+       │   "password": "Pass123!"
+       │ }
+       │
+┌──────▼─────────────────────┐
+│  Auth Service              │
+│  register_tenant()         │
+└──────┬─────────────────────┘
+       │
+       │ 1. Validate email
+       │ 2. Extract domain
+       │
+┌──────▼─────────────────────┐
+│  Domain Extractor          │
+│  extract_domain_from_email()│
+└──────┬─────────────────────┘
+       │
+       │ Returns: "sliit"
+       │
+┌──────▼─────────────────────┐
+│  Tenant User Repository    │
+│  create_tenant_user_table() │
+└──────┬─────────────────────┘
+       │
+       │ CREATE TABLE IF NOT EXISTS
+       │ tenant_sliit_users (...)
+       │
+┌──────▼─────────────────────┐
+│  MySQL Database            │
+│  Table Created ✓           │
+└──────┬─────────────────────┘
+       │
+       │ Table exists
+       │
+┌──────▼─────────────────────┐
+│  Tenant User Repository    │
+│  create_tenant_user()       │
+└──────┬─────────────────────┘
+       │
+       │ INSERT INTO tenant_sliit_users
+       │ VALUES (usr-abc, admin@..., ...)
+       │
+┌──────▼─────────────────────┐
+│  MySQL Database            │
+│  User Created ✓            │
+└──────┬─────────────────────┘
+       │
+       │ User data returned
+       │
+┌──────▼─────────────────────┐
+│  JWT Token Generator       │
+│  create_token_pair()        │
+└──────┬─────────────────────┘
+       │
+       │ {
+       │   "sub": "usr-abc",
+       │   "email": "admin@...",
+       │   "tenant_id": "tenant_sliit",
+       │   "tenant_name": "sliit",  ← IMPORTANT
+       │   "role": "SUPER_ADMIN"
+       │ }
+       │
+┌──────▼─────────────────────┐
+│  Response to Client        │
+│  {                         │
+│    "tenant_id": "...",     │
+│    "tenant_name": "sliit", │
+│    "user": {...},          │
+│    "tokens": {             │
+│      "access_token": "..." │
+│    }                       │
+│  }                         │
+└────────────────────────────┘
+```
+
+## Login Flow
+
+```
+┌──────────────┐
+│    USER      │
+│ Enters Email │
+└──────┬───────┘
+       │
+       │ POST /auth/login
+       │ {
+       │   "email": "john@my.sliit.lk",
+       │   "password": "MyPass123!"
+       │ }
+       │
+┌──────▼─────────────────────┐
+│  Auth Service              │
+│  login()                   │
+└──────┬─────────────────────┘
+       │
+       │ Extract domain from email
+       │
+┌──────▼─────────────────────┐
+│  Domain Extractor          │
+└──────┬─────────────────────┘
+       │
+       │ Returns: "sliit"
+       │
+┌──────▼─────────────────────┐
+│  Tenant User Repository    │
+│  get_user_by_email(        │
+│    domain="sliit",         │
+│    email="john@..."        │
+│  )                         │
+└──────┬─────────────────────┘
+       │
+       │ SELECT * FROM tenant_sliit_users
+       │ WHERE email = 'john@...'
+       │
+┌──────▼─────────────────────┐
+│  MySQL Database            │
+│  Query tenant_sliit_users  │
+└──────┬─────────────────────┘
+       │
+       │ Returns user record
+       │
+┌──────▼─────────────────────┐
+│  Password Verifier         │
+│  verify_password()         │
+└──────┬─────────────────────┘
+       │
+       │ ✓ Password correct
+       │
+┌──────▼─────────────────────┐
+│  Update Last Login         │
+│  update_last_login()       │
+└──────┬─────────────────────┘
+       │
+       │ UPDATE tenant_sliit_users
+       │ SET last_login_at = NOW()
+       │
+┌──────▼─────────────────────┐
+│  JWT Token Generator       │
+│  create_token_pair()        │
+└──────┬─────────────────────┘
+       │
+       │ {
+       │   "sub": "usr-def",
+       │   "email": "john@...",
+       │   "tenant_id": "tenant_sliit",
+       │   "tenant_name": "sliit",  ← For future queries
+       │   "role": "DEVELOPER"
+       │ }
+       │
+┌──────▼─────────────────────┐
+│  Response to Client        │
+│  {                         │
+│    "user": {               │
+│      "tenant_name": "sliit"│
+│    },                      │
+│    "tokens": {             │
+│      "access_token": "..." │
+│    }                       │
+│  }                         │
+└────────────────────────────┘
+```
+
+## Invite User Flow
+
+```
+┌──────────────┐
+│   ADMIN      │
+│ Invites User │
+└──────┬───────┘
+       │
+       │ POST /auth/invite
+       │ Authorization: Bearer {admin_jwt}
+       │ {
+       │   "first_name": "Jane",
+       │   "last_name": "Smith",
+       │   "email": "jane@my.sliit.lk",
+       │   "role": "DEVELOPER"
+       │ }
+       │
+┌──────▼─────────────────────┐
+│  JWT Token Decoder         │
+│  get_current_user_from_token│
+└──────┬─────────────────────┘
+       │
+       │ Extracts from JWT:
+       │ {
+       │   "user_id": "usr-abc",
+       │   "tenant_name": "sliit",
+       │   "role": "SUPER_ADMIN"
+       │ }
+       │
+┌──────▼─────────────────────┐
+│  Authorization Check       │
+│  Is role SUPER_ADMIN/ADMIN?│
+└──────┬─────────────────────┘
+       │
+       │ ✓ Authorized
+       │
+┌──────▼─────────────────────┐
+│  Auth Service              │
+│  invite_user(              │
+│    tenant_name="sliit",    │
+│    email="jane@...",       │
+│    ...                     │
+│  )                         │
+└──────┬─────────────────────┘
+       │
+       │ Generate temp password
+       │
+┌──────▼─────────────────────┐
+│  Tenant User Repository    │
+│  create_tenant_user(        │
+│    domain="sliit",         │
+│    email="jane@...",       │
+│    ...                     │
+│  )                         │
+└──────┬─────────────────────┘
+       │
+       │ INSERT INTO tenant_sliit_users
+       │ VALUES (usr-xyz, jane@..., ...)
+       │
+┌──────▼─────────────────────┐
+│  MySQL Database            │
+│  User Added ✓              │
+└──────┬─────────────────────┘
+       │
+       │ Send welcome email
+       │
+┌──────▼─────────────────────┐
+│  Email Service             │
+│  send_user_welcome_email() │
+└──────┬─────────────────────┘
+       │
+       │ Email sent ✓
+       │
+┌──────▼─────────────────────┐
+│  Response to Admin         │
+│  {                         │
+│    "user_id": "usr-xyz",   │
+│    "email": "jane@...",    │
+│    "temporary_password": "█│
+│  }                         │
+└────────────────────────────┘
+```
+
+## Data Isolation Model
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    COMPANY: SLIIT                           │
+│                    Domain: sliit                            │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐ │
+│  │  tenant_sliit_users                                   │ │
+│  │                                                       │ │
+│  │  ┌────────┬─────────────────┬──────────┬──────────┐ │ │
+│  │  │usr-abc │admin@my.sliit.lk│SUPER_ADMIN│ {...}   │ │ │
+│  │  ├────────┼─────────────────┼──────────┼──────────┤ │ │
+│  │  │usr-def │john@my.sliit.lk │DEVELOPER │ {...}   │ │ │
+│  │  ├────────┼─────────────────┼──────────┼──────────┤ │ │
+│  │  │usr-ghi │jane@my.sliit.lk │DEVELOPER │ {...}   │ │ │
+│  │  └────────┴─────────────────┴──────────┴──────────┘ │ │
+│  └───────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                            ▲
+                            │ ISOLATED - No cross-tenant access
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│            COMPANY: Axiata Digital Labs                     │
+│            Domain: axixtadigitalalabs                       │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐ │
+│  │  tenant_axixtadigitalalabs_users                      │ │
+│  │                                                       │ │
+│  │  ┌────────┬──────────────────────┬──────────┬─────┐ │ │
+│  │  │usr-xyz │admin@axixtadig...com │SUPER_ADMIN│{...}││ │
+│  │  ├────────┼──────────────────────┼──────────┼─────┤ │ │
+│  │  │usr-uvw │developer@axixtadi...│DEVELOPER │{...}││ │
+│  │  └────────┴──────────────────────┴──────────┴─────┘ │ │
+│  └───────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                            ▲
+                            │ ISOLATED - No cross-tenant access
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                COMPANY: Test Corp                           │
+│                Domain: testcorp                             │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐ │
+│  │  tenant_testcorp_users                                │ │
+│  │                                                       │ │
+│  │  ┌────────┬──────────────────┬──────────┬─────────┐ │ │
+│  │  │usr-pqr │admin@testcorp.com│SUPER_ADMIN│ {...}  │ │ │
+│  │  └────────┴──────────────────┴──────────┴─────────┘ │ │
+│  └───────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## JWT Token Flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    JWT TOKEN                                 │
+│                                                              │
+│  Header:                                                     │
+│  {                                                           │
+│    "alg": "HS256",                                          │
+│    "typ": "JWT"                                             │
+│  }                                                           │
+│                                                              │
+│  Payload:                                                    │
+│  {                                                           │
+│    "sub": "usr-abc123",        ← User ID                    │
+│    "email": "admin@my.sliit.lk", ← Email                    │
+│    "tenant_id": "tenant_sliit",  ← Tenant ID                │
+│    "tenant_name": "sliit",       ← Domain for table lookup  │
+│    "role": "SUPER_ADMIN",        ← User role                │
+│    "exp": 1234567890,            ← Expiration               │
+│    "iat": 1234567890,            ← Issued at                │
+│    "type": "access"              ← Token type               │
+│  }                                                           │
+│                                                              │
+│  Signature: {secret_key}                                     │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            │ Sent with every request
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│                    API REQUEST                               │
+│                                                              │
+│  GET /api/v1/auth/me                                        │
+│  Authorization: Bearer eyJhbGc...                           │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            │ Decode JWT
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│                JWT DECODER                                   │
+│                                                              │
+│  Extracts:                                                   │
+│  - user_id: "usr-abc123"                                    │
+│  - tenant_name: "sliit"    ← Used to query correct table   │
+│  - role: "SUPER_ADMIN"                                      │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            │ Query: tenant_sliit_users
+                            │ WHERE user_id = 'usr-abc123'
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│                    DATABASE                                  │
+│                                                              │
+│  SELECT * FROM tenant_sliit_users                           │
+│  WHERE user_id = 'usr-abc123'                               │
+│                                                              │
+│  Result: User data for usr-abc123                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Domain Extraction Logic
+
+```
+Input Email: admin@my.sliit.lk
+                │
+                ▼
+┌────────────────────────────────────┐
+│  Split at '@'                      │
+│  local_part = "admin"              │
+│  domain_part = "my.sliit.lk"       │
+└────────────┬───────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────┐
+│  Split domain by '.'               │
+│  parts = ["my", "sliit", "lk"]     │
+└────────────┬───────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────┐
+│  Filter out:                       │
+│  - Excluded prefixes: "my"         │
+│  - Excluded TLDs: "lk"             │
+│                                    │
+│  Remaining: "sliit"                │
+└────────────┬───────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────┐
+│  Sanitize (alphanumeric only)      │
+│  Result: "sliit"                   │
+└────────────┬───────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────┐
+│  Generate table name               │
+│  "tenant_sliit_users"              │
+└────────────────────────────────────┘
+```
+
+## Summary
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  OLD ARCHITECTURE               NEW ARCHITECTURE            │
+├─────────────────────────────────┬───────────────────────────┤
+│  ❌ Global users table          │  ✅ Tenant-specific tables│
+│  ❌ Global tenants table        │  ✅ Domain-based isolation│
+│  ❌ Tenant foreign keys         │  ✅ Automatic routing     │
+│  ❌ Complex tenant filtering    │  ✅ Simple table lookup   │
+│  ❌ Potential data leaks        │  ✅ Database-level isol.  │
+└─────────────────────────────────┴───────────────────────────┘
+
+KEY BENEFITS:
+✅ Complete data isolation per tenant
+✅ Scalable (each tenant can grow independently)
+✅ Secure (no cross-tenant access possible)
+✅ Simple (domain-based automatic routing)
+✅ Flexible (JSON user_data field)
+```

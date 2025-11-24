@@ -17,7 +17,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     Create JWT access token.
     
     Args:
-        data: Data to encode in token (user_id, email, tenant_id, role)
+        data: Data to encode in token (user_id, email, tenant_name, role)
         expires_delta: Optional custom expiration time
     
     Returns:
@@ -48,7 +48,7 @@ def create_refresh_token(data: dict) -> str:
     Create JWT refresh token.
     
     Args:
-        data: Data to encode in token (user_id, tenant_id)
+        data: Data to encode in token (user_id, tenant_name)
     
     Returns:
         Encoded JWT refresh token
@@ -129,7 +129,7 @@ def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
         token: JWT access token
     
     Returns:
-        Dictionary with user info or None
+        Dictionary with user info including tenant_name or None
     """
     payload = verify_token(token, token_type="access")
     
@@ -139,7 +139,7 @@ def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
     return {
         "user_id": payload.get("sub"),
         "email": payload.get("email"),
-        "tenant_id": payload.get("tenant_id"),
+        "tenant_name": payload.get("tenant_name"),
         "role": payload.get("role")
     }
 
@@ -149,7 +149,7 @@ def create_token_pair(user_data: dict) -> Dict[str, str]:
     Create both access and refresh tokens.
     
     Args:
-        user_data: User data to encode (user_id, email, tenant_id, role)
+        user_data: User data to encode (user_id, email, tenant_name, role)
     
     Returns:
         Dictionary with access_token and refresh_token
@@ -159,7 +159,7 @@ def create_token_pair(user_data: dict) -> Dict[str, str]:
     # Refresh token only needs minimal data
     refresh_data = {
         "sub": user_data["sub"],
-        "tenant_id": user_data["tenant_id"]
+        "tenant_name": user_data.get("tenant_name")
     }
     refresh_token = create_refresh_token(refresh_data)
     
