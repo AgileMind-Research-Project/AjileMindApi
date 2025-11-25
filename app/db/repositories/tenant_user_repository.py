@@ -86,7 +86,8 @@ class TenantUserRepository:
     
     async def create_tenant_database(self, db_name: str, tenant_name: str, tenant_email: str) -> bool:
         """
-        Create separate database for tenant with tenant_info table.
+        Create separate database for tenant and all required tables.
+        Executes tenant_database_schema.sql to create all tables.
         Database name = domain (e.g., visionexdigital)
         
         Args:
@@ -95,7 +96,7 @@ class TenantUserRepository:
             tenant_email: Tenant admin email
         
         Returns:
-            True if database and table created successfully
+            True if database and tables created successfully
         """
         
         try:
@@ -104,22 +105,52 @@ class TenantUserRepository:
             await self.db.execute_query(create_db_query, commit=True)
             logger.info(f"Created database: {db_name}")
             
-            # Create tenant_info table
-            tenant_info_query = f"""
-                CREATE TABLE IF NOT EXISTS `{db_name}`.`tenant_info` (
-                    `id` INT AUTO_INCREMENT PRIMARY KEY,
-                    `domain` VARCHAR(100) UNIQUE NOT NULL,
-                    `tenant_name` VARCHAR(255) NOT NULL,
-                    `tenant_email` VARCHAR(255) NOT NULL,
-                    `tenant_status` ENUM('ACTIVE', 'SUSPENDED', 'INACTIVE') DEFAULT 'ACTIVE',
-                    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX `idx_domain` (`domain`),
-                    INDEX `idx_status` (`tenant_status`)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """
-            await self.db.execute_query(tenant_info_query, commit=True)
-            logger.info(f"Created tenant_info table in {db_name}")
+            # Read and execute tenant schema SQL file
+            import os
+            import re
+            schema_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'tenant_database_schema.sql')
+            
+            with open(schema_path, 'r', encoding='utf-8') as f:
+                schema_sql = f.read()
+            
+            # Replace {TENANT_DB} placeholder with actual database name
+            schema_sql = schema_sql.replace('{TENANT_DB}', db_name)
+            
+            # Remove single-line comments (-- ...)
+            schema_sql = re.sub(r'--[^\n]*', '', schema_sql)
+            
+            # Remove multi-line comments (/* ... */)
+            schema_sql = re.sub(r'/\*.*?\*/', '', schema_sql, flags=re.DOTALL)
+            
+            # Split by semicolons and clean up
+            statements = []
+            for stmt in schema_sql.split(';'):
+                stmt = stmt.strip()
+                if stmt and 'CREATE TABLE' in stmt.upper():  # Only CREATE TABLE statements
+                    # Ensure database name is prefixed to table name
+                    if f'`{db_name}`.' not in stmt:
+                        # Replace CREATE TABLE `table_name` with CREATE TABLE `db_name`.`table_name`
+                        stmt = re.sub(
+                            r'CREATE TABLE IF NOT EXISTS `(\w+)`',
+                            f'CREATE TABLE IF NOT EXISTS `{db_name}`.`\\1`',
+                            stmt,
+                            flags=re.IGNORECASE
+                        )
+                    statements.append(stmt)
+            
+            # Execute all CREATE TABLE statements
+            for statement in statements:
+                try:
+                    await self.db.execute_query(statement, commit=True)
+                    # Extract table name for logging
+                    table_match = re.search(r'`(\w+)`\s*\(', statement)
+                    table_name = table_match.group(1) if table_match else 'unknown'
+                    logger.info(f"Created table in {db_name}: {table_name}")
+                except Exception as e:
+                    logger.error(f"Error creating table: {e}")
+                    raise
+            
+            logger.info(f"Created all tables from schema in {db_name}")
             
             # Insert tenant info (use db_name as domain identifier)
             insert_tenant_query = f"""
@@ -520,7 +551,7 @@ class TenantUserRepository:
             WHERE email = %s
         """
         
-        result = await self.db.execute_query(query, (tenant_id, email), fetch_one=True)
+        result = await self.db.execute_query(query, (email,), fetch_one=True)
         return result and result['count'] > 0
     
     async def delete_user(
