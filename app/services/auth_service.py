@@ -166,7 +166,6 @@ class AuthService:
         """
         # Validate email domain
         if not validate_email_domain(email):
-            print(email,"fffff")
             log_auth_event("login_failed", email=email, reason="invalid_email_domain")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

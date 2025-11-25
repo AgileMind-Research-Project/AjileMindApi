@@ -12,6 +12,8 @@ from app.core.config import settings
 from app.core.logger import logger
 import boto3
 import json
+from botocore.exceptions import ClientError
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """
@@ -213,24 +215,6 @@ async def get_current_user_from_token(authorization: str = Header(None, alias="A
     
     return user_info
 
-
-def getschema(token: str) -> Optional[str]:
-    """
-    Extract tenant schema name from JWT token.
-    
-    Args:
-        token: JWT access token
-    Returns:
-        Tenant schema name or None
-    """ 
-    payload = verify_token(token, token_type="access")
-    
-    if payload is None:
-        return None
-    
-    return payload.get("tenant_name")
-
-
 def get_secrets():
     client = boto3.client("secretsmanager")
 
@@ -262,12 +246,22 @@ def get_secrets():
 
     return secrets_result
 
-def create__secret(secret_name, secret_value):
+def create_secret(secret_name, secret_value):
     client = boto3.client("secretsmanager")
-
-    response = client.create_secret(
-        Name=secret_name,
-        SecretString=secret_value
-    )
-
-    return response
+    
+    try:
+        response = client.create_secret(
+            Name=secret_name,
+            SecretString=secret_value
+        )
+        print("Secret created:",response)
+        return {
+            "success": True,
+            "message": f"Secret '{response.get('Name')}' created successfully."
+        }
+    
+    except ClientError as e:
+        return {
+            "success": False,
+            "message": f"Failed to create secret '{secret_name}'. Error: {e}"
+        }

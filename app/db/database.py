@@ -85,7 +85,7 @@ class Database:
                 if schema:
                     async with conn.cursor() as temp_cursor:
                         await temp_cursor.execute(f"USE `{schema}`")
-                
+                        logger.info(f"Switched to schema: {schema}")             
                 async with conn.cursor(aiomysql.DictCursor) as cursor:
                     await cursor.execute(query, params or ())
                     

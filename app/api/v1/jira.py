@@ -238,16 +238,16 @@ async def create_jira_issue(
 @router.get(
     "/status",
     summary="Get Jira Integration Status",
-    description="Check if Jira is connected for the tenant"
+    description="Get all Jira integration accounts for the tenant"
 )
 async def get_jira_status(
     current_user: Dict[str, Any] = Depends(get_current_user_from_token),
     jira_service: JiraService = Depends(get_jira_service)
 ) -> Dict[str, Any]:
     """
-    Get Jira integration status for the tenant.
+    Get all Jira integration accounts for the tenant.
     
-    Returns whether Jira is connected and basic configuration info.
+    Returns a list of all Jira integrations with their status.
     """
     try:
         tenant_name = current_user.get("tenant_name")
@@ -257,25 +257,29 @@ async def get_jira_status(
                 detail="Tenant name not found in token"
             )
         
-        credentials = await jira_service.get_credentials(tenant_name)
+        integrations = await jira_service.get_all_integrations(tenant_name)
         
-        if credentials:
+        if integrations:
+            # Also check if any active integration exists
+            has_active = any(integration.get("is_active") for integration in integrations)
+            
             return {
                 "success": True,
-                "message": "Jira is connected",
+                "message": f"Found {len(integrations)} Jira integration(s)",
                 "data": {
-                    "connected": True,
-                    "jira_url": credentials["jira_url"],
-                    "email": credentials["email"],
-                    "is_active": bool(credentials["is_active"])
+                    "connected": has_active,
+                    "integrations": integrations,
+                    "total": len(integrations)
                 }
             }
         else:
             return {
                 "success": True,
-                "message": "Jira not connected",
+                "message": "No Jira integrations found",
                 "data": {
-                    "connected": False
+                    "connected": False,
+                    "integrations": [],
+                    "total": 0
                 }
             }
         
@@ -310,16 +314,16 @@ async def disconnect_jira(
                 detail="Tenant name not found in token"
             )
         
+        # Set api_token to 0 (inactive) for all integrations in this tenant
         query = """
             UPDATE jira_integrations
-            SET is_active = 0, updated_at = NOW()
-            WHERE tenant_name = %s
+            SET api_token = 0, updated_at = NOW()
         """
         
         await database.execute_query(
             query,
-            (tenant_name,),
-            commit=True
+            commit=True,
+            schema=tenant_name
         )
         
         logger.info(f"Jira disconnected for tenant {tenant_name} by {current_user['email']}")
