@@ -25,6 +25,8 @@ class JiraService:
         tenant_name: str,
         jira_url: str,
         email: str,
+        write_key: str,
+        read_key: str,
         api_token: str
     ) -> Dict[str, Any]:
         """

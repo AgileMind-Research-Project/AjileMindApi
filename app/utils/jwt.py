@@ -10,7 +10,8 @@ from jose import JWTError, jwt
 from fastapi import HTTPException, status, Header
 from app.core.config import settings
 from app.core.logger import logger
-
+import boto3
+import json
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """
@@ -211,3 +212,62 @@ async def get_current_user_from_token(authorization: str = Header(None, alias="A
         )
     
     return user_info
+
+
+def getschema(token: str) -> Optional[str]:
+    """
+    Extract tenant schema name from JWT token.
+    
+    Args:
+        token: JWT access token
+    Returns:
+        Tenant schema name or None
+    """ 
+    payload = verify_token(token, token_type="access")
+    
+    if payload is None:
+        return None
+    
+    return payload.get("tenant_name")
+
+
+def get_secrets():
+    client = boto3.client("secretsmanager")
+
+    secrets_result = {}
+
+    # 1. List all secrets
+    paginator = client.get_paginator("list_secrets")
+
+    for page in paginator.paginate():
+        for item in page.get("SecretList", []):
+            name = item["Name"]
+
+            # 2. Get each secret's decrypted value
+            value_resp = client.get_secret_value(SecretId=name)
+
+            if "SecretString" in value_resp:
+                value_raw = value_resp["SecretString"]
+            else:
+                value_raw = value_resp["SecretBinary"].decode("utf-8")
+
+            # Try convert value to JSON (if it's JSON)
+            try:
+                value = json.loads(value_raw)
+            except:
+                value = value_raw
+
+            # Store in output dict
+            secrets_result[name] = value
+
+    return secrets_result
+
+def create__secret(secret_name, secret_value):
+    client = boto3.client("secretsmanager")
+
+    response = client.create_secret(
+        Name=secret_name,
+        SecretString=secret_value
+    )
+
+    return response
