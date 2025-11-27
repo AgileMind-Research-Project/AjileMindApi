@@ -97,6 +97,26 @@ class Settings(BaseSettings):
     AUDIT_LOGGING_ENABLED: bool = True
     AUDIT_RETENTION_DAYS: int = 90
     
+    # ============================================
+    # DOCUMENT CHAT / RAG SETTINGS
+    # ============================================
+    
+    # LLM Configuration (Ollama)
+    LLM_API_URL: str = "http://localhost:11434"  # Default to local Ollama
+    LLM_MODEL_NAME: str = "llama2"  # Can be changed to mistral, codellama, etc.
+    LLM_TEMPERATURE: float = 0.7
+    LLM_MAX_TOKENS: int = 1000
+    
+    # Vector Database (ChromaDB)
+    CHROMA_PERSIST_DIR: str = "./data/chroma_db"
+    EMBEDDING_MODEL_NAME: str = "all-MiniLM-L6-v2"  # Sentence-transformers model
+    
+    # Document Processing
+    MAX_FILE_SIZE_MB: int = 10
+    ALLOWED_FILE_TYPES: List[str] = [".pdf"]
+    CHUNK_SIZE: int = 1000
+    CHUNK_OVERLAP: int = 200
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
