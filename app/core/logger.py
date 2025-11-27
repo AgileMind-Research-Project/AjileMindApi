@@ -289,7 +289,7 @@ def log_auth_event(event: str, **kwargs):
         "event": event,
         **kwargs
     }
-    
+    print(log_data,"ggggggggg")
     security_logger.info(f"Auth event: {event}", extra={"extra_fields": log_data})
 
 

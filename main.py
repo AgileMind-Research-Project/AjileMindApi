@@ -17,7 +17,7 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, documents
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp
 from app.db.database import db
 from app.middleware.audit_middleware import AuditLoggingMiddleware
 
@@ -243,6 +243,7 @@ async def api_status():
 # Include routers
 app.include_router(platform.router, prefix=f"{settings.API_PREFIX}/platform", tags=["Platform"])
 app.include_router(auth.router, prefix=f"{settings.API_PREFIX}/auth", tags=["Authentication"])
+app.include_router(otp.router, prefix=f"{settings.API_PREFIX}/otp", tags=["OTP Authentication"])
 app.include_router(roles.router, prefix=f"{settings.API_PREFIX}/roles", tags=["Roles"])
 app.include_router(audit.router, prefix=f"{settings.API_PREFIX}/audit", tags=["Audit Logs"])
 app.include_router(users.router, prefix=f"{settings.API_PREFIX}/users", tags=["Users"])

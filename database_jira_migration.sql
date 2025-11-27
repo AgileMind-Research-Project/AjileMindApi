@@ -7,7 +7,7 @@ USE agilemind_db;
 
 CREATE TABLE IF NOT EXISTS jira_integrations (
     id INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Auto-increment ID',
-    tenant_id VARCHAR(50) NOT NULL COMMENT 'Tenant this integration belongs to',
+    tenant_name VARCHAR(100) NOT NULL COMMENT 'Tenant domain name (e.g., visionexdigital)',
     jira_url VARCHAR(255) NOT NULL COMMENT 'Jira Cloud URL (e.g., https://company.atlassian.net)',
     email VARCHAR(255) NOT NULL COMMENT 'Jira account email',
     api_token VARCHAR(500) NOT NULL COMMENT 'Jira API token (encrypted)',
@@ -15,9 +15,8 @@ CREATE TABLE IF NOT EXISTS jira_integrations (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp',
     
-    FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-    UNIQUE KEY unique_tenant_jira (tenant_id),
-    INDEX idx_tenant (tenant_id),
+    UNIQUE KEY unique_tenant_jira (tenant_name),
+    INDEX idx_tenant (tenant_name),
     INDEX idx_is_active (is_active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Jira Cloud integration credentials';
 
@@ -26,7 +25,7 @@ CREATE TABLE IF NOT EXISTS jira_integrations (
 -- ============================================
 CREATE TABLE IF NOT EXISTS jira_issue_sync (
     id INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Auto-increment ID',
-    tenant_id VARCHAR(50) NOT NULL COMMENT 'Tenant ID',
+    tenant_name VARCHAR(100) NOT NULL COMMENT 'Tenant domain name',
     task_id VARCHAR(50) NULL COMMENT 'Internal task ID (if linked)',
     jira_issue_key VARCHAR(50) NOT NULL COMMENT 'Jira issue key (e.g., PROJ-123)',
     jira_issue_id VARCHAR(50) NOT NULL COMMENT 'Jira issue ID',
