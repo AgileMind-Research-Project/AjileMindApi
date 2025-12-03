@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS `tenant_info` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
 COMMENT='Tenant configuration and metadata';
 
+-- ============================================ jira_integrations TABLE
+-- Stores Jira account integration details for the tenant
+
 CREATE TABLE IF NOT EXISTS `jira_integrations` (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `jira_url` VARCHAR(255) NOT NULL COMMENT 'Base URL of Jira instance',
@@ -53,3 +56,91 @@ CREATE TABLE IF NOT EXISTS `jira_integrations` (
     INDEX `idx_api_token` (`api_token`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
 COMMENT='Jira account records and API token validation state';
+
+-- ============================================ projects TABLE
+-- Stores project details for the tenant
+CREATE TABLE IF NOT EXISTS `projects` (
+    `project_id` BIGINT NOT NULL PRIMARY KEY COMMENT 'Project ID provided by jira or system',
+
+    `project_name` VARCHAR(255) NOT NULL COMMENT 'Name of the project',
+    `key` VARCHAR(255) NOT NULL COMMENT 'Project key provided by system',
+    `project_type` VARCHAR(100) NOT NULL COMMENT 'Type/category of the project',
+    `start_date` DATE NOT NULL COMMENT 'Project start date',
+    `end_date` DATE NOT NULL COMMENT 'Project end date',
+
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP 
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    -- Unique constraints
+    UNIQUE KEY `unique_project_key` (`key`),
+    UNIQUE KEY `unique_project_name` (`project_name`),
+
+    -- Additional index for faster search on project_name
+    INDEX `idx_project_name` (`project_name`),
+    INDEX `idx_project_key` (`key`),
+    INDEX `idx_start_date` (`start_date`),
+    INDEX `idx_end_date` (`end_date`)
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Project records and timelines';
+
+-- ============================================ project_backlog TABLE
+-- Stores backlog items for projects
+
+  CREATE TABLE IF NOT EXISTS `project_backlog` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Backlog unique ID created by system',
+
+    `project_id` BIGINT NOT NULL COMMENT 'Project ID this backlog item belongs to',
+    `name` VARCHAR(255) NOT NULL COMMENT 'Backlog item name / summary',
+    `description` TEXT NULL COMMENT 'Detailed description of the backlog item',
+    `issue_type` VARCHAR(100) NOT NULL COMMENT 'Type: story, feature, change, bug',
+    `status` VARCHAR(100) NOT NULL DEFAULT 'todo' COMMENT 'Current status of the item',
+    `priority` VARCHAR(100) NULL COMMENT 'Priority: high, medium, low',
+    `assignee` VARCHAR(255) NULL COMMENT 'Assigned user/person',
+
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Record creation time',
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP 
+        ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update time',
+
+    -- Indexes
+    INDEX `idx_project_id` (`project_id`),
+    INDEX `idx_issue_type` (`issue_type`),
+    INDEX `idx_status` (`status`),
+    INDEX `idx_priority` (`priority`)
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Backlog items gathered before project start and new changes/features added later';
+
+
+-- ============================================
+-- FOREIGN KEY CONSTRAINTS
+-- ============================================
+-- Maintains referential integrity between tables
+-- Pattern: ALTER TABLE `child_table` ADD CONSTRAINT `fk_child_parent`
+-- ============================================
+
+-- Project Backlog -> Projects relationship
+-- Ensures backlog items belong to valid projects
+ALTER TABLE `project_backlog`
+    ADD CONSTRAINT `fk_backlog_project`
+    FOREIGN KEY (`project_id`)
+    REFERENCES `projects`(`project_id`)
+    ON UPDATE CASCADE
+    ON DELETE CASCADE;
+
+-- Add future foreign key constraints below following the same pattern:
+-- 
+-- Example template:
+-- Relationship description goes in comment above the ALTER statement
+-- ALTER TABLE `child_table`
+--     ADD CONSTRAINT `fk_child_parent`
+--     FOREIGN KEY (`parent_id`)
+--     REFERENCES `parent_table`(`id`)
+--     ON UPDATE CASCADE
+--     ON DELETE [CASCADE|SET NULL|RESTRICT];
+-- ============================================
+
+

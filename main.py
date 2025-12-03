@@ -17,7 +17,7 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, otp
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects
 from app.db.database import db
 from app.middleware.audit_middleware import AuditLoggingMiddleware
 
@@ -248,6 +248,7 @@ app.include_router(roles.router, prefix=f"{settings.API_PREFIX}/roles", tags=["R
 app.include_router(audit.router, prefix=f"{settings.API_PREFIX}/audit", tags=["Audit Logs"])
 app.include_router(users.router, prefix=f"{settings.API_PREFIX}/users", tags=["Users"])
 app.include_router(jira.router, prefix=f"{settings.API_PREFIX}/jira", tags=["Jira Integration"])
+app.include_router(projects.router, prefix=f"{settings.API_PREFIX}/projects", tags=["Projects"])
 # app.include_router(tenants.router, prefix=f"{settings.API_PREFIX}/tenants", tags=["Tenants"])
 
 if __name__ == "__main__":    
