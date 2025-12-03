@@ -229,7 +229,7 @@ def get_secrets():
 
             # 2. Get each secret's decrypted value
             value_resp = client.get_secret_value(SecretId=name)
-
+            
             if "SecretString" in value_resp:
                 value_raw = value_resp["SecretString"]
             else:
@@ -264,4 +264,59 @@ def create_secret(secret_name, secret_value):
         return {
             "success": False,
             "message": f"Failed to create secret '{secret_name}'. Error: {e}"
+        }
+
+
+def get_secret(secret_name):
+    """
+    Retrieve a secret value from AWS Secrets Manager.
+    
+    Args:
+        secret_name: Name of the secret to retrieve
+    
+    Returns:
+        Dict with success status and secret_value or error message
+    """
+    client = boto3.client("secretsmanager")
+    
+    try:
+        response = client.get_secret_value(SecretId=secret_name)
+        
+        if "SecretString" in response:
+            secret_value = response["SecretString"]
+        else:
+            secret_value = response["SecretBinary"].decode("utf-8")
+        
+        return {
+            "success": True,
+            "secret_value": secret_value
+        }
+    
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        
+        if error_code == 'ResourceNotFoundException':
+            return {
+                "success": False,
+                "message": f"Secret '{secret_name}' not found."
+            }
+        elif error_code == 'InvalidRequestException':
+            return {
+                "success": False,
+                "message": f"Invalid request for secret '{secret_name}'."
+            }
+        elif error_code == 'InvalidParameterException':
+            return {
+                "success": False,
+                "message": f"Invalid parameter for secret '{secret_name}'."
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"Error retrieving secret '{secret_name}': {e}"
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Unexpected error retrieving secret '{secret_name}': {e}"
         }

@@ -79,6 +79,7 @@ class Database:
         start_time = time.time()
         result = None
         
+        
         try:
             async with self.get_connection() as conn:
                 # Switch schema if specified

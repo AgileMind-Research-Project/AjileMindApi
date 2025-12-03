@@ -7,11 +7,13 @@ Business logic for Jira Cloud integration.
 import aiohttp
 import base64
 import json
+import requests
 from typing import Optional, Dict, Any, List
+from datetime import date
 from fastapi import HTTPException, status
 from app.db.database import Database
 from app.core.logger import logger
-from app.utils.jwt import create_secret
+from app.utils.jwt import create_secret, get_secret
 
 
 class JiraService:
@@ -136,6 +138,7 @@ class JiraService:
         Returns:
             Credentials data or None if not found
         """
+        
         try:
             query = """
                 SELECT jira_url, email, api_token, created_at, updated_at
@@ -151,6 +154,7 @@ class JiraService:
             )
             
             if result:
+                print(result,'jira credentials result')
                 return {
                     "jira_url": result.get("jira_url"),
                     "email": result.get("email"),
@@ -400,4 +404,173 @@ class JiraService:
             logger.error(f"Error verifying Jira credentials: {str(e)}")
             return False
     
+    async def _get_account_id(
+        self,
+        jira_url: str,
+        email: str,
+        api_token: str
+    ) -> Optional[str]:
+        """Get Jira account ID for the authenticated user"""
+        try:
+            auth_str = f"{email}:{api_token}"
+            auth_bytes = auth_str.encode('ascii')
+            auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
+            
+            headers = {
+                "Authorization": f"Basic {auth_b64}",
+                "Accept": "application/json"
+            }
+            
+            # Use synchronous request for account ID
+            response = requests.get(
+                f"{jira_url}/rest/api/3/myself",
+                headers=headers,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                user_data = response.json()
+                return user_data.get("accountId")
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting account ID: {str(e)}")
+            return None
     
+    async def create_project(
+        self,
+        tenant_name: str,
+        project_name: str,
+        key: str,
+        project_type: str = "software",
+        template: str = "com.pyxis.greenhopper.jira:gh-scrum-template",
+        description: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a new project in Jira Cloud.
+        
+        Args:
+            tenant_name: Tenant database name
+            project_name: Project name
+            key: Project key (2-10 uppercase letters)
+            project_type: Project type (software, business, service_desk)
+            template: Project template key
+            description: Project description
+        
+        Returns:
+            Created project data with id, key, and name
+            
+        Raises:
+            HTTPException: If credentials not found or project creation fails
+        """
+        # Get Jira credentials
+        credentials = await self.get_credentials(tenant_name)
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Jira integration not configured. Please connect Jira first."
+            )
+        
+        jira_url = credentials["jira_url"]
+        email = credentials["email"]
+        
+        # Get API token from secret manager
+        secret_name = f"jira_api_token_{tenant_name}_{jira_url.replace('https://','').replace('/','_')}"
+        secret_result = get_secret(secret_name)
+        
+        if not secret_result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve Jira API token from secure storage"
+            )
+        
+        api_token = secret_result.get("secret_value")
+        
+        try:
+            # Get account ID for project lead
+            account_id = await self._get_account_id(jira_url, email, api_token)
+            
+            if not account_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Failed to get Jira account ID"
+                )
+            
+            # Prepare project creation payload
+            payload = {
+                "key": key.upper(),
+                "name": project_name,
+                "projectTypeKey": project_type,
+                "projectTemplateKey": template,
+                "leadAccountId": account_id
+            }
+            
+            if description:
+                payload["description"] = description
+            
+            # Create authorization header
+            auth_str = f"{email}:{api_token}"
+            auth_bytes = auth_str.encode('ascii')
+            auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
+            
+            headers = {
+                "Authorization": f"Basic {auth_b64}",
+                "Accept": "application/json",
+                "Content-Type": "application/json"
+            }
+            
+            # Create project using REST API
+            response = requests.post(
+                f"{jira_url}/rest/api/3/project",
+                json=payload,
+                headers=headers,
+                timeout=30
+            )
+            
+            if response.status_code in [200, 201]:
+                project_data = response.json()
+                logger.info(f"Project created in Jira: {project_data.get('key')} - {project_data.get('name')}")
+                
+                return {
+                    "project_id": int(project_data.get("id")),
+                    "key": project_data.get("key"),
+                    "name": project_data.get("name"),
+                    "self": project_data.get("self"),
+                    "jira_url": f"{jira_url}/projects/{project_data.get('key')}"
+                }
+            else:
+                error_data = response.json()
+                errors = error_data.get("errors", {})
+                error_messages = error_data.get("errorMessages", [])
+                
+                # Handle specific errors
+                if "projectName" in errors:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Project name already exists: {errors['projectName']}"
+                    )
+                elif "projectKey" in errors:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Project key already exists: {errors['projectKey']}"
+                    )
+                elif error_messages:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Jira error: {'; '.join(error_messages)}"
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Failed to create project in Jira: {response.text}"
+                    )
+                    
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error creating Jira project: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create project: {str(e)}"
+            )

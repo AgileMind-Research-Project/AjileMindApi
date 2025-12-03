@@ -122,11 +122,16 @@ class TenantUserRepository:
             # Remove multi-line comments (/* ... */)
             schema_sql = re.sub(r'/\*.*?\*/', '', schema_sql, flags=re.DOTALL)
             
-            # Split by semicolons and clean up
-            statements = []
+            # Split by semicolons and clean up - separate CREATE TABLE and ALTER TABLE statements
+            create_table_statements = []
+            alter_table_statements = []
+            
             for stmt in schema_sql.split(';'):
                 stmt = stmt.strip()
-                if stmt and 'CREATE TABLE' in stmt.upper():  # Only CREATE TABLE statements
+                if not stmt:
+                    continue
+                    
+                if 'CREATE TABLE' in stmt.upper():
                     # Ensure database name is prefixed to table name
                     if f'`{db_name}`.' not in stmt:
                         # Replace CREATE TABLE `table_name` with CREATE TABLE `db_name`.`table_name`
@@ -136,21 +141,50 @@ class TenantUserRepository:
                             stmt,
                             flags=re.IGNORECASE
                         )
-                    statements.append(stmt)
+                    create_table_statements.append(stmt)
+                    
+                elif 'ALTER TABLE' in stmt.upper() and 'ADD CONSTRAINT' in stmt.upper():
+                    # Ensure database name is prefixed to ALTER TABLE statements
+                    if f'`{db_name}`.' not in stmt:
+                        stmt = re.sub(
+                            r'ALTER TABLE `(\w+)`',
+                            f'ALTER TABLE `{db_name}`.`\\1`',
+                            stmt,
+                            flags=re.IGNORECASE
+                        )
+                    alter_table_statements.append(stmt)
             
-            # Execute all CREATE TABLE statements
-            for statement in statements:
+            # Step 1: Execute all CREATE TABLE statements first
+            logger.info(f"Creating tables in {db_name}...")
+            for statement in create_table_statements:
                 try:
                     await self.db.execute_query(statement, commit=True)
                     # Extract table name for logging
                     table_match = re.search(r'`(\w+)`\s*\(', statement)
                     table_name = table_match.group(1) if table_match else 'unknown'
-                    logger.info(f"Created table in {db_name}: {table_name}")
+                    logger.info(f"✓ Created table: {db_name}.{table_name}")
                 except Exception as e:
                     logger.error(f"Error creating table: {e}")
                     raise
             
-            logger.info(f"Created all tables from schema in {db_name}")
+            logger.info(f"Created all {len(create_table_statements)} tables in {db_name}")
+            
+            # Step 2: Execute all ALTER TABLE (foreign key) statements after tables are created
+            if alter_table_statements:
+                logger.info(f"Adding foreign key constraints in {db_name}...")
+                for statement in alter_table_statements:
+                    try:
+                        await self.db.execute_query(statement, commit=True)
+                        # Extract constraint info for logging
+                        constraint_match = re.search(r'ADD CONSTRAINT `(\w+)`', statement)
+                        constraint_name = constraint_match.group(1) if constraint_match else 'unknown'
+                        logger.info(f"✓ Added foreign key constraint: {constraint_name}")
+                    except Exception as e:
+                        logger.error(f"Error adding foreign key constraint: {e}")
+                        logger.warning(f"Continuing despite foreign key error...")
+                        # Don't raise - continue with remaining constraints
+                
+                logger.info(f"Applied {len(alter_table_statements)} foreign key constraints")
             
             # Insert tenant info (use db_name as domain identifier)
             insert_tenant_query = f"""
