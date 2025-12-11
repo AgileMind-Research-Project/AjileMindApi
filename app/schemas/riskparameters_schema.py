@@ -47,6 +47,9 @@ class RiskMetadata(BaseModel):
     completed_tasks: int
     blocked_tasks: int
     total_bugs: int
+    high_priority_bugs: int = 0
+    medium_priority_bugs: int = 0
+    low_priority_bugs: int = 0
     completed_sprints: int
     total_sprints: int
     total_leave_hours: float

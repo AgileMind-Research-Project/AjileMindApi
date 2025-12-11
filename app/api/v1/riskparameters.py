@@ -39,18 +39,6 @@ async def calculate_parameter_risk(project_id: int, parameter: str = Query(..., 
         "risk_percentage": risk_percentage,
         "risk_level": risk_level
     }
-from fastapi import APIRouter, HTTPException
-from app.schemas.riskparameters_schema import (
-    RiskParameters,
-    RiskCalculationResponse
-)
-from app.services.riskparameters_service import RiskParametersService
-from app.services.risk_calculation_service import RiskCalculationService
-
-
-router = APIRouter(tags=["Risk Parameters"])
-service = RiskParametersService()
-risk_calc_service = RiskCalculationService()
 
 
 @router.post("/create")
@@ -70,7 +58,8 @@ async def get_parameters(project_id: int):
 
 @router.put("/update")
 async def update_parameters(params: RiskParameters):
-    return await service.update_parameters(params)
+    result = await service.update_parameters(params)
+    return {"message": "Risk parameters updated successfully"}
 
 
 @router.get("/calculate-risk/{project_id}", response_model=RiskCalculationResponse)
