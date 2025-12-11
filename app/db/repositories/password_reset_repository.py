@@ -20,6 +20,7 @@ class PasswordResetRepository:
         self,
         user_id: str,
         token: str,
+        email: str,
         expires_in_hours: int = 1
     ) -> Dict[str, Any]:
         """
@@ -28,6 +29,7 @@ class PasswordResetRepository:
         Args:
             user_id: User ID
             token: Reset token
+            email: User email (for domain extraction during reset)
             expires_in_hours: Token expiration hours
         
         Returns:
@@ -37,14 +39,14 @@ class PasswordResetRepository:
         
         query = """
             INSERT INTO password_reset_tokens (
-                token_id, user_id, token, expires_at, used, created_at
+                token_id, user_id, email, token, expires_at, used, created_at
             )
-            VALUES (%s, %s, %s, DATE_ADD(NOW(), INTERVAL %s HOUR), FALSE, NOW())
+            VALUES (%s, %s, %s, %s, DATE_ADD(NOW(), INTERVAL %s HOUR), FALSE, NOW())
         """
         
         await self.db.execute_query(
             query,
-            (token_id, user_id, token, expires_in_hours),
+            (token_id, user_id, email, token, expires_in_hours),
             commit=True
         )
         
@@ -52,7 +54,7 @@ class PasswordResetRepository:
         
         # Fetch the created token to get the actual expires_at timestamp
         created_token = await self.db.execute_query(
-            "SELECT token_id, user_id, token, expires_at FROM password_reset_tokens WHERE token_id = %s",
+            "SELECT token_id, user_id, email, token, expires_at FROM password_reset_tokens WHERE token_id = %s",
             (token_id,),
             fetch_one=True
         )
@@ -60,6 +62,7 @@ class PasswordResetRepository:
         return created_token if created_token else {
             "token_id": token_id,
             "user_id": user_id,
+            "email": email,
             "token": token,
             "expires_in_hours": expires_in_hours
         }
@@ -72,12 +75,13 @@ class PasswordResetRepository:
             token: Reset token
         
         Returns:
-            Token data or None
+            Token data with email or None
         """
         query = """
             SELECT 
                 token_id,
                 user_id,
+                email,
                 token,
                 expires_at,
                 used,

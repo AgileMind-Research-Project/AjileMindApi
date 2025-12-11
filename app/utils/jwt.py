@@ -10,6 +10,9 @@ from jose import JWTError, jwt
 from fastapi import HTTPException, status, Header
 from app.core.config import settings
 from app.core.logger import logger
+import boto3
+import json
+from botocore.exceptions import ClientError
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -17,7 +20,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     Create JWT access token.
     
     Args:
-        data: Data to encode in token (user_id, email, tenant_id, role)
+        data: Data to encode in token (user_id, email, tenant_name, role)
         expires_delta: Optional custom expiration time
     
     Returns:
@@ -48,7 +51,7 @@ def create_refresh_token(data: dict) -> str:
     Create JWT refresh token.
     
     Args:
-        data: Data to encode in token (user_id, tenant_id)
+        data: Data to encode in token (user_id, tenant_name)
     
     Returns:
         Encoded JWT refresh token
@@ -129,7 +132,7 @@ def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
         token: JWT access token
     
     Returns:
-        Dictionary with user info or None
+        Dictionary with user info including tenant_name or None
     """
     payload = verify_token(token, token_type="access")
     
@@ -139,7 +142,7 @@ def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
     return {
         "user_id": payload.get("sub"),
         "email": payload.get("email"),
-        "tenant_id": payload.get("tenant_id"),
+        "tenant_name": payload.get("tenant_name"),
         "role": payload.get("role")
     }
 
@@ -149,7 +152,7 @@ def create_token_pair(user_data: dict) -> Dict[str, str]:
     Create both access and refresh tokens.
     
     Args:
-        user_data: User data to encode (user_id, email, tenant_id, role)
+        user_data: User data to encode (user_id, email, tenant_name, role)
     
     Returns:
         Dictionary with access_token and refresh_token
@@ -159,7 +162,7 @@ def create_token_pair(user_data: dict) -> Dict[str, str]:
     # Refresh token only needs minimal data
     refresh_data = {
         "sub": user_data["sub"],
-        "tenant_id": user_data["tenant_id"]
+        "tenant_name": user_data.get("tenant_name")
     }
     refresh_token = create_refresh_token(refresh_data)
     
@@ -211,3 +214,109 @@ async def get_current_user_from_token(authorization: str = Header(None, alias="A
         )
     
     return user_info
+
+def get_secrets():
+    client = boto3.client("secretsmanager")
+
+    secrets_result = {}
+
+    # 1. List all secrets
+    paginator = client.get_paginator("list_secrets")
+
+    for page in paginator.paginate():
+        for item in page.get("SecretList", []):
+            name = item["Name"]
+
+            # 2. Get each secret's decrypted value
+            value_resp = client.get_secret_value(SecretId=name)
+            
+            if "SecretString" in value_resp:
+                value_raw = value_resp["SecretString"]
+            else:
+                value_raw = value_resp["SecretBinary"].decode("utf-8")
+
+            # Try convert value to JSON (if it's JSON)
+            try:
+                value = json.loads(value_raw)
+            except:
+                value = value_raw
+
+            # Store in output dict
+            secrets_result[name] = value
+
+    return secrets_result
+
+def create_secret(secret_name, secret_value):
+    client = boto3.client("secretsmanager")
+    
+    try:
+        response = client.create_secret(
+            Name=secret_name,
+            SecretString=secret_value
+        )
+        print("Secret created:",response)
+        return {
+            "success": True,
+            "message": f"Secret '{response.get('Name')}' created successfully."
+        }
+    
+    except ClientError as e:
+        return {
+            "success": False,
+            "message": f"Failed to create secret '{secret_name}'. Error: {e}"
+        }
+
+
+def get_secret(secret_name):
+    """
+    Retrieve a secret value from AWS Secrets Manager.
+    
+    Args:
+        secret_name: Name of the secret to retrieve
+    
+    Returns:
+        Dict with success status and secret_value or error message
+    """
+    client = boto3.client("secretsmanager")
+    
+    try:
+        response = client.get_secret_value(SecretId=secret_name)
+        
+        if "SecretString" in response:
+            secret_value = response["SecretString"]
+        else:
+            secret_value = response["SecretBinary"].decode("utf-8")
+        
+        return {
+            "success": True,
+            "secret_value": secret_value
+        }
+    
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        
+        if error_code == 'ResourceNotFoundException':
+            return {
+                "success": False,
+                "message": f"Secret '{secret_name}' not found."
+            }
+        elif error_code == 'InvalidRequestException':
+            return {
+                "success": False,
+                "message": f"Invalid request for secret '{secret_name}'."
+            }
+        elif error_code == 'InvalidParameterException':
+            return {
+                "success": False,
+                "message": f"Invalid parameter for secret '{secret_name}'."
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"Error retrieving secret '{secret_name}': {e}"
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Unexpected error retrieving secret '{secret_name}': {e}"
+        }

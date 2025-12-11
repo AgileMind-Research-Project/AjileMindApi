@@ -190,11 +190,20 @@ async def change_password(
                 detail="New passwords do not match"
             )
         
+        # Get tenant_name from JWT token
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid token: missing tenant information"
+            )
+        
         # Change password
         await auth_service.change_password(
             user_id=current_user["user_id"],
             current_password=request.current_password,
-            new_password=request.new_password
+            new_password=request.new_password,
+            tenant_name=tenant_name
         )
         
         return {
@@ -237,7 +246,7 @@ async def verify_current_password(
     """
     try:
         from app.utils.password import verify_password
-        from app.db.repositories.user_repository import UserRepository
+        from app.db.repositories.tenant_user_repository import TenantUserRepository
         
         if not request.current_password:
             return {
@@ -248,9 +257,20 @@ async def verify_current_password(
                 }
             }
         
-        # Get user repository
-        user_repo = UserRepository(db)
-        user = await user_repo.get_user_by_id(current_user["user_id"])
+        # Get tenant_name from JWT token
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            return {
+                "success": True,
+                "message": "Password verification",
+                "data": {
+                    "is_valid": False
+                }
+            }
+        
+        # Get user from tenant-specific repository
+        tenant_user_repo = TenantUserRepository(db)
+        user = await tenant_user_repo.get_user_by_id(tenant_name, current_user["user_id"])
         
         if not user:
             return {
@@ -366,6 +386,7 @@ async def reset_password(
 )
 async def invite_user(
     request: InviteUserRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
     auth_service: AuthService = Depends(get_auth_service)
 ) -> Dict[str, Any]:
     """
@@ -375,12 +396,36 @@ async def invite_user(
     Requires authentication and SUPER_ADMIN or ADMIN role.
     """
     try:
-        # TODO: Get tenant_id from JWT token in Authorization header
-        # For now, this is a placeholder
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Invite user endpoint requires authentication"
+        # Get tenant_name from JWT token
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid token: missing tenant information"
+            )
+        
+        # Check user role
+        if current_user.get("role") not in ["SUPER_ADMIN", "ADMIN"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can invite users"
+            )
+        
+        # Invite user
+        result = await auth_service.invite_user(
+            tenant_name=tenant_name,
+            first_name=request.first_name,
+            last_name=request.last_name,
+            email=request.email,
+            role=request.role,
+            company_name=tenant_name  # Use domain as company name fallback
         )
+        
+        return {
+            "success": True,
+            "message": "User invited successfully",
+            "data": result
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -396,20 +441,21 @@ async def invite_user(
     summary="Get Current User",
     description="Get current user profile from JWT token"
 )
-async def get_current_user(
-    auth_service: AuthService = Depends(get_auth_service)
+async def get_current_user_endpoint(
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token)
 ) -> Dict[str, Any]:
     """
     Get current user profile.
     
     Requires valid JWT token in Authorization header.
+    Returns user information from JWT token.
     """
     try:
-        # TODO: Get token from Authorization header and decode
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Get current user endpoint requires authentication"
-        )
+        return {
+            "success": True,
+            "message": "User retrieved successfully",
+            "data": current_user
+        }
     except HTTPException:
         raise
     except Exception as e:

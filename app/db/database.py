@@ -1,7 +1,7 @@
 """
 Database Connection and Utilities
 
-Handles MySQL database connections and query execution.
+Handles MySQL schema connections and query execution.
 """
 
 import aiomysql
@@ -19,7 +19,7 @@ class Database:
         self.pool: Optional[aiomysql.Pool] = None
     
     async def connect(self):
-        """Create database connection pool"""
+        """Create schema connection pool"""
         try:
             self.pool = await aiomysql.create_pool(
                 host=settings.DB_HOST,
@@ -34,11 +34,11 @@ class Database:
             )
             logger.info(f"Database pool created: {settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}")
         except Exception as e:
-            logger.error(f"Failed to create database pool: {e}")
+            logger.error(f"Failed to create schema pool: {e}")
             raise
     
     async def disconnect(self):
-        """Close database connection pool"""
+        """Close schema connection pool"""
         if self.pool:
             self.pool.close()
             await self.pool.wait_closed()
@@ -46,7 +46,7 @@ class Database:
     
     @asynccontextmanager
     async def get_connection(self):
-        """Get database connection from pool"""
+        """Get schema connection from pool"""
         if not self.pool:
             raise RuntimeError("Database pool not initialized")
         
@@ -59,10 +59,11 @@ class Database:
         params: tuple = None,
         fetch_one: bool = False,
         fetch_all: bool = False,
-        commit: bool = False
+        commit: bool = False,
+        schema: str = None
     ) -> Optional[Any]:
         """
-        Execute database query with logging and error handling.
+        Execute schema query with logging and error handling.
         
         Args:
             query: SQL query string
@@ -70,6 +71,7 @@ class Database:
             fetch_one: Return single row
             fetch_all: Return all rows
             commit: Commit transaction
+            schema: Optional schema name to execute query in
         
         Returns:
             Query result or None
@@ -77,8 +79,14 @@ class Database:
         start_time = time.time()
         result = None
         
+        
         try:
             async with self.get_connection() as conn:
+                # Switch schema if specified
+                if schema:
+                    async with conn.cursor() as temp_cursor:
+                        await temp_cursor.execute(f"USE `{schema}`")
+                        logger.info(f"Switched to schema: {schema}")             
                 async with conn.cursor(aiomysql.DictCursor) as cursor:
                     await cursor.execute(query, params or ())
                     
@@ -107,13 +115,14 @@ class Database:
             logger.exception(f"Database query failed: {e}")
             raise
     
-    async def execute_many(self, query: str, params_list: List[tuple]) -> int:
+    async def execute_many(self, query: str, params_list: List[tuple], schema: str = None) -> int:
         """
         Execute query with multiple parameter sets.
         
         Args:
             query: SQL query string
             params_list: List of parameter tuples
+            schema: Optional schema name to execute query in
         
         Returns:
             Number of rows affected
@@ -122,6 +131,11 @@ class Database:
         
         try:
             async with self.get_connection() as conn:
+                # Switch schema if specified
+                if schema:
+                    async with conn.cursor() as temp_cursor:
+                        await temp_cursor.execute(f"USE `{schema}`")
+                
                 async with conn.cursor() as cursor:
                     await cursor.executemany(query, params_list)
                     await conn.commit()
@@ -142,7 +156,7 @@ class Database:
             raise
 
 
-# Global database instance
+# Global schema instance
 db = Database()
 
 
