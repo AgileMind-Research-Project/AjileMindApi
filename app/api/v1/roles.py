@@ -93,13 +93,13 @@ def get_permission_level_from_json(permissions_json: str) -> str:
     "",
     response_model=List[RoleResponse],
     summary="Get All Roles",
-    description="Retrieve all roles (system and custom) - Super Admin only"
+    description="Retrieve all system roles - Super Admin only"
 )
 async def get_roles(
     current_user: Dict = Depends(verify_super_admin),
     database: Database = Depends(get_database)
 ) -> List[Dict[str, Any]]:
-    """Get all roles for the tenant"""
+    """Get all system roles (shared across all tenants)"""
     try:
         query = """
             SELECT 
@@ -108,13 +108,12 @@ async def get_roles(
                 DESCRIPTION as description,
                 CREATED_AT as created_at
             FROM roles
-            WHERE TENANT_ID IS NULL OR TENANT_ID = %s
+            WHERE is_system_role = TRUE
             ORDER BY CREATED_AT DESC
         """
         
         roles = await database.execute_query(
             query,
-            (current_user["tenant_id"],),
             fetch_all=True
         )
         
@@ -161,11 +160,11 @@ async def create_role(
         check_query = """
             SELECT ROLE_ID as role_id 
             FROM roles 
-            WHERE NAME = %s AND (TENANT_ID = %s OR TENANT_ID IS NULL)
+            WHERE NAME = %s
         """
         existing = await database.execute_query(
             check_query,
-            (role_name, current_user["tenant_id"]),
+            (role_name,),
             fetch_one=True
         )
         
@@ -175,13 +174,10 @@ async def create_role(
                 detail=f"Role '{role_name}' already exists"
             )
         
-        # Convert permission level to JSON
-        permissions_json = convert_permission_level_to_json("READ")  # Default permission
-        
-        # Insert new role
+        # Insert new role (system-wide, no tenant_id)
         insert_query = """
             INSERT INTO roles (
-                ROLE_ID, TENANT_ID, NAME, DESCRIPTION
+                ROLE_ID, NAME, DESCRIPTION, is_system_role
             ) VALUES (%s, %s, %s, %s)
         """
         
@@ -189,9 +185,9 @@ async def create_role(
             insert_query,
             (
                 role_id,
-                current_user["tenant_id"],
                 role_name,
-                role_data.description
+                role_data.description,
+                False
             ),
             commit=True
         )
@@ -245,15 +241,22 @@ async def update_role(
     try:
         # Check if role exists
         check_query = """
-            SELECT ROLE_ID as role_id, NAME as name
+            SELECT ROLE_ID as role_id, NAME as name, is_system_role
             FROM roles 
-            WHERE ROLE_ID = %s AND TENANT_ID = %s
+            WHERE ROLE_ID = %s
         """
         existing_role = await database.execute_query(
             check_query,
-            (role_id, current_user["tenant_id"]),
+            (role_id,),
             fetch_one=True
         )
+        
+        # Prevent editing system roles
+        if existing_role and existing_role.get("is_system_role"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot edit system roles"
+            )
         
         if not existing_role:
             raise HTTPException(
@@ -326,15 +329,22 @@ async def delete_role(
     try:
         # Check if role exists
         check_query = """
-            SELECT ROLE_ID as role_id
+            SELECT ROLE_ID as role_id, is_system_role
             FROM roles 
-            WHERE ROLE_ID = %s AND TENANT_ID = %s
+            WHERE ROLE_ID = %s
         """
         existing_role = await database.execute_query(
             check_query,
-            (role_id, current_user["tenant_id"]),
+            (role_id,),
             fetch_one=True
         )
+        
+        # Prevent deleting system roles
+        if existing_role and existing_role.get("is_system_role"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot delete system roles"
+            )
         
         if not existing_role:
             raise HTTPException(
@@ -389,23 +399,29 @@ async def get_user_role(
 ) -> Dict[str, Any]:
     """Get user's current role"""
     try:
-        query = """
+        # Get tenant domain from JWT
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+        
+        # Query domain-based user table
+        query = f"""
             SELECT 
-                u.USER_ID as user_id,
-                u.EMAIL as email,
-                u.FIRST_NAME as first_name,
-                u.LAST_NAME as last_name,
-                r.ROLE_ID as role_id,
-                r.NAME as role_name,
-                r.DISPLAY_NAME as role_display_name
-            FROM users u
-            LEFT JOIN roles r ON u.ROLE_ID = r.ROLE_ID
-            WHERE u.USER_ID = %s AND u.TENANT_ID = %s
+                user_id,
+                email,
+                first_name,
+                last_name,
+                role
+            FROM `{tenant_name}`
+            WHERE user_id = %s
         """
         
         user = await database.execute_query(
             query,
-            (user_id, current_user["tenant_id"]),
+            (user_id,),
             fetch_one=True
         )
         
@@ -420,9 +436,7 @@ async def get_user_role(
             "email": user["email"],
             "name": f"{user['first_name']} {user['last_name']}",
             "current_role": {
-                "role_id": user["role_id"],
-                "role_name": user["role_name"],
-                "role_display_name": user["role_display_name"]
+                "role_name": user["role"]
             }
         }
         
@@ -449,11 +463,19 @@ async def update_user_role(
 ) -> Dict[str, Any]:
     """Update user's role"""
     try:
-        # Check if user exists
-        user_query = "SELECT USER_ID as user_id, EMAIL as email FROM users WHERE USER_ID = %s AND TENANT_ID = %s"
+        # Get tenant domain from JWT
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+        
+        # Check if user exists in domain table
+        user_query = f"SELECT user_id, email FROM `{tenant_name}` WHERE user_id = %s"
         user = await database.execute_query(
             user_query,
-            (user_id, current_user["tenant_id"]),
+            (user_id,),
             fetch_one=True
         )
         
@@ -463,15 +485,15 @@ async def update_user_role(
                 detail="User not found"
             )
         
-        # Check if role exists
+        # Check if role exists (role_id is actually the role name in new architecture)
         role_query = """
-            SELECT ROLE_ID as role_id, NAME as name 
+            SELECT role_id, name 
             FROM roles 
-            WHERE ROLE_ID = %s AND (TENANT_ID = %s OR TENANT_ID IS NULL)
+            WHERE name = %s
         """
         role = await database.execute_query(
             role_query,
-            (request.role_id, current_user["tenant_id"]),
+            (request.role_id,),
             fetch_one=True
         )
         
@@ -481,11 +503,11 @@ async def update_user_role(
                 detail="Role not found"
             )
         
-        # Update user role
-        update_query = """
-            UPDATE users 
-            SET ROLE_ID = %s, UPDATED_AT = %s
-            WHERE USER_ID = %s
+        # Update user role in domain table (role stored as name, not ID)
+        update_query = f"""
+            UPDATE `{tenant_name}` 
+            SET role = %s, updated_at = %s
+            WHERE user_id = %s
         """
         
         await database.execute_query(
@@ -499,8 +521,7 @@ async def update_user_role(
         return {
             "message": "User role updated successfully",
             "user_id": user_id,
-            "new_role_id": request.role_id,
-            "new_role_name": role["name"]
+            "new_role_name": request.role_id
         }
         
     except HTTPException:

@@ -4,11 +4,11 @@ Authentication Service
 Business logic for authentication and user management.
 """
 
+import uuid
 from typing import Optional, Dict, Any
 from fastapi import HTTPException, status
 from app.db.database import Database
-from app.db.repositories.tenant_repository import TenantRepository
-from app.db.repositories.user_repository import UserRepository
+from app.db.repositories.tenant_user_repository import TenantUserRepository
 from app.db.repositories.password_reset_repository import PasswordResetRepository
 from app.utils.password import (
     hash_password,
@@ -18,6 +18,7 @@ from app.utils.password import (
     generate_reset_token
 )
 from app.utils.jwt import create_token_pair, get_user_from_token
+from app.utils.domain_extractor import extract_domain_from_email, validate_email_domain
 from app.services.email_service import email_service
 from app.core.logger import logger, log_auth_event
 from app.core.config import settings
@@ -28,38 +29,8 @@ class AuthService:
     
     def __init__(self, db: Database):
         self.db = db
-        self.tenant_repo = TenantRepository(db)
-        self.user_repo = UserRepository(db)
+        self.tenant_user_repo = TenantUserRepository(db)
         self.reset_repo = PasswordResetRepository(db)
-    
-    async def _create_super_admin_role(self, tenant_id: str, role_id: str) -> None:
-        """
-        Create Super Admin role for new tenant.
-        
-        Args:
-            tenant_id: Tenant ID
-            role_id: Role ID to use
-        """
-        query = """
-            INSERT INTO roles (ROLE_ID, TENANT_ID, NAME, DISPLAY_NAME, DESCRIPTION, PERMISSIONS, IS_SYSTEM_ROLE, CREATED_AT, UPDATED_AT)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-        """
-        
-        await self.db.execute_query(
-            query,
-            (
-                role_id,
-                tenant_id,
-                "SUPER_ADMIN",
-                "Super Administrator",
-                "Full system access with all permissions",
-                '["*"]',  # JSON array of permissions
-                False  # Not a system role (tenant-specific)
-            ),
-            commit=True
-        )
-        
-        logger.info(f"Created Super Admin role for tenant {tenant_id}")
     
     async def register_tenant(
         self,
@@ -70,7 +41,8 @@ class AuthService:
         """
         Register new tenant from Platform Home.
         
-        Creates tenant, super admin user, and sends welcome email.
+        Creates tenant-specific user table, super admin user, and sends welcome email.
+        Users are NOT added to the global users table.
         
         Args:
             company_name: Company name
@@ -80,40 +52,73 @@ class AuthService:
         Returns:
             Tenant and user data with tokens
         """
-        # Check if email already exists (any tenant)
-        existing_user = await self.user_repo.get_user_by_email(email)
-        if existing_user:
-            log_auth_event("tenant_registration_failed", email=email, reason="email_exists")
+        # Validate email domain
+        if not validate_email_domain(email):
+            log_auth_event("tenant_registration_failed", email=email, reason="invalid_email_domain")
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Company email already registered"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email domain cannot be extracted for tenant isolation"
             )
         
-        # Create tenant
-        tenant = await self.tenant_repo.create_tenant(company_name)
+        # Extract domain from email
+        domain = extract_domain_from_email(email)
         
-        # Create Super Admin role for this tenant
-        role_id = f"role_{tenant['tenant_id']}_super_admin"
-        await self._create_super_admin_role(tenant["tenant_id"], role_id)
+        # Table/Database name = domain only (e.g., visionexdigital)
+        table_db_name = domain
+        
+        # Step 1: Check if table already exists (prevent duplicate tenant registration)
+        check_table_query = """
+            SELECT COUNT(*) as count
+            FROM information_schema.TABLES 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = %s
+        """
+        existing_table = await self.db.execute_query(check_table_query, (table_db_name,), fetch_one=True)
+        
+        if existing_table and existing_table.get("count", 0) > 0:
+            logger.warning(f"Tenant registration failed: Table {table_db_name} already exists for domain {domain}")
+            log_auth_event("tenant_registration_failed", email=email, reason="tenant_already_exists")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A tenant for domain '{domain}' already exists. Please contact your administrator."
+            )
+        
+        logger.info(f"Creating new tenant with domain: {domain}, table: {table_db_name}")
+        
+        # Step 2: Create users table in CENTRALIZED database (table name: domain)
+        await self.tenant_user_repo.create_tenant_users_table(
+            table_name=table_db_name
+        )
+        logger.info(f"Created users table in centralized DB: {table_db_name}")
+        
+        # Step 3: Create NEW DATABASE with same name as the table
+        await self.tenant_user_repo.create_tenant_database(
+            db_name=table_db_name,
+            tenant_name=company_name,
+            tenant_email=email
+        )
+        logger.info(f"Created tenant database: {table_db_name}")
         
         # Hash password
         password_hash = hash_password(password)
         
-        # Create super admin user
-        user = await self.user_repo.create_user(
-            tenant_id=tenant["tenant_id"],
+        # Step 4: Create super admin user in centralized users table (table named domain)
+        user = await self.tenant_user_repo.create_tenant_user(
+            domain=domain,
             email=email,
             password_hash=password_hash,
             role="SUPER_ADMIN",
+            first_name=None,
+            last_name=None,
             status="ACTIVE",
             password_change_required=False
         )
         
-        # Generate JWT tokens
+        # Generate JWT tokens with domain
         token_data = {
             "sub": user["user_id"],
             "email": user["email"],
-            "tenant_id": tenant["tenant_id"],
+            "tenant_name": domain,
             "role": user["role"]
         }
         tokens = create_token_pair(token_data)
@@ -122,24 +127,23 @@ class AuthService:
         email_service.send_tenant_welcome_email(
             email=email,
             company_name=company_name,
-            tenant_id=tenant["tenant_id"]
+            tenant_id=domain
         )
         
         log_auth_event(
             "tenant_registered",
             user_id=user["user_id"],
-            tenant_id=tenant["tenant_id"],
             email=email
         )
         
         return {
-            "tenant_id": tenant["tenant_id"],
+            "tenant_name": domain,
             "company_name": company_name,
             "user": {
                 "user_id": user["user_id"],
                 "email": user["email"],
-                "first_name": user["first_name"],
-                "last_name": user["last_name"],
+                "first_name": user.get("first_name"),
+                "last_name": user.get("last_name"),
                 "role": user["role"]
             },
             "tokens": tokens,
@@ -150,15 +154,62 @@ class AuthService:
         """
         Authenticate user and return tokens.
         
+        Extracts domain from email, queries tenant-specific table,
+        verifies credentials, and includes tenant_name in JWT.
+        
         Args:
             email: User email
             password: User password
         
         Returns:
-            User data and tokens
+            User data and tokens with tenant_name
         """
-        # Get user
-        user = await self.user_repo.get_user_by_email(email)
+        # Validate email domain
+        if not validate_email_domain(email):
+            log_auth_event("login_failed", email=email, reason="invalid_email_domain")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password"
+            )
+        
+        # Extract domain from email
+        domain = extract_domain_from_email(email)
+        
+        # Find users table matching the domain pattern: %_{domain}
+        # Example: For domain "sliit", find table like "tn_abc12345_sliit"
+        find_table_query = """
+            SELECT TABLE_NAME 
+            FROM information_schema.TABLES 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME LIKE %s
+            LIMIT 1
+        """
+        table_pattern = f"%{domain}"
+        table_result = await self.db.execute_query(find_table_query, (table_pattern,), fetch_one=True)
+        
+        print(f"Finding table for domain '{domain}' with pattern '{table_pattern}': {table_result}")
+        
+        if not table_result:
+            log_auth_event("login_failed", email=email, reason="tenant_table_not_found")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password"
+            )
+        
+        table_name = table_result["TABLE_NAME"]
+        
+        logger.info(f"Found table {table_name} for domain {domain}")
+        
+        # Get user from centralized users table
+        try:
+            user = await self.tenant_user_repo.get_user_by_email(table_name, email)
+        except Exception as e:
+            logger.error(f"Error querying tenant database for domain {domain}: {e}")
+            log_auth_event("login_failed", email=email, reason="tenant_table_not_found")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password"
+            )
         
         if not user:
             log_auth_event("login_failed", email=email, reason="user_not_found")
@@ -189,13 +240,13 @@ class AuthService:
             )
         
         # Update last login
-        await self.user_repo.update_last_login(user["user_id"])
+        await self.tenant_user_repo.update_last_login(table_name, user["user_id"])
         
-        # Generate tokens
+        # Generate tokens with domain only
         token_data = {
             "sub": user["user_id"],
             "email": user["email"],
-            "tenant_id": user["tenant_id"],
+            "tenant_name": domain,
             "role": user["role"]
         }
         tokens = create_token_pair(token_data)
@@ -203,19 +254,18 @@ class AuthService:
         log_auth_event(
             "login_success",
             user_id=user["user_id"],
-            email=email,
-            tenant_id=user["tenant_id"]
+            email=email
         )
         
+        # Extract user data
         return {
             "user": {
                 "user_id": user["user_id"],
                 "email": user["email"],
-                "first_name": user["first_name"],
-                "last_name": user["last_name"],
+                "first_name": user.get("first_name"),
+                "last_name": user.get("last_name"),
                 "role": user["role"],
-                "tenant_id": user["tenant_id"],
-                "tenant_name": user.get("tenant_name")
+                "tenant_name": domain
             },
             "tokens": tokens,
             "password_change_required": user.get("password_change_required", False)
@@ -225,15 +275,17 @@ class AuthService:
         self,
         user_id: str,
         current_password: str,
-        new_password: str
+        new_password: str,
+        tenant_name: str  # domain
     ) -> Dict[str, Any]:
         """
-        Change user password.
+        Change user password in tenant-specific table.
         
         Args:
             user_id: User ID
             current_password: Current password
             new_password: New password
+            tenant_name: Tenant domain name
         
         Returns:
             Success data
@@ -241,8 +293,8 @@ class AuthService:
         try:
             logger.info(f"Starting password change for user: {user_id}")
             
-            # Get user
-            user = await self.user_repo.get_user_by_id(user_id)
+            # Get user from tenant's database
+            user = await self.tenant_user_repo.get_user_by_id(tenant_name, user_id)
             
             if not user:
                 logger.warning(f"User not found: {user_id}")
@@ -251,7 +303,7 @@ class AuthService:
                     detail="User not found"
                 )
             
-            logger.info(f"User found, verifying current password")
+            logger.info("User found, verifying current password")
             
             # Verify current password
             if not verify_password(current_password, user["password_hash"]):
@@ -274,8 +326,9 @@ class AuthService:
             new_password_hash = hash_password(new_password)
             
             logger.info(f"Updating password in database for user: {user_id}")
-            # Update password
-            await self.user_repo.update_password(
+            # Update password in tenant's database  
+            await self.tenant_user_repo.update_password(
+                table_name=tenant_name,
                 user_id=user_id,
                 password_hash=new_password_hash,
                 clear_password_change_required=True
@@ -307,8 +360,12 @@ class AuthService:
         Returns:
             True (always, for security)
         """
-        # Get user
-        user = await self.user_repo.get_user_by_email(email)
+        # Extract domain from email to determine table name
+        domain = extract_domain_from_email(email)
+        table_name = domain
+        
+        # Get user from domain-based table
+        user = await self.tenant_user_repo.get_user_by_email(table_name, email)
         
         if user:
             # Generate reset token
@@ -318,6 +375,7 @@ class AuthService:
             await self.reset_repo.create_reset_token(
                 user_id=user["user_id"],
                 token=reset_token,
+                email=email,
                 expires_in_hours=1
             )
             
@@ -353,11 +411,26 @@ class AuthService:
                 detail="Invalid or expired reset token"
             )
         
+        # Get user email to extract domain
+        # Note: We need email in token_data or another way to get the table name
+        # For now, we'll need to get user info from reset token table
+        user_email = token_data.get("email")
+        if not user_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot determine user tenant from token"
+            )
+        
+        # Extract domain to determine table name
+        domain = extract_domain_from_email(user_email)
+        table_name = domain
+        
         # Hash new password
         new_password_hash = hash_password(new_password)
         
-        # Update password
-        await self.user_repo.update_password(
+        # Update password in domain-based table
+        await self.tenant_user_repo.update_password(
+            table_name=table_name,
             user_id=token_data["user_id"],
             password_hash=new_password_hash,
             clear_password_change_required=False
@@ -375,27 +448,29 @@ class AuthService:
     
     async def invite_user(
         self,
-        tenant_id: str,
+        tenant_name: str,  # domain
         first_name: str,
         last_name: str,
         email: str,
-        role: str
+        role: str,
+        company_name: str
     ) -> Dict[str, Any]:
         """
-        Invite new user to tenant.
+        Invite new user to tenant-specific table.
         
         Args:
-            tenant_id: Tenant ID
+            tenant_name: Tenant domain name
             first_name: User first name
             last_name: User last name
             email: User email
             role: User role
+            company_name: Company name for email
         
         Returns:
             Created user data
         """
         # Check if email already exists in tenant
-        exists = await self.user_repo.email_exists_in_tenant(email, tenant_id)
+        exists = await self.tenant_user_repo.email_exists_in_tenant(tenant_name, email)
         
         if exists:
             raise HTTPException(
@@ -407,12 +482,9 @@ class AuthService:
         temporary_password = generate_user_password(first_name, email)
         password_hash = hash_password(temporary_password)
         
-        # Get tenant details
-        tenant = await self.tenant_repo.get_tenant_by_id(tenant_id)
-        
-        # Create user
-        user = await self.user_repo.create_user(
-            tenant_id=tenant_id,
+        # Create user in tenant-specific table
+        user = await self.tenant_user_repo.create_tenant_user(
+            domain=tenant_name,
             email=email,
             password_hash=password_hash,
             role=role,
@@ -427,7 +499,7 @@ class AuthService:
             email=email,
             first_name=first_name,
             last_name=last_name,
-            company_name=tenant["company_name"],
+            company_name=company_name,
             role=role,
             temporary_password=temporary_password
         )
@@ -436,7 +508,6 @@ class AuthService:
             "user_invited",
             user_id=user["user_id"],
             email=email,
-            tenant_id=tenant_id,
             role=role
         )
         
@@ -464,7 +535,16 @@ class AuthService:
                 detail="Invalid or expired token"
             )
         
-        user = await self.user_repo.get_user_by_id(user_info["user_id"])
+        # Extract tenant_name (domain) from token
+        tenant_name = user_info.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: missing tenant information"
+            )
+        
+        # Get user from tenant-specific table
+        user = await self.tenant_user_repo.get_user_by_id(tenant_name, user_info["user_id"])
         
         if not user:
             raise HTTPException(
@@ -475,11 +555,10 @@ class AuthService:
         return {
             "user_id": user["user_id"],
             "email": user["email"],
-            "first_name": user["first_name"],
-            "last_name": user["last_name"],
+            "first_name": user.get("first_name"),
+            "last_name": user.get("last_name"),
             "role": user["role"],
-            "tenant_id": user["tenant_id"],
-            "tenant_name": user.get("tenant_name"),
+            "tenant_name": tenant_name,
             "status": user["status"],
             "last_login_at": user.get("last_login_at"),
             "created_at": user.get("created_at")
