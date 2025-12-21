@@ -67,6 +67,7 @@ class TenantUserRepository:
                     `first_name` VARCHAR(100),
                     `last_name` VARCHAR(100),
                     `role` VARCHAR(50) NOT NULL DEFAULT 'USER',
+                    `projects` JSON DEFAULT NULL,
                     `status` ENUM('ACTIVE', 'SUSPENDED', 'PENDING_ACTIVATION') DEFAULT 'PENDING_ACTIVATION',
                     `password_change_required` BOOLEAN DEFAULT TRUE,
                     `last_login_at` DATETIME NULL,
