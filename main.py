@@ -3,11 +3,20 @@ AgileMind Backend - FastAPI Application
 Multi-tenant SaaS Platform for Agile Project Management
 """
 
+import sys
+import os
+
+# Fix encoding for Windows terminal (UTF-8)
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
-import sys
 from pathlib import Path
 
 # Add app directory to path
@@ -17,7 +26,7 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, otp
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp, documents
 from app.db.database import db
 from app.middleware.audit_middleware import AuditLoggingMiddleware
 
@@ -25,15 +34,18 @@ from app.middleware.audit_middleware import AuditLoggingMiddleware
 async def lifespan(app: FastAPI):
     """Application lifespan events"""
     # Run configuration tests on startup
-    run_config_test()
+    try:
+        run_config_test()
+    except Exception as e:
+        print(f"Config test failed (non-critical): {e}")
     
     # Initialize database connection pool
-    print("\n🔌 Initializing database connection pool...")
+    print("\n[*] Initializing database connection pool...")
     try:
         await db.connect()
-        print("✅ Database pool initialized successfully\n")
+        print("[OK] Database pool initialized successfully\n")
     except Exception as e:
-        print(f"❌ Failed to initialize database pool: {e}\n")
+        print(f"[FAIL] Failed to initialize database pool: {e}\n")
         raise
     
     yield

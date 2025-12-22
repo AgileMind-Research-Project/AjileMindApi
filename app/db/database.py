@@ -19,7 +19,7 @@ class Database:
         self.pool: Optional[aiomysql.Pool] = None
     
     async def connect(self):
-        """Create schema connection pool"""
+        """Create schema connection pool and run migrations"""
         try:
             self.pool = await aiomysql.create_pool(
                 host=settings.DB_HOST,
@@ -33,6 +33,19 @@ class Database:
                 autocommit=False
             )
             logger.info(f"Database pool created: {settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}")
+            
+            # Run auto-migrations on startup
+            try:
+                logger.info("Running database auto-migrations...")
+                from app.db.migrations import DatabaseMigration
+                migration_success = await DatabaseMigration.run_migrations(self.pool)
+                if migration_success:
+                    logger.info("[OK] All migrations completed successfully")
+                else:
+                    logger.warning("⚠️ Some migrations may have failed - check logs")
+            except Exception as e:
+                logger.warning(f"⚠️ Migration warning: {e} - Continuing startup...")
+                
         except Exception as e:
             logger.error(f"Failed to create schema pool: {e}")
             raise

@@ -2,12 +2,19 @@
 Document Processing Service
 
 Handles PDF extraction, text chunking, and document processing for RAG system.
+Enhanced with support for date-based document metadata (title, type, body).
+
+Date-Based Document Feature:
+- Documents are indexed by upload_date to enable date-based filtering
+- Each document has metadata: title, type (stand_up_doc, retro_summary, etc.), body
+- Frontend can filter documents by date and display them in dropdown
+- Selected document is sent to vector DB for RAG-based chat context
 """
 
 import os
 import uuid
-from typing import List, Dict, Any, BinaryIO
-from datetime import datetime
+from typing import List, Dict, Any, BinaryIO, Optional
+from datetime import datetime, date
 from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.core.logger import logger
@@ -158,6 +165,80 @@ class DocumentService:
         
         except Exception as e:
             logger.error(f"Failed to process PDF {filename}: {str(e)}", exc_info=True)
+            raise
+    
+    async def process_document_with_metadata(
+        self,
+        file: BinaryIO,
+        filename: str,
+        title: str,
+        document_type: str,
+        user_id: str,
+        tenant_id: str,
+        upload_date: Optional[date] = None
+    ) -> Dict[str, Any]:
+        """
+        Process document with complete metadata for date-based document feature.
+        
+        This is the MAIN method for the date-based document chat feature:
+        - Extracts document text and creates chunks
+        - Returns metadata (title, type, upload_date) along with chunks
+        - Frontend will use upload_date to group documents
+        - Selected documents will be sent to vector DB
+        
+        Args:
+            file: Binary file object (PDF or text)
+            filename: Original filename
+            title: Document title (e.g., "Sprint 15 Standup")
+            document_type: Type of document (stand_up_doc, retro_summary, sprint_notes, etc.)
+            user_id: User uploading the document
+            tenant_id: Tenant ID for isolation
+            upload_date: Date of upload (defaults to today)
+        
+        Returns:
+            Dictionary with document metadata and chunks for vector DB storage
+        """
+        try:
+            document_id = f"doc_{uuid.uuid4().hex[:16]}"
+            upload_date = upload_date or datetime.now().date()
+            
+            logger.info(
+                f"Processing document with metadata: title='{title}', type='{document_type}', "
+                f"date={upload_date}, user={user_id}, tenant={tenant_id}"
+            )
+            
+            # Extract document text (handles PDF)
+            text = await self.extract_text_from_pdf(file, filename)
+            
+            if not text or len(text.strip()) < 10:
+                raise Exception("No meaningful text extracted from document")
+            
+            # Create text chunks for vector database
+            chunks = await self.chunk_text(text, document_id, filename)
+            
+            # Return complete metadata for storage and vector DB
+            result = {
+                "document_id": document_id,
+                "filename": filename,
+                "title": title,
+                "document_type": document_type,
+                "body": text,  # Full document body stored in DB
+                "upload_date": upload_date.isoformat(),
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "total_chunks": len(chunks),
+                "chunks": chunks,
+                "processed_at": datetime.utcnow().isoformat()
+            }
+            
+            logger.info(
+                f"Document processed: {document_id}, chunks={len(chunks)}, date={upload_date}"
+            )
+            
+            return result
+        
+        except Exception as e:
+            logger.error(f"Failed to process document with metadata: {str(e)}", exc_info=True)
             raise
     
     def get_document_stats(self, text: str) -> Dict[str, Any]:
