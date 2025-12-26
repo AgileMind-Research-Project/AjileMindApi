@@ -90,29 +90,55 @@ CREATE TABLE IF NOT EXISTS `projects` (
 -- Stores backlog items for projects
 
   CREATE TABLE IF NOT EXISTS `project_backlog` (
-    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Backlog unique ID created by system',
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY
+        COMMENT 'Backlog unique ID created by system',
 
-    `project_id` BIGINT NOT NULL COMMENT 'Project ID this backlog item belongs to',
-    `name` VARCHAR(255) NOT NULL COMMENT 'Backlog item name / summary',
-    `description` TEXT NULL COMMENT 'Detailed description of the backlog item',
-    `issue_type` VARCHAR(100) NOT NULL COMMENT 'Type: story, feature, change, bug',
-    `status` VARCHAR(100) NOT NULL DEFAULT 'todo' COMMENT 'Current status of the item',
-    `priority` VARCHAR(100) NULL COMMENT 'Priority: high, medium, low',
-    `assignee` VARCHAR(255) NULL COMMENT 'Assigned user/person',
+    `project_id` BIGINT NOT NULL
+        COMMENT 'Project ID this backlog item belongs to',
 
-    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Record creation time',
-    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP 
-        ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update time',
+    `name` VARCHAR(255) NOT NULL
+        COMMENT 'Backlog item name / summary',
+
+    `description` TEXT NULL
+        COMMENT 'Detailed description of the backlog item',
+
+    `issue_type` VARCHAR(100) NOT NULL
+        COMMENT 'Type: story, feature, change, bug',
+
+    `status` VARCHAR(100) NOT NULL DEFAULT 'todo'
+        COMMENT 'Current status: todo, in_progress, done',
+
+    `priority` VARCHAR(100) NULL
+        COMMENT 'Priority: high, medium, low',
+
+    `assignee` VARCHAR(255) NULL
+        COMMENT 'Assigned user/person',
+
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        COMMENT 'Record creation time',
+
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP
+        COMMENT 'Last update time',
 
     -- Indexes
     INDEX `idx_project_id` (`project_id`),
     INDEX `idx_issue_type` (`issue_type`),
     INDEX `idx_status` (`status`),
-    INDEX `idx_priority` (`priority`)
+    INDEX `idx_priority` (`priority`),
+
+    -- Foreign Key
+    CONSTRAINT `fk_backlog_project`
+        FOREIGN KEY (`project_id`)
+        REFERENCES `projects` (`project_id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci
-  COMMENT='Backlog items gathered before project start and new changes/features added later';
+  COMMENT='Backlog items before project start and future changes/features';
+
 
 
 -- ============================================
@@ -124,12 +150,12 @@ CREATE TABLE IF NOT EXISTS `projects` (
 
 -- Project Backlog -> Projects relationship
 -- Ensures backlog items belong to valid projects
-ALTER TABLE `project_backlog`
-    ADD CONSTRAINT `fk_backlog_project`
-    FOREIGN KEY (`project_id`)
-    REFERENCES `projects`(`project_id`)
-    ON UPDATE CASCADE
-    ON DELETE CASCADE;
+-- ALTER TABLE `project_backlog`
+--     ADD CONSTRAINT `fk_backlog_project`
+--     FOREIGN KEY (`project_id`)
+--     REFERENCES `projects`(`project_id`)
+--     ON UPDATE CASCADE
+--     ON DELETE CASCADE;
 
 -- Add future foreign key constraints below following the same pattern:
 -- 
