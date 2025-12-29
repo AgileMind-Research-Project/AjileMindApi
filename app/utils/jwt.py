@@ -132,17 +132,27 @@ def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
         token: JWT access token
     
     Returns:
-        Dictionary with user info including tenant_name or None
+        Dictionary with user info including tenant_name and schema
     """
     payload = verify_token(token, token_type="access")
     
     if payload is None:
         return None
     
+    tenant_name = payload.get("tenant_name")
+    # Generate schema name from tenant name (convert to snake_case)
+    schema = None
+    if tenant_name:
+        # Convert tenant name to schema format (e.g., "Acme Corp" -> "acme_corp")
+        schema = tenant_name.lower().replace(" ", "_")
+    
     return {
         "user_id": payload.get("sub"),
+        "id": payload.get("sub"),  # Add id field for compatibility
         "email": payload.get("email"),
-        "tenant_name": payload.get("tenant_name"),
+        "tenant_name": tenant_name,
+        "schema": schema,  # Add schema field
+        "tenant_schema": schema,  # Add alias for compatibility
         "role": payload.get("role")
     }
 

@@ -24,6 +24,7 @@ USE `{TENANT_DB}`;
 -- ============================================
 -- Stores tenant configuration and metadata
 -- ============================================
+
 CREATE TABLE IF NOT EXISTS `tenant_info` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `domain` VARCHAR(100) UNIQUE NOT NULL COMMENT 'Tenant domain identifier',
@@ -43,6 +44,8 @@ COMMENT='Tenant configuration and metadata';
 -- ============================================ jira_integrations TABLE
 -- Stores Jira account integration details for the tenant
 
+
+
 CREATE TABLE IF NOT EXISTS `jira_integrations` (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `jira_url` VARCHAR(255) NOT NULL COMMENT 'Base URL of Jira instance',
@@ -56,6 +59,29 @@ CREATE TABLE IF NOT EXISTS `jira_integrations` (
     INDEX `idx_api_token` (`api_token`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
 COMMENT='Jira account records and API token validation state';
+
+-- ============================================
+-- DOCUMENTS TABLE
+-- ============================================
+-- Stores documents for RAG-based chatbot
+
+CREATE TABLE IF NOT EXISTS `documents` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `doc_title` VARCHAR(255) NOT NULL COMMENT 'Title of the document',
+    `doc_content` LONGTEXT NOT NULL COMMENT 'Complete document content for RAG context',
+    `uploaded_date` DATE NOT NULL COMMENT 'Date when document was uploaded',
+    `category` VARCHAR(100) COMMENT 'Optional category for document classification',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp',
+    `is_active` BOOLEAN DEFAULT TRUE COMMENT 'Soft delete flag',
+    
+    -- Indexes for performance
+    INDEX `idx_uploaded_date` (`uploaded_date`),
+    INDEX `idx_category` (`category`),
+    INDEX `idx_created_at` (`created_at`),
+    INDEX `idx_is_active` (`is_active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Table for storing documents used in RAG-based chatbot';
 
 -- ============================================ projects TABLE
 -- Stores project details for the tenant
@@ -124,12 +150,12 @@ CREATE TABLE IF NOT EXISTS `projects` (
 
 -- Project Backlog -> Projects relationship
 -- Ensures backlog items belong to valid projects
-ALTER TABLE `project_backlog`
-    ADD CONSTRAINT `fk_backlog_project`
-    FOREIGN KEY (`project_id`)
-    REFERENCES `projects`(`project_id`)
-    ON UPDATE CASCADE
-    ON DELETE CASCADE;
+-- ALTER TABLE `project_backlog`
+--     ADD CONSTRAINT `fk_backlog_project`
+--     FOREIGN KEY (`project_id`)
+--     REFERENCES `projects`(`project_id`)
+--     ON UPDATE CASCADE
+--     ON DELETE CASCADE;
 
 -- Add future foreign key constraints below following the same pattern:
 -- 
@@ -144,3 +170,13 @@ ALTER TABLE `project_backlog`
 -- ============================================
 
 
+-- Migration: Add Documents Table for RAG-based Chatbot
+-- Description: Creates documents table to store document content for RAG (Retrieval Augmented Generation) based chatbot
+-- Date: 2025-12-22
+
+
+
+-- Optional: Add tenant_id if multi-tenancy is needed
+-- ALTER TABLE documents ADD COLUMN tenant_id INT NOT NULL AFTER id;
+-- ALTER TABLE documents ADD FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+-- ALTER TABLE documents ADD INDEX idx_tenant_id (tenant_id);
