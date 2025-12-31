@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS `projects` (
     `project_id` BIGINT NOT NULL
         COMMENT 'Project ID this backlog item belongs to',
 
-    `name` VARCHAR(255) NOT NULL
+    `summary` VARCHAR(255) NOT NULL
         COMMENT 'Backlog item name / summary',
 
     `description` TEXT NULL
@@ -140,33 +140,5 @@ CREATE TABLE IF NOT EXISTS `projects` (
   COMMENT='Backlog items before project start and future changes/features';
 
 
-
--- ============================================
--- FOREIGN KEY CONSTRAINTS
--- ============================================
--- Maintains referential integrity between tables
--- Pattern: ALTER TABLE `child_table` ADD CONSTRAINT `fk_child_parent`
--- ============================================
-
--- Project Backlog -> Projects relationship
--- Ensures backlog items belong to valid projects
--- ALTER TABLE `project_backlog`
---     ADD CONSTRAINT `fk_backlog_project`
---     FOREIGN KEY (`project_id`)
---     REFERENCES `projects`(`project_id`)
---     ON UPDATE CASCADE
---     ON DELETE CASCADE;
-
--- Add future foreign key constraints below following the same pattern:
--- 
--- Example template:
--- Relationship description goes in comment above the ALTER statement
--- ALTER TABLE `child_table`
---     ADD CONSTRAINT `fk_child_parent`
---     FOREIGN KEY (`parent_id`)
---     REFERENCES `parent_table`(`id`)
---     ON UPDATE CASCADE
---     ON DELETE [CASCADE|SET NULL|RESTRICT];
--- ============================================
 
 
