@@ -69,8 +69,9 @@ class DocumentDateResponse(BaseModel):
 
 class ChatQueryRequest(BaseModel):
     """Schema for chatbot query request"""
-    document_id: int = Field(..., description="ID of the document to use as context")
+    document_id: Optional[int] = Field(None, description="ID of the document to use as context. If None, search all documents")
     query: str = Field(..., min_length=1, description="User query for the chatbot")
+    search_all: bool = Field(False, description="If True, search across all documents to find the most relevant one")
 
 
 class ChatQueryResponse(BaseModel):
@@ -80,6 +81,34 @@ class ChatQueryResponse(BaseModel):
     user_query: str
     chatbot_response: str
     timestamp: datetime
+    source_document: Optional[str] = Field(None, description="Name of the document that provided the answer (for multi-doc search)")
+    relevant_sources: List['DocumentSource'] = Field(default_factory=list, description="All relevant documents with excerpts (for multi-doc search)")
+
+
+class DocumentSource(BaseModel):
+    """Schema for a relevant document source with excerpts"""
+    document_id: int
+    document_title: str
+    relevance_score: float
+    relevant_excerpts: List[str] = Field(default_factory=list, description="Relevant text excerpts from this document")
+
+
+class MultiDocChatRequest(BaseModel):
+    """Schema for chatbot query across multiple documents"""
+    query: str = Field(..., min_length=1, description="User query for the chatbot")
+    uploaded_date: Optional[date] = Field(None, description="Optional date filter. If None, search all dates")
+
+
+class MultiDocChatResponse(BaseModel):
+    """Schema for multi-document chatbot response"""
+    document_id: int
+    document_title: str
+    user_query: str
+    chatbot_response: str
+    timestamp: datetime
+    relevance_score: float = Field(0.0, description="Relevance score of the matched document")
+    searched_documents: int = Field(0, description="Number of documents searched")
+    relevant_sources: List[DocumentSource] = Field(default_factory=list, description="All relevant documents with excerpts")
 
 
 class DocumentSearchRequest(BaseModel):

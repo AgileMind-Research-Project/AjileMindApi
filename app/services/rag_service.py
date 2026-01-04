@@ -6,13 +6,14 @@ Features:
 - OpenAI GPT-4 integration
 - Document chunking and context retrieval
 - Semantic search capabilities
+- Multi-document search support
 - Fallback to simple RAG without LLM
 """
 
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from app.core.config import settings
 from app.core.logger import logger
-from app.schemas.document import ChatQueryResponse, DocumentContentResponse
+from app.schemas.document import ChatQueryResponse, DocumentContentResponse, MultiDocChatResponse
 from datetime import datetime
 import re
 from abc import ABC, abstractmethod
@@ -101,6 +102,68 @@ Do not use outside knowledge - only rely on the provided document content."""
         scored_chunks.sort(key=lambda x: x[1], reverse=True)
         return [chunk for chunk, _ in scored_chunks[:top_k]]
     
+    @staticmethod
+    def calculate_document_relevance(
+        content: str,
+        query: str
+    ) -> float:
+        """
+        Calculate relevance score of a document for a query
+        
+        Args:
+            content: Document content
+            query: User query
+            
+        Returns:
+            Relevance score (0.0 to 1.0)
+        """
+        if not content or not query:
+            return 0.0
+        
+        query_words = set(query.lower().split())
+        content_lower = content.lower()
+        
+        # Count matching words
+        matches = sum(1 for word in query_words if word in content_lower)
+        
+        # Calculate score as percentage of matching words
+        if len(query_words) == 0:
+            return 0.0
+        
+        return matches / len(query_words)
+    
+    @staticmethod
+    def find_most_relevant_document(
+        documents: List[DocumentContentResponse],
+        query: str
+    ) -> Tuple[Optional[DocumentContentResponse], float]:
+        """
+        Find the most relevant document for a query from a list of documents
+        
+        Args:
+            documents: List of documents to search
+            query: User query
+            
+        Returns:
+            Tuple of (most relevant document, relevance score)
+        """
+        if not documents:
+            return None, 0.0
+        
+        best_doc = None
+        best_score = 0.0
+        
+        for doc in documents:
+            score = RAGServiceBase.calculate_document_relevance(
+                doc.doc_content if doc.doc_content else "",
+                query
+            )
+            if score > best_score:
+                best_score = score
+                best_doc = doc
+        
+        return best_doc, best_score
+    
     @abstractmethod
     async def generate_response(
         self,
@@ -109,6 +172,54 @@ Do not use outside knowledge - only rely on the provided document content."""
     ) -> ChatQueryResponse:
         """Generate response - to be implemented by subclasses"""
         pass
+    
+    async def generate_response_from_multiple_documents(
+        self,
+        documents: List[DocumentContentResponse],
+        user_query: str
+    ) -> MultiDocChatResponse:
+        """
+        Generate response by searching across multiple documents
+        
+        Args:
+            documents: List of documents to search
+            user_query: User's question
+            
+        Returns:
+            MultiDocChatResponse with answer from most relevant document
+        """
+        if not documents:
+            return MultiDocChatResponse(
+                document_id=0,
+                document_title="No Documents",
+                user_query=user_query,
+                chatbot_response="No documents available to search. Please upload documents first.",
+                timestamp=datetime.utcnow(),
+                relevance_score=0.0,
+                searched_documents=0
+            )
+        
+        # Find the most relevant document
+        best_doc, relevance_score = self.find_most_relevant_document(documents, user_query)
+        
+        if not best_doc or relevance_score == 0.0:
+            # No relevant document found, try to give a general response
+            # Use the first document as fallback
+            best_doc = documents[0]
+            relevance_score = 0.0
+        
+        # Generate response using the best matching document
+        response = await self.generate_response(best_doc, user_query)
+        
+        return MultiDocChatResponse(
+            document_id=response.document_id,
+            document_title=response.document_title,
+            user_query=user_query,
+            chatbot_response=response.chatbot_response,
+            timestamp=datetime.utcnow(),
+            relevance_score=relevance_score,
+            searched_documents=len(documents)
+        )
 
 
 class SimpleRAGService(RAGServiceBase):
