@@ -1,0 +1,4 @@
+# AI Agent Requirements
+llama-cpp-python>=0.2.0
+numpy>=1.20.0
+typing-extensions>=4.5.0
