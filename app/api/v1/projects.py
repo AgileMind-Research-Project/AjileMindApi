@@ -145,7 +145,15 @@ async def create_project(
             start_date=request.start_date,
             end_date=request.end_date,
             description=request.description,
-            template=request.template.value
+            template=request.template.value,
+            sprint_size=request.sprint_size,
+            project_lead=request.project_lead,
+            architecture_type=request.architecture_type.value if request.architecture_type else None,
+            stack_type=request.stack_type.value if request.stack_type else None,
+            frontend_technologies=request.frontend_technologies,
+            backend_technologies=request.backend_technologies,
+            cloud_host=request.cloud_host,
+            budget=request.budget
         )
         
         logger.info(
@@ -330,7 +338,15 @@ async def update_project(
             project_id=project_id,
             project_name=request.project_name,
             start_date=request.start_date,
-            end_date=request.end_date
+            end_date=request.end_date,
+            sprint_size=request.sprint_size,
+            project_lead=request.project_lead,
+            architecture_type=request.architecture_type.value if request.architecture_type else None,
+            stack_type=request.stack_type.value if request.stack_type else None,
+            frontend_technologies=request.frontend_technologies,
+            backend_technologies=request.backend_technologies,
+            cloud_host=request.cloud_host,
+            budget=request.budget
         )
         
         logger.info(
