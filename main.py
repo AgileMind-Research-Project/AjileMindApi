@@ -8,7 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 import sys
+import os
 from pathlib import Path
+
+# Fix Windows console encoding for Unicode characters
+if sys.platform == 'win32':
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
 
 # Add app directory to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -17,7 +24,7 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, documents
 from app.db.database import db
 from app.middleware.audit_middleware import AuditLoggingMiddleware
 from app.core.redis_chat_client import init_redis_chat
@@ -261,6 +268,7 @@ app.include_router(jira.router, prefix=f"{settings.API_PREFIX}/jira", tags=["Jir
 app.include_router(projects.router, prefix=f"{settings.API_PREFIX}/projects", tags=["Projects"])
 app.include_router(backlog.router, prefix=f"{settings.API_PREFIX}/backlog", tags=["Backlog"])
 app.include_router(redis_chat.router, prefix=f"{settings.API_PREFIX}/chat", tags=["Redis Chat"])
+app.include_router(documents.router, prefix=f"{settings.API_PREFIX}/documents", tags=["Documents & RAG Chatbot"])
 # app.include_router(tenants.router, prefix=f"{settings.API_PREFIX}/tenants", tags=["Tenants"])
 
 if __name__ == "__main__":    
