@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.core.logger import logger, log_database_query
 import time
+import pymysql
 
 
 class Database:
@@ -162,3 +163,16 @@ db = Database()
 async def get_db() -> Database:
     """Dependency for FastAPI routes"""
     return db
+
+
+def get_db_connection():
+    """Get synchronous database connection for legacy code"""
+    return pymysql.connect(
+        host=settings.DB_HOST,
+        port=settings.DB_PORT,
+        user=settings.DB_USER,
+        password=settings.DB_PASSWORD,
+        database=settings.DB_NAME,
+        charset='utf8mb4',
+        autocommit=False
+    )
