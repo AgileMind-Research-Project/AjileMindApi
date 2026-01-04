@@ -1,76 +1,106 @@
-# standup_agent.py
-
 from llama_cpp import Llama
 import os
-import time
 import json
 
-# 1. LLM ගොනුවට Path එක සකසන්න
-# ඔබගේ project directory එකේම ගොනුව ඇති බව උපකල්පනය කරයි
-MODEL_FILE_NAME = "modal/mistral-7b-instruct-v0.2.Q4_K_S.gguf"
-MODEL_PATH = os.path.join(os.getcwd(), MODEL_FILE_NAME)
+# --- (Configuration) ---
+MODEL_FOLDER = "models"
+MODEL_FILE = "mistral-7b-instruct-v0.2.Q4_K_S.gguf"
+MODEL_PATH = os.path.join(os.getcwd(), MODEL_FOLDER, MODEL_FILE)
 
+# --- 1. Load The LLM ---
 print(f"Loading Model from: {MODEL_PATH}")
-
-# 2. LLM එක Load කරන්න
-# n_gpu_layers=0: GPU (2GB) භාවිතා නොකර, සම්පූර්ණයෙන්ම CPU/RAM මත ධාවනය වීමට
-# n_ctx: Context window size (input/output) - 2048 සාමාන්‍යයි.
-start_time = time.time()
 try:
     llm = Llama(
         model_path=MODEL_PATH,
-        n_gpu_layers=0,  
-        n_ctx=2048,      
-        verbose=False    # Loading messages පෙන්වන්නේ නැත
+        n_gpu_layers=0, n_ctx=2048, verbose=False
     )
-    load_time = time.time() - start_time
-    print(f"✅ Model Loaded Successfully in {load_time:.2f} seconds.")
+    print("✅ Model Loaded Successfully.")
 except Exception as e:
-    print(f"❌ Error Loading LLM: {e}")
+    print(f"❌ Error Loading Model: {e}")
     exit()
 
-# 3. Few-Shot Prompt එක සකස් කරන්න (JSON Output සඳහා උපදෙස් දෙන්න)
-# මෙහිදී ඔබට ඔබේම Few-Shot උදාහරණ එකතු කළ හැකිය
-STANDUP_PROMPT = f"""
-You are a Standup Analyzer Agent. Your task is to classify a single standup update and output a JSON object.
+# --- 2. Listener Agent Function 
+def analyze_update(text_input):
+    """
 
-Output ONLY the JSON object.
-
-Example 1 (Few-Shot):
-Input: I fixed the bug in the authentication module and started testing.
-Output: {{"category": "TASK", "description": "Fixed auth bug, started testing", "status": "Done"}}
-
-Example 2 (Few-Shot):
-Input: I can't connect to the staging database because the firewall is blocking me. I need IT help.
-Output: {{"category": "BLOCKER", "description": "Firewall blocking access to staging DB", "status": "Waiting for IT"}}
-
----
-INSTRUCTION: Analyze the following update.
-UPDATE: I'll work on the new user registration page UI tomorrow.
-Output: 
-"""
-
-# 4. Agentic Action: LLM වෙත Prompt එක යවන්න
-print("\n--- Sending Prompt to LLM Agent ---")
-try:
-    response_stream = llm(
-        STANDUP_PROMPT,
-        max_tokens=200, 
-        stop=["\n"], # LLM එක JSON එකෙන් පසු නවතී
-        temperature=0.01, # නිරවද්‍යතාවය සඳහා අඩු උෂ්ණත්වයක්
-        echo=False
-    )
+    """
+    prompt = f"""
+    You are a Standup Analyzer. Classify the update into JSON.
     
-    # ප්‍රතිචාරය ලබා ගැනීම
-    llm_output = response_stream["choices"][0]["text"].strip()
+    ### STRICT INSTRUCTIONS:
+    1. Output ONLY valid JSON.
+    2. Use ONLY one of the following categories: ["TASK", "PLAN", "BLOCKER"].
+    3. Do NOT invent new categories like "DEPLOYMENT" or "TESTING". Map them to "TASK".
+
+    Example 1:
+    Input: I deployed the code.
+    Output: {{"category": "TASK", "description": "Deployed the code", "status": "Done"}}
     
-    print("\n✅ LLM Output Received:")
-    print(llm_output)
+    Example 2:
+    Input: I am stuck on the API.
+    Output: {{"category": "BLOCKER", "description": "API issue", "status": "Stuck"}}
     
-    # JSON Parsing පරීක්ෂා කිරීම (Agentic Logic සඳහා වැදගත්)
-    parsed_json = json.loads(llm_output)
-    print("\nParsed JSON Category:", parsed_json.get("category"))
+    ---
+    Input: {text_input}
+    Output:
+    """
     
-except Exception as e:
-    print(f"\n❌ LLM Inference Error: {e}")
-    print("This might be due to incorrect JSON output or slow CPU.")
+    try:
+        response = llm(prompt, max_tokens=256, stop=["}"], temperature=0.01, echo=False)
+        output_text = response["choices"][0]["text"].strip()
+        
+        if not output_text.endswith("}"):
+            output_text += "}"
+            
+        start_idx = output_text.find("{")
+        if start_idx != -1:
+            output_text = output_text[start_idx:]
+            
+        return json.loads(output_text)
+    except Exception as e:
+        print(f"❌ Analysis Error: {e}")
+        return None
+
+# --- 3. Mock Tools --
+
+def tool_update_jira(task_details):
+    print(f"\n[🔨 ACTION: JIRA] Creating new Jira Ticket...")
+    print(f"   └── Summary: {task_details.get('description')}")
+    print(f"   └── Status:  {task_details.get('status')}")
+    print("   ✅ Jira Updated Successfully (Mock).")
+
+def tool_resolve_blocker(blocker_details):
+    print(f"\n[🚨 ACTION: BLOCKER RESOLVER] Critical Issue Detected!")
+    print(f"   └── Issue: {blocker_details.get('description')}")
+    print("   🔍 Searching Knowledge Base for solutions...")
+    print("   💡 Suggestion: Check the 'Auth Middleware' documentation or ask Senior Dev 'Chamara'.")
+
+# --- 4. The Orchestrator ---
+def run_agentic_flow(user_input):
+    print(f"\n🗣️ User says: '{user_input}'")
+    print("   ... Analyzing ...")
+    
+    # 1. Listener Agent
+    result = analyze_update(user_input)
+    
+    if result:
+        category = result.get("category")
+        print(f"   🎯 Detected Category: {category}")
+        
+        # 2. Decision Logic
+        if category == "TASK" or category == "PLAN":
+            tool_update_jira(result)
+        elif category == "BLOCKER":
+            tool_resolve_blocker(result)
+        else:
+            print("   ℹ️ No specific action required.")
+    else:
+        print("   ❌ Failed to analyze input.")
+
+# --- 5. Main Execution Loop ---
+if __name__ == "__main__":
+    # Test Case 1: Normal Progress 
+    run_agentic_flow("I successfully deployed the frontend to the dev server.")
+    
+    # Test Case 2: බාධකයක් (Blocker)
+    run_agentic_flow("I can't proceed because the database connection is timing out.")

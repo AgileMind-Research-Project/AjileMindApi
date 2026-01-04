@@ -114,7 +114,7 @@ SMTP_FROM_NAME=AgileMind Platform
 
 # Application Configuration
 API_V1_PREFIX=/api/v1
-BACKEND_CORS_ORIGINS=["http://localhost:3008","http://localhost:3000"]
+BACKEND_CORS_ORIGINS=["http://localhost:9999","http://localhost:3000"]
 PROJECT_NAME=AgileMind API
 DEBUG=True
 ```
@@ -356,14 +356,14 @@ agile-mind-backend/
    python main.py
    ```
 
-2. **Start Frontend Server** (Port 3008)
+2. **Start Frontend Server** (Port 9999)
    ```bash
    cd ../agile-mind-frontend
    npm run dev
    ```
 
 3. **Open Browser**
-   - Frontend: http://localhost:3008
+   - Frontend: http://localhost:9999
    - Backend API Docs: http://localhost:5000/api/docs
 
 ---

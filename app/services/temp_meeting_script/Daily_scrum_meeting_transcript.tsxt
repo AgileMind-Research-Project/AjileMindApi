@@ -1,0 +1,98 @@
+📄 Daily Scrum Meeting Transcript – Microsoft Teams Style
+
+Project: HRM Enterprise Platform
+Sprint: 12
+Sprint Day: 07
+Date: 2025-02-17
+Time: 09:30 AM – 09:47 AM
+Duration: 17 minutes
+Meeting Type: Daily Scrum
+Organizer: John Silva (Project Manager)
+Participants: PM, QA, 10 Developers
+
+[09:30 AM] PM – John Silva:
+
+Good morning, everyone. Let’s begin the Daily Scrum.
+Please follow the standard format: Yesterday, Today, Blockers, with Ticket IDs.
+Starting with Dev1.
+
+[09:31 AM] Dev1 – Ayesha:
+
+Yesterday (HRM-214): Integrated Employee List API and completed response mapping.
+Today (HRM-228): Implementing pagination + sorting on Employee UI.
+Blockers: None.
+
+[09:32 AM] Dev2 – Kamal:
+
+Yesterday (HRM-199): Added MongoDB indexes for announcement search optimization.
+Today (HRM-231): Developing department/designation filters for announcements.
+Blockers: None.
+
+[09:33 AM] Dev3 – Nipun:
+
+Yesterday (HRM-245): Fixed Admin Dashboard UI layout inconsistencies.
+Today (HRM-259): Creating notification badge component with unread count.
+Blockers: Waiting for updated /notifications API response from backend (HRM-BE-52).
+
+[09:34 AM] Dev4 – Shehani:
+
+Yesterday (HRM-226): Built reusable modal component (AntD + MUI hybrid).
+Today (HRM-238): Integrating modal into Announcement Create Form.
+Blockers: None.
+
+[09:35 AM] Dev5 – Ravindu:
+
+Yesterday (HRM-207): Completed session validation + token refresh on login page.
+Today (HRM-260): Implementing role-based protected routes (Admin, Teacher, Parent).
+Blockers: None.
+
+[09:36 AM] Dev6 – Hashan:
+
+Yesterday (HRM-233): Developed backend service for assignment file uploads.
+Today (HRM-240): Adding file-size + file-type validation rules.
+Blockers: Need confirmation on max upload size requirement from PM.
+
+[09:37 AM] Dev7 – Sanduni:
+
+Yesterday (HRM-254): Created UI draft for Teacher Performance Report.
+Today (HRM-269): Binding performance data API to the UI.
+Blockers: Missing fields avgScore and attendanceRate in BE API (HRM-BE-61).
+
+[09:38 AM] Dev8 – Isuru:
+
+Yesterday (HRM-222): Implemented Student Attendance Calendar UI.
+Today (HRM-277): Adding present/absent color indicators + tooltip.
+Blockers: None.
+
+[09:39 AM] Dev9 – Tharindu:
+
+Yesterday (HRM-202): Started Student Profile Edit Module.
+Today (HRM-263): Connecting profile module with MongoDB + validation schema.
+Blockers: None.
+
+[09:40 AM] Dev10 – Dinithi:
+
+Yesterday (HRM-249): Configured WebSocket server for real-time announcements.
+Today (HRM-280): Testing department-based notification delivery using Socket.io.
+Blockers: Waiting for performance testing results from infra team.
+
+[09:41 AM] QA – Melissa:
+
+Yesterday (HRM-QA-112): Completed regression tests for Admin Login & Dashboard widgets.
+Today (HRM-QA-121): Testing announcement creation, notification triggers, and delivery flow.
+Blockers: Need sample admin/teacher roles data from Dev5 for permission test cases.
+
+[09:43 AM] PM – John Silva:
+
+Updates acknowledged.
+
+API team will fix missing fields for HRM-BE-61 today.
+
+Dev5, please provide QA with sample roles.
+No other critical issues identified.
+
+[09:45 AM] PM – John Silva:
+
+This concludes the Daily Scrum.
+Next meeting: Tomorrow, same time.
+Thank you, everyone.
