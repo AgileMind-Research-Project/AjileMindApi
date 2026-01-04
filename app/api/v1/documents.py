@@ -19,7 +19,9 @@ from app.schemas.document import (
 from app.services.document_service import document_service
 from app.services.rag_service import get_rag_service  # Lazily create RAG service on first use
 from app.core.logger import logger
-from app.api.v1.auth import get_current_user_from_token
+from app.utils.jwt import get_current_user_from_token
+from app.db.database import get_db, Database
+from fastapi import status
 
 # Create router
 router = APIRouter(
@@ -767,6 +769,58 @@ async def extract_text_from_docx(content: bytes) -> str:
     except Exception as e:
         logger.error(f"DOCX extraction error: {e}")
         return ""
+
+
+@router.delete(
+    "/{document_id}",
+    summary="Delete document",
+    description="Delete a document by ID"
+)
+async def delete_document(
+    document_id: int,
+    current_user: dict = Depends(get_current_user_from_token),
+    db: Database = Depends(get_db)
+):
+    """Delete a document"""
+    try:
+        # Get tenant schema from user
+        tenant_schema = current_user.get("tenant_schema", "gmail")
+        
+        # Check if document exists and belongs to user's tenant
+        query = f"""
+            SELECT id FROM {tenant_schema}.documents 
+            WHERE id = %s
+        """
+        result = await db.execute_query(query, (document_id,), fetch_one=True)
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Document with ID {document_id} not found"
+            )
+        
+        # Delete the document
+        delete_query = f"""
+            DELETE FROM {tenant_schema}.documents 
+            WHERE id = %s
+        """
+        await db.execute_query(delete_query, (document_id,), commit=True)
+        
+        logger.info(f"Document {document_id} deleted successfully")
+        
+        return {
+            "message": "Document deleted successfully",
+            "document_id": document_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting document: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting document: {str(e)}"
+        )
 
 
 @router.get(
