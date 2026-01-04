@@ -31,7 +31,15 @@ class ProjectService:
         start_date: date,
         end_date: date,
         description: Optional[str] = None,
-        template: str = "com.pyxis.greenhopper.jira:gh-scrum-template"
+        template: str = "com.pyxis.greenhopper.jira:gh-scrum-template",
+        sprint_size: Optional[int] = None,
+        project_lead: Optional[str] = None,
+        architecture_type: Optional[str] = None,
+        stack_type: Optional[str] = None,
+        frontend_technologies: Optional[List[str]] = None,
+        backend_technologies: Optional[List[str]] = None,
+        cloud_host: Optional[str] = None,
+        budget: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Create a project in Jira first, then save to database.
@@ -119,7 +127,15 @@ class ProjectService:
                 key=key,
                 project_type=project_type,
                 start_date=start_date,
-                end_date=end_date
+                end_date=end_date,
+                sprint_size=sprint_size,
+                project_lead=project_lead,
+                architecture_type=architecture_type,
+                stack_type=stack_type,
+                frontend_technologies=frontend_technologies,
+                backend_technologies=backend_technologies,
+                cloud_host=cloud_host,
+                budget=budget
             )
             
             logger.info(f"✅ Project saved to database successfully: {db_project}")
@@ -212,7 +228,15 @@ class ProjectService:
         project_id: int,
         project_name: Optional[str] = None,
         start_date: Optional[date] = None,
-        end_date: Optional[date] = None
+        end_date: Optional[date] = None,
+        sprint_size: Optional[int] = None,
+        project_lead: Optional[str] = None,
+        architecture_type: Optional[str] = None,
+        stack_type: Optional[str] = None,
+        frontend_technologies: Optional[List[str]] = None,
+        backend_technologies: Optional[List[str]] = None,
+        cloud_host: Optional[str] = None,
+        budget: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Update project details.
@@ -242,7 +266,15 @@ class ProjectService:
             project_id=project_id,
             project_name=project_name,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            sprint_size=sprint_size,
+            project_lead=project_lead,
+            architecture_type=architecture_type,
+            stack_type=stack_type,
+            frontend_technologies=frontend_technologies,
+            backend_technologies=backend_technologies,
+            cloud_host=cloud_host,
+            budget=budget
         )
         
         # Return updated project

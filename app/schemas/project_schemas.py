@@ -24,6 +24,24 @@ class ProjectTemplate(str, Enum):
     CLASSIC = "com.atlassian.jira-core-project-templates:jira-core-project-management"
 
 
+class ArchitectureType(str, Enum):
+    """Project architecture patterns"""
+    MONOLITHIC = "Monolithic"
+    MICROSERVICES = "Microservices"
+    SERVERLESS = "Serverless"
+    EVENT_DRIVEN = "Event-Driven"
+    LAYERED = "Layered"
+    MODULAR = "Modular"
+    OTHER = "Other"
+
+
+class StackType(str, Enum):
+    """Application stack types"""
+    FRONTEND = "Frontend"
+    BACKEND = "Backend"
+    FULLSTACK = "Fullstack"
+
+
 class CreateProjectRequest(BaseModel):
     """Request model for creating a new project"""
     project_name: str = Field(
@@ -55,6 +73,50 @@ class CreateProjectRequest(BaseModel):
         description="Project template (Scrum, Kanban, Classic)"
     )
     
+    # Project Management Metadata
+    sprint_size: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Sprint duration in weeks"
+    )
+    project_lead: Optional[str] = Field(
+        None,
+        max_length=255,
+        description="Project lead name or email"
+    )
+    
+    # Architecture and Stack Information
+    architecture_type: Optional[ArchitectureType] = Field(
+        None,
+        description="Project architecture pattern"
+    )
+    stack_type: Optional[StackType] = Field(
+        None,
+        description="Application stack type (Frontend, Backend, Fullstack)"
+    )
+    
+    # Technology Stack (separated by frontend/backend based on stack_type)
+    frontend_technologies: Optional[List[str]] = Field(
+        None,
+        description="Frontend technologies, frameworks, and languages"
+    )
+    backend_technologies: Optional[List[str]] = Field(
+        None,
+        description="Backend technologies, frameworks, and languages"
+    )
+    
+    # Infrastructure
+    cloud_host: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Cloud hosting provider (e.g., AWS, Azure, GCP)"
+    )
+    budget: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Project budget"
+    )
+    
     @validator('end_date')
     def validate_end_date(cls, v, values):
         """Validate that end date is after start date"""
@@ -80,7 +142,14 @@ class CreateProjectRequest(BaseModel):
                 "start_date": "2025-01-01",
                 "end_date": "2025-12-31",
                 "description": "Scrum project for development team",
-                "template": "com.pyxis.greenhopper.jira:gh-scrum-template"
+                "template": "com.pyxis.greenhopper.jira:gh-scrum-template",
+                "sprint_size": 2,
+                "project_lead": "john.doe@example.com",
+                "architecture_type": "Microservices",
+                "stack_type": "Fullstack",
+                "frontend_technologies": ["React", "TypeScript", "TailwindCSS"],
+                "backend_technologies": ["Node.js", "Express", "MongoDB"],
+                "cloud_host": "AWS"
             }
         }
 
@@ -93,6 +162,14 @@ class ProjectResponse(BaseModel):
     project_type: str
     start_date: date
     end_date: date
+    sprint_size: Optional[int] = None
+    project_lead: Optional[str] = None
+    architecture_type: Optional[str] = None
+    stack_type: Optional[str] = None
+    frontend_technologies: Optional[List[str]] = None
+    backend_technologies: Optional[List[str]] = None
+    cloud_host: Optional[str] = None
+    budget: Optional[float] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     jira_url: Optional[str] = None
@@ -125,6 +202,14 @@ class UpdateProjectRequest(BaseModel):
     project_name: Optional[str] = Field(None, min_length=1, max_length=255)
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    sprint_size: Optional[int] = Field(None, ge=1)
+    project_lead: Optional[str] = Field(None, max_length=255)
+    architecture_type: Optional[ArchitectureType] = None
+    stack_type: Optional[StackType] = None
+    frontend_technologies: Optional[List[str]] = None
+    backend_technologies: Optional[List[str]] = None
+    cloud_host: Optional[str] = Field(None, max_length=100)
+    budget: Optional[float] = Field(None, ge=0)
     
     @validator('end_date')
     def validate_dates(cls, v, values):

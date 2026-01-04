@@ -68,6 +68,21 @@ CREATE TABLE IF NOT EXISTS `projects` (
     `start_date` DATE NOT NULL COMMENT 'Project start date',
     `end_date` DATE NOT NULL COMMENT 'Project end date',
 
+    -- Project Management Metadata
+    `sprint_size` INT NULL COMMENT 'Sprint duration in weeks (typically 1-4)',
+    `project_lead` VARCHAR(255) NULL COMMENT 'Project lead name or email',
+
+    -- Architecture and Stack Information
+    `architecture_type` ENUM('Monolithic', 'Microservices', 'Serverless', 'Event-Driven', 'Layered', 'Modular', 'Other') NULL COMMENT 'Project architecture pattern',
+    `stack_type` ENUM('Frontend', 'Backend', 'Fullstack') NULL COMMENT 'Application stack type',
+    
+    -- Technology Stack (separated by frontend/backend based on stack_type)
+    `frontend_technologies` JSON NULL COMMENT 'Frontend technologies, frameworks, and languages (e.g., ["React", "TypeScript", "TailwindCSS"])',
+    `backend_technologies` JSON NULL COMMENT 'Backend technologies, frameworks, and languages (e.g., ["Node.js", "Express", "MongoDB"])',
+    
+    -- Infrastructure
+    `cloud_host` VARCHAR(100) NULL COMMENT 'Cloud hosting provider (e.g., AWS, Azure, GCP, DigitalOcean)',
+    `budget` DECIMAL(12,2) NULL COMMENT 'Project budget',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP 
         ON UPDATE CURRENT_TIMESTAMP,
@@ -80,7 +95,13 @@ CREATE TABLE IF NOT EXISTS `projects` (
     INDEX `idx_project_name` (`project_name`),
     INDEX `idx_project_key` (`key`),
     INDEX `idx_start_date` (`start_date`),
-    INDEX `idx_end_date` (`end_date`)
+    INDEX `idx_end_date` (`end_date`),
+    
+    -- Indexes for new columns
+    INDEX `idx_project_lead` (`project_lead`),
+    INDEX `idx_architecture_type` (`architecture_type`),
+    INDEX `idx_stack_type` (`stack_type`),
+    INDEX `idx_cloud_host` (`cloud_host`)
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci
@@ -90,8 +111,8 @@ CREATE TABLE IF NOT EXISTS `projects` (
 -- Stores backlog items for projects
 
   CREATE TABLE IF NOT EXISTS `project_backlog` (
-    `id` BIGINT AUTO_INCREMENT PRIMARY KEY
-        COMMENT 'Backlog unique ID created by system',
+    `id` VARCHAR(128) NOT NULL PRIMARY KEY
+        COMMENT 'Backlog unique ID created by jira',
 
     `project_id` BIGINT NOT NULL
         COMMENT 'Project ID this backlog item belongs to',
@@ -113,6 +134,8 @@ CREATE TABLE IF NOT EXISTS `projects` (
 
     `assignee` VARCHAR(255) NULL
         COMMENT 'Assigned user/person',
+    `tags` JSON DEFAULT NULL
+        COMMENT 'Tags associated with the backlog item',
 
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         COMMENT 'Record creation time',
@@ -139,6 +162,47 @@ CREATE TABLE IF NOT EXISTS `projects` (
   COLLATE=utf8mb4_unicode_ci
   COMMENT='Backlog items before project start and future changes/features';
 
+
+CREATE TABLE IF NOT EXISTS `project_backlog_priority` (
+    `project_id` BIGINT NOT NULL
+        COMMENT 'Project ID this backlog item belongs to',
+
+    `backlog_id` VARCHAR(128) NOT NULL
+        COMMENT 'Backlog item ID (from project_backlog)',
+
+    `rank` INT NOT NULL
+        COMMENT 'Priority rank (1 = highest priority)',
+
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        COMMENT 'Record creation time',
+
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP
+        COMMENT 'Last update time',
+
+    -- Primary Key (Composite)
+    PRIMARY KEY (`project_id`, `backlog_id`),
+
+    -- Indexes
+    INDEX `idx_project_rank` (`project_id`, `rank`),
+
+    -- Foreign Keys
+    CONSTRAINT `fk_priority_project`
+        FOREIGN KEY (`project_id`)
+        REFERENCES `projects` (`project_id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT `fk_priority_backlog`
+        FOREIGN KEY (`backlog_id`)
+        REFERENCES `project_backlog` (`id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Priority ranking of backlog items per project';
 
 
 
