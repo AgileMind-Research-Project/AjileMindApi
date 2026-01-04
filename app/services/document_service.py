@@ -51,6 +51,52 @@ class DocumentService:
             raise
     
     @staticmethod
+    async def get_all_documents_content(schema: str, limit: int = 100) -> List[DocumentContentResponse]:
+        """
+        Fetch all documents with content for multi-document RAG search
+        
+        Args:
+            schema: Database schema name
+            limit: Maximum number of documents to fetch
+            
+        Returns:
+            List of documents with content
+        """
+        try:
+            query = """
+                SELECT id, doc_title, doc_content, uploaded_date, category
+                FROM documents
+                WHERE is_active = TRUE
+                ORDER BY created_at DESC
+                LIMIT %s
+            """
+            
+            results = await db.execute_query(
+                query,
+                (limit,),
+                fetch_all=True,
+                schema=schema
+            )
+            
+            if not results:
+                return []
+            
+            return [
+                DocumentContentResponse(
+                    id=row['id'],
+                    doc_title=row['doc_title'],
+                    doc_content=row['doc_content'],
+                    uploaded_date=row['uploaded_date'],
+                    category=row['category']
+                )
+                for row in results
+            ]
+            
+        except Exception as e:
+            logger.error(f"Error fetching all documents content: {e}")
+            raise
+    
+    @staticmethod
     async def get_unique_dates(schema: str) -> List[DocumentDateResponse]:
         """
         Fetch all unique uploaded dates with document counts
@@ -86,6 +132,57 @@ class DocumentService:
             
         except Exception as e:
             logger.error(f"Error fetching unique dates: {e}")
+            raise
+    
+    @staticmethod
+    async def get_documents_by_date_with_content(
+        uploaded_date: date,
+        schema: str,
+        limit: int = 100
+    ) -> List[DocumentContentResponse]:
+        """
+        Fetch documents with content for a specific date (for multi-doc RAG search)
+        
+        Args:
+            uploaded_date: Date to filter documents
+            schema: Database schema name
+            limit: Maximum number of results
+            
+        Returns:
+            List of documents with content on the specified date
+        """
+        try:
+            query = """
+                SELECT id, doc_title, doc_content, uploaded_date, category
+                FROM documents
+                WHERE uploaded_date = %s AND is_active = TRUE
+                ORDER BY created_at DESC
+                LIMIT %s
+            """
+            
+            results = await db.execute_query(
+                query,
+                (uploaded_date, limit),
+                fetch_all=True,
+                schema=schema
+            )
+            
+            if not results:
+                return []
+            
+            return [
+                DocumentContentResponse(
+                    id=row['id'],
+                    doc_title=row['doc_title'],
+                    doc_content=row['doc_content'],
+                    uploaded_date=row['uploaded_date'],
+                    category=row['category']
+                )
+                for row in results
+            ]
+            
+        except Exception as e:
+            logger.error(f"Error fetching documents by date with content: {e}")
             raise
     
     @staticmethod

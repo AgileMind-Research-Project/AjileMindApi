@@ -14,7 +14,7 @@ from app.schemas.document import (
     DocumentCreate, DocumentResponse, DocumentListResponse,
     DocumentContentResponse, DocumentDateResponse,
     ChatQueryRequest, ChatQueryResponse, DocumentSearchRequest,
-    DocumentSearchResponse
+    DocumentSearchResponse, MultiDocChatRequest, MultiDocChatResponse
 )
 from app.services.document_service import document_service
 from app.services.rag_service import get_rag_service  # Lazily create RAG service on first use
@@ -26,7 +26,6 @@ router = APIRouter(
     tags=["documents"],
     responses={404: {"description": "Not found"}},
 )
-
 
 # ==================== Document Management Endpoints ====================
 
@@ -301,17 +300,18 @@ async def get_document_content(
     "/chat",
     response_model=ChatQueryResponse,
     summary="Chat with document using RAG",
-    description="Send a query and get response based on selected document content"
+    description="Send a query and get response based on selected document content. If document_id is not provided and search_all is True, searches all documents."
 )
 async def chat_with_document(
     query: ChatQueryRequest,
     current_user: dict = Depends(get_current_user_from_token)
 ):
     """
-    Query the chatbot for a specific document
+    Query the chatbot for a specific document or search all documents
     
-    - **document_id**: ID of the document to use as context
+    - **document_id**: ID of the document to use as context (optional if search_all is True)
     - **query**: The user's question
+    - **search_all**: If True, search across all documents
     
     Returns chatbot response based on document content
     """
@@ -324,7 +324,42 @@ async def chat_with_document(
                 detail="User schema not found"
             )
         
-        # Fetch document content
+        # If search_all is True or document_id is not provided, search all documents
+        if query.search_all or query.document_id is None:
+            # Use multi-document search
+            documents = await document_service.get_all_documents_content(schema, limit=100)
+            
+            if not documents:
+                from datetime import datetime as dt
+                return ChatQueryResponse(
+                    document_id=0,
+                    document_title="No Documents",
+                    user_query=query.query,
+                    chatbot_response="No documents available to search. Please upload documents first.",
+                    timestamp=dt.utcnow(),
+                    source_document=None
+                )
+            
+            # Generate response using RAG with multiple documents
+            rag = get_rag_service()
+            multi_response = await rag.generate_response_from_multiple_documents(documents, query.query)
+            
+            logger.info(
+                f"Multi-doc chatbot response generated, searched {multi_response.searched_documents} documents "
+                f"for user {current_user.get('id')}"
+            )
+            
+            # Convert to ChatQueryResponse
+            return ChatQueryResponse(
+                document_id=multi_response.document_id,
+                document_title=multi_response.document_title,
+                user_query=multi_response.user_query,
+                chatbot_response=multi_response.chatbot_response,
+                timestamp=multi_response.timestamp,
+                source_document=f"Found in: {multi_response.document_title} (searched {multi_response.searched_documents} documents)"
+            )
+        
+        # Single document search
         document = await document_service.get_document_content(query.document_id, schema)
         
         if not document:
@@ -337,14 +372,13 @@ async def chat_with_document(
         if not document.doc_content or len(document.doc_content.strip()) < 10:
             logger.warning(f"Document {query.document_id} has no content or too short")
             # Return a helpful response instead of error
-            from app.schemas.document import ChatQueryResponse
-            from datetime import datetime
+            from datetime import datetime as dt
             return ChatQueryResponse(
                 document_id=document.id,
                 document_title=document.doc_title or "Unknown",
                 user_query=query.query,
                 chatbot_response=f"The document '{document.doc_title}' appears to be empty or has insufficient content for analysis. Please upload a document with text content.",
-                timestamp=datetime.utcnow()
+                timestamp=dt.utcnow()
             )
         
         logger.debug(f"Processing chat for document {query.document_id}, content length: {len(document.doc_content)}")
@@ -364,6 +398,76 @@ async def chat_with_document(
         raise he
     except Exception as e:
         logger.error(f"Error generating chatbot response: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error generating chatbot response"
+        )
+
+
+@router.post(
+    "/chat/all",
+    response_model=MultiDocChatResponse,
+    summary="Chat across all documents using RAG",
+    description="Search across all documents to find the most relevant one and answer the query"
+)
+async def chat_with_all_documents(
+    query: MultiDocChatRequest,
+    current_user: dict = Depends(get_current_user_from_token)
+):
+    """
+    Query the chatbot across all documents
+    
+    - **query**: The user's question
+    - **uploaded_date**: Optional date filter (None = search all dates)
+    
+    Returns chatbot response from the most relevant document
+    """
+    try:
+        schema = current_user.get("schema") or current_user.get("tenant_schema")
+        
+        if not schema:
+            raise HTTPException(
+                status_code=400,
+                detail="User schema not found"
+            )
+        
+        # Fetch all documents (optionally filtered by date)
+        if query.uploaded_date:
+            # Get documents for specific date but with content
+            documents = await document_service.get_documents_by_date_with_content(
+                query.uploaded_date, schema, limit=100
+            )
+        else:
+            # Get all documents
+            documents = await document_service.get_all_documents_content(schema, limit=100)
+        
+        if not documents:
+            from datetime import datetime
+            return MultiDocChatResponse(
+                document_id=0,
+                document_title="No Documents",
+                user_query=query.query,
+                chatbot_response="No documents available to search. Please upload documents first.",
+                timestamp=datetime.utcnow(),
+                relevance_score=0.0,
+                searched_documents=0
+            )
+        
+        # Generate response using RAG with multiple documents
+        rag = get_rag_service()
+        response = await rag.generate_response_from_multiple_documents(documents, query.query)
+        
+        logger.info(
+            f"Multi-doc chatbot response generated, searched {response.searched_documents} documents "
+            f"for user {current_user.get('id')}"
+        )
+        
+        return response
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error generating multi-doc chatbot response: {e}")
         raise HTTPException(
             status_code=500,
             detail="Error generating chatbot response"
