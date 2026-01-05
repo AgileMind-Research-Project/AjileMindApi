@@ -241,4 +241,47 @@ CREATE TABLE IF NOT EXISTS `project_backlog_priority` (
 -- Optional: Add tenant_id if multi-tenancy is needed
 -- ALTER TABLE documents ADD COLUMN tenant_id INT NOT NULL AFTER id;
 -- ALTER TABLE documents ADD FOREIGN KEY (tenant_id) REFERENCES tenants(id);
--- ALTER TABLE documents ADD INDEX idx_tenant_id (tenant_id);
+
+-- ============================================
+-- MEETINGS TABLE
+-- ============================================
+-- Stores meeting records for the tenant
+CREATE TABLE IF NOT EXISTS `meetings` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `meeting_id` VARCHAR(50) NOT NULL UNIQUE COMMENT 'Unique meeting identifier (UUID)',
+    `project_id` BIGINT NULL COMMENT 'Associated project ID (optional)',
+    `title` VARCHAR(255) NOT NULL COMMENT 'Meeting title',
+    `description` TEXT NULL COMMENT 'Meeting agenda or description',
+    
+    -- Schedule
+    `date` DATE NOT NULL COMMENT 'Meeting date',
+    `start_time` TIME NOT NULL COMMENT 'Start time',
+    `end_time` TIME NOT NULL COMMENT 'End time',
+    
+    -- Status & Type
+    `status` ENUM('SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') DEFAULT 'SCHEDULED',
+    `category` VARCHAR(100) DEFAULT 'Daily Meeting' COMMENT 'Meeting category (e.g., Daily, Sprint Planning)',
+    
+    -- Content
+    `meeting_transcript` LONGTEXT NULL COMMENT 'AI generated or manual transcript',
+    `recording_url` VARCHAR(500) NULL COMMENT 'Link to meeting recording',
+    
+    -- Metadata
+    `created_by` VARCHAR(100) NULL COMMENT 'User ID who created the meeting',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    -- Indexes
+    INDEX `idx_project_id` (`project_id`),
+    INDEX `idx_date` (`date`),
+    INDEX `idx_status` (`status`),
+    INDEX `idx_category` (`category`),
+
+    -- Foreign Key
+    CONSTRAINT `fk_meetings_project`
+        FOREIGN KEY (`project_id`)
+        REFERENCES `projects` (`project_id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Meeting records and schedules';
+
