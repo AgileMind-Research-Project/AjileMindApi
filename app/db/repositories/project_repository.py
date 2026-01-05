@@ -27,6 +27,7 @@ class ProjectRepository:
         end_date: date,
         sprint_size: Optional[int] = None,
         project_lead: Optional[str] = None,
+        project_manager: Optional[List[str]] = None,
         architecture_type: Optional[str] = None,
         stack_type: Optional[str] = None,
         frontend_technologies: Optional[List[str]] = None,
@@ -63,23 +64,24 @@ class ProjectRepository:
             # Serialize technology lists to JSON
             frontend_tech_json = json.dumps(frontend_technologies) if frontend_technologies else None
             backend_tech_json = json.dumps(backend_technologies) if backend_technologies else None
+            project_manager_json = json.dumps(project_manager) if project_manager else None
             
             query = """
                 INSERT INTO projects (
                     project_id, project_name, `key`, project_type, 
                     start_date, end_date,
-                    sprint_size, project_lead, architecture_type, stack_type,
+                    sprint_size, project_lead, project_manager, architecture_type, stack_type,
                     frontend_technologies, backend_technologies, cloud_host, budget,
                     created_at, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             """
             
             await self.db.execute_query(
                 query,
                 (
                     project_id, project_name, key, project_type, start_date, end_date,
-                    sprint_size, project_lead, architecture_type, stack_type,
+                    sprint_size, project_lead, project_manager_json, architecture_type, stack_type,
                     frontend_tech_json, backend_tech_json, cloud_host, budget
                 ),
                 commit=True,
@@ -115,7 +117,7 @@ class ProjectRepository:
                 SELECT 
                     project_id, project_name, `key`, project_type,
                     start_date, end_date,
-                    sprint_size, project_lead, architecture_type, stack_type,
+                    sprint_size, project_lead, project_manager, architecture_type, stack_type,
                     frontend_technologies, backend_technologies, cloud_host, budget,
                     created_at, updated_at
                 FROM projects
@@ -143,6 +145,12 @@ class ProjectRepository:
                         result['backend_technologies'] = json.loads(result['backend_technologies'])
                     except:
                         result['backend_technologies'] = None
+                
+                if result.get('project_manager'):
+                    try:
+                        result['project_manager'] = json.loads(result['project_manager'])
+                    except:
+                        result['project_manager'] = None
             
             return result
             
@@ -249,7 +257,7 @@ class ProjectRepository:
                 SELECT 
                     project_id, project_name, `key`, project_type,
                     start_date, end_date,
-                    sprint_size, project_lead, architecture_type, stack_type,
+                    sprint_size, project_lead, project_manager, architecture_type, stack_type,
                     frontend_technologies, backend_technologies, cloud_host, budget,
                     created_at, updated_at
                 FROM projects
@@ -279,6 +287,12 @@ class ProjectRepository:
                             project['backend_technologies'] = json.loads(project['backend_technologies'])
                         except:
                             project['backend_technologies'] = None
+                    
+                    if project.get('project_manager'):
+                        try:
+                            project['project_manager'] = json.loads(project['project_manager'])
+                        except:
+                            project['project_manager'] = None
             
             # Get total count
             count_query = "SELECT COUNT(*) as total FROM projects"
@@ -305,6 +319,7 @@ class ProjectRepository:
         end_date: Optional[date] = None,
         sprint_size: Optional[int] = None,
         project_lead: Optional[str] = None,
+        project_manager: Optional[List[str]] = None,
         architecture_type: Optional[str] = None,
         stack_type: Optional[str] = None,
         frontend_technologies: Optional[List[str]] = None,
@@ -359,6 +374,10 @@ class ProjectRepository:
             if project_lead is not None:
                 update_fields.append("project_lead = %s")
                 params.append(project_lead)
+            
+            if project_manager is not None:
+                update_fields.append("project_manager = %s")
+                params.append(json.dumps(project_manager) if project_manager else None)
             
             if architecture_type is not None:
                 update_fields.append("architecture_type = %s")
