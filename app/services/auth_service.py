@@ -242,12 +242,13 @@ class AuthService:
         # Update last login
         await self.tenant_user_repo.update_last_login(table_name, user["user_id"])
         
-        # Generate tokens with domain only
+        # Generate tokens with domain and projects
         token_data = {
             "sub": user["user_id"],
             "email": user["email"],
             "tenant_name": domain,
-            "role": user["role"]
+            "role": user["role"],
+            "projects": user.get("projects", [])
         }
         tokens = create_token_pair(token_data)
         
@@ -265,7 +266,8 @@ class AuthService:
                 "first_name": user.get("first_name"),
                 "last_name": user.get("last_name"),
                 "role": user["role"],
-                "tenant_name": domain
+                "tenant_name": domain,
+                "projects": user.get("projects", [])
             },
             "tokens": tokens,
             "password_change_required": user.get("password_change_required", False)
@@ -560,6 +562,7 @@ class AuthService:
             "role": user["role"],
             "tenant_name": tenant_name,
             "status": user["status"],
+            "projects": user.get("projects", []),
             "last_login_at": user.get("last_login_at"),
             "created_at": user.get("created_at")
         }
