@@ -329,6 +329,89 @@ async def list_users(
         )
 
 
+@router.get(
+    "/by-role/{role}",
+    summary="Get Users by Role",
+    description="Get all users with a specific role (for dropdowns, etc.)"
+)
+async def get_users_by_role(
+    role: str,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    database: Database = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Get all users with a specific role.
+    
+    Useful for populating dropdowns with users of specific roles.
+    For example: Get all PROJECT_MANAGER users for project assignment.
+    
+    **Access:** All authenticated users
+    
+    **Parameters:**
+    - role: Role to filter by (e.g., PROJECT_MANAGER, ADMIN, DEVELOPER)
+    
+    **Returns:**
+    - List of users with that role (email, name, user_id)
+    """
+    try:
+        # Get tenant domain from JWT
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+        
+        # Query users with specific role
+        query = f"""
+            SELECT 
+                user_id,
+                email,
+                first_name,
+                last_name,
+                role,
+                status
+            FROM `{tenant_name}`
+            WHERE role = %s AND status = 'ACTIVE'
+            ORDER BY first_name, last_name
+        """
+        
+        users = await database.execute_query(
+            query,
+            (role,),
+            fetch_all=True
+        )
+        
+        # Convert to simple format for dropdown
+        result = []
+        for user in users:
+            full_name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+            result.append({
+                "user_id": user["user_id"],
+                "email": user["email"],
+                "name": full_name or user["email"],  # Fallback to email if no name
+                "first_name": user.get("first_name"),
+                "last_name": user.get("last_name")
+            })
+        
+        logger.info(f"Retrieved {len(result)} users with role {role} for tenant {tenant_name}")
+        
+        return {
+            "success": True,
+            "message": f"Found {len(result)} user(s) with role {role}",
+            "data": result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting users by role: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve users by role: {str(e)}"
+        )
+
+
 class UpdateUserRequest(BaseModel):
     """Request model for updating user basic details"""
     first_name: Optional[str] = Field(None, min_length=1, max_length=50)

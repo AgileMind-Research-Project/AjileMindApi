@@ -84,6 +84,10 @@ class CreateProjectRequest(BaseModel):
         max_length=255,
         description="Project lead name or email"
     )
+    project_manager: Optional[List[str]] = Field(
+        None,
+        description="List of project manager emails (users with PROJECT_MANAGER role)"
+    )
     
     # Architecture and Stack Information
     architecture_type: Optional[ArchitectureType] = Field(
@@ -164,6 +168,7 @@ class ProjectResponse(BaseModel):
     end_date: date
     sprint_size: Optional[int] = None
     project_lead: Optional[str] = None
+    project_manager: Optional[List[str]] = None
     architecture_type: Optional[str] = None
     stack_type: Optional[str] = None
     frontend_technologies: Optional[List[str]] = None
@@ -204,6 +209,10 @@ class UpdateProjectRequest(BaseModel):
     end_date: Optional[date] = None
     sprint_size: Optional[int] = Field(None, ge=1)
     project_lead: Optional[str] = Field(None, max_length=255)
+    project_manager: Optional[List[str]] = Field(
+        None,
+        description="List of project manager emails"
+    )
     architecture_type: Optional[ArchitectureType] = None
     stack_type: Optional[StackType] = None
     frontend_technologies: Optional[List[str]] = None

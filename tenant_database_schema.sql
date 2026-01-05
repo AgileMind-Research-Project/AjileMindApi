@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS `projects` (
     `sprint_size` INT NULL COMMENT 'Sprint duration in weeks (typically 1-4)',
     `next_sprint_start_date` DATE NULL COMMENT 'Next sprint start date',
     `project_lead` VARCHAR(255) NULL COMMENT 'Project lead name or email',
+    `project_manager` JSON DEFAULT NULL COMMENT 'Project manager email',
 
     -- Architecture and Stack Information
     `architecture_type` ENUM(
@@ -308,6 +309,29 @@ CREATE TABLE IF NOT EXISTS `project_backlog_priority` (
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci
   COMMENT='Priority ranking of backlog items per project';
+
+
+-- ============================================
+-- NOTIFICATIONS TABLE
+-- ============================================
+-- Stores notifications for users
+-- ============================================
+CREATE TABLE IF NOT EXISTS `notifications` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Notification ID',
+    `header` VARCHAR(255) NOT NULL COMMENT 'Notification header/title',
+    `description` TEXT NOT NULL COMMENT 'Notification description/message',
+    `related_users` JSON NOT NULL COMMENT 'List of user emails who should see this notification',
+    `is_read` BOOLEAN DEFAULT FALSE COMMENT 'Whether notification has been read',
+    `notification_type` ENUM('INFO', 'WARNING', 'SUCCESS', 'ERROR') DEFAULT 'INFO' COMMENT 'Type of notification',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX `idx_created_at` (`created_at`),
+    INDEX `idx_notification_type` (`notification_type`)
+) ENGINE=InnoDB 
+  DEFAULT CHARSET=utf8mb4 
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='User notifications';
 
 
 
