@@ -286,6 +286,7 @@ class TenantUserRepository:
                 first_name,
                 last_name,
                 role,
+                projects,
                 status,
                 password_change_required,
                 last_login_at,
@@ -297,13 +298,24 @@ class TenantUserRepository:
         
         result = await self.db.execute_query(query, (email,), fetch_one=True)
         
-        if result and result.get('user_data'):
-            try:
-                # Parse JSON user_data if it's a string
-                if isinstance(result['user_data'], str):
-                    result['user_data'] = json.loads(result['user_data'])
-            except json.JSONDecodeError:
-                result['user_data'] = {}
+        if result:
+            # Parse JSON projects if it's a string
+            if result.get('projects'):
+                try:
+                    if isinstance(result['projects'], str):
+                        result['projects'] = json.loads(result['projects'])
+                except json.JSONDecodeError:
+                    result['projects'] = []
+            else:
+                result['projects'] = []
+            
+            # Parse JSON user_data if it's a string
+            if result.get('user_data'):
+                try:
+                    if isinstance(result['user_data'], str):
+                        result['user_data'] = json.loads(result['user_data'])
+                except json.JSONDecodeError:
+                    result['user_data'] = {}
         
         return result
     
@@ -330,6 +342,7 @@ class TenantUserRepository:
                 first_name,
                 last_name,
                 role,
+                projects,
                 status,
                 password_change_required,
                 last_login_at,
@@ -341,12 +354,24 @@ class TenantUserRepository:
         
         result = await self.db.execute_query(query, (user_id,), fetch_one=True)
         
-        if result and result.get('user_data'):
-            try:
-                if isinstance(result['user_data'], str):
-                    result['user_data'] = json.loads(result['user_data'])
-            except json.JSONDecodeError:
-                result['user_data'] = {}
+        if result:
+            # Parse JSON projects if it's a string
+            if result.get('projects'):
+                try:
+                    if isinstance(result['projects'], str):
+                        result['projects'] = json.loads(result['projects'])
+                except json.JSONDecodeError:
+                    result['projects'] = []
+            else:
+                result['projects'] = []
+            
+            # Parse JSON user_data if it's a string
+            if result.get('user_data'):
+                try:
+                    if isinstance(result['user_data'], str):
+                        result['user_data'] = json.loads(result['user_data'])
+                except json.JSONDecodeError:
+                    result['user_data'] = {}
         
         return result
     

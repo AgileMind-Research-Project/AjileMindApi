@@ -194,6 +194,10 @@ async def list_projects(
     
     **Access:** All authenticated users
     
+    **Filtering:**
+    - ADMIN and SUPER_ADMIN see all projects
+    - PROJECT_MANAGER and other roles see only assigned projects (from user.projects field)
+    
     **Query Parameters:**
     - `page`: Page number (default: 1)
     - `limit`: Items per page (default: 20, max: 100)
@@ -221,11 +225,34 @@ async def list_projects(
             limit=limit
         )
         
+        # Get user role and projects for filtering
+        user_role = current_user.get("role")
+        user_projects = current_user.get("projects", [])
+        
+        # Filter projects based on user role
+        if user_role in ["ADMIN", "SUPER_ADMIN"]:
+            # ADMIN and SUPER_ADMIN see all projects
+            filtered_projects = result["projects"]
+        else:
+            # PROJECT_MANAGER and other roles see only assigned projects
+            filtered_projects = [
+                project for project in result["projects"]
+                if project.get("project_id") in user_projects
+            ]
+        
+        # Recalculate total count after filtering
+        filtered_total = len(filtered_projects)
+        
+        logger.info(
+            f"User {current_user.get('email')} (role: {user_role}) "
+            f"viewing {filtered_total} of {result['total']} projects"
+        )
+        
         return {
             "success": True,
-            "message": f"Found {result['total']} project(s)",
-            "data": result["projects"],
-            "total": result["total"],
+            "message": f"Found {filtered_total} project(s)",
+            "data": filtered_projects,
+            "total": filtered_total,
             "page": result["page"],
             "limit": result["limit"]
         }
@@ -254,7 +281,11 @@ async def get_project(
     """
     Get project details by ID.
     
-    **Access:** All authenticated users
+    **Access:** All authenticated users (filtered by assigned projects)
+    
+    **Access Control:**
+    - ADMIN and SUPER_ADMIN can access all projects
+    - Other roles can only access projects they are assigned to
     
     **Path Parameters:**
     - `project_id`: Project ID
@@ -280,6 +311,19 @@ async def get_project(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Project with ID {project_id} not found"
             )
+        
+        # Check if user has access to this project
+        user_role = current_user.get("role")
+        user_projects = current_user.get("projects", [])
+        
+        # ADMIN and SUPER_ADMIN can access all projects
+        if user_role not in ["ADMIN", "SUPER_ADMIN"]:
+            # Other roles can only access assigned projects
+            if project_id not in user_projects:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have access to this project"
+                )
         
         return {
             "success": True,

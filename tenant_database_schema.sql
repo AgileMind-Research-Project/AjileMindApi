@@ -211,6 +211,55 @@ COLLATE=utf8mb4_unicode_ci
 COMMENT='Backlog items before project start and future changes/features';
 
 
+-- ============================================ sprint TABLE
+-- Stores sprint information for projects
+CREATE TABLE IF NOT EXISTS `sprint` (
+    `sprint_id` INT NOT NULL   PRIMARY KEY
+        COMMENT 'Unique sprint identifier',
+
+    `project_id` BIGINT NOT NULL
+        COMMENT 'Project this sprint belongs to',
+
+    `sprint_name` VARCHAR(255) NOT NULL
+        COMMENT 'Sprint name/identifier',
+
+    `start_date` DATE NOT NULL
+        COMMENT 'Sprint start date',
+
+    `end_date` DATE NOT NULL
+        COMMENT 'Sprint end date',
+
+    `status` ENUM('PLANNED', 'ACTIVE', 'COMPLETED') DEFAULT 'PLANNED'
+        COMMENT 'Sprint status',
+
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        COMMENT 'Record creation time',
+
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP
+        COMMENT 'Last update time',
+
+    -- Indexes
+    INDEX `idx_project_id` (`project_id`),
+    INDEX `idx_status` (`status`),
+    INDEX `idx_start_date` (`start_date`),
+    INDEX `idx_end_date` (`end_date`),
+
+    -- Foreign Keys
+    CONSTRAINT `fk_sprint_project`
+        FOREIGN KEY (`project_id`)
+        REFERENCES `projects` (`project_id`)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Sprint management for projects';
+
+
+-- ============================================ project_backlog_priority TABLE
+-- Stores priority ranking of backlog items
 CREATE TABLE IF NOT EXISTS `project_backlog_priority` (
     `project_id` BIGINT NOT NULL
         COMMENT 'Project ID this backlog item belongs to',

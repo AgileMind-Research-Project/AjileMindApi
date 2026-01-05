@@ -143,7 +143,8 @@ def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
         "user_id": payload.get("sub"),
         "email": payload.get("email"),
         "tenant_name": payload.get("tenant_name"),
-        "role": payload.get("role")
+        "role": payload.get("role"),
+        "projects": payload.get("projects", [])
     }
 
 
