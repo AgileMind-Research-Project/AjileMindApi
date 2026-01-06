@@ -58,6 +58,7 @@ PyJWT==2.10.1
 pymupdf
 PyMySQL==1.1.2
 python-dateutil==2.9.0.post0
+python-docx
 python-dotenv==1.2.1
 python-jose==3.5.0
 python-multipart==0.0.21
