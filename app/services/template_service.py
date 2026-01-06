@@ -87,13 +87,17 @@ class TemplateService:
                 raise ValueError(f"Template with ID {template_id} not found")
             
             # Parse JSON fields
+            # Parse JSON fields and handle format
+            sections_raw = json.loads(result['sections'])
+            sections_list = sections_raw['sections'] if isinstance(sections_raw, dict) and 'sections' in sections_raw else sections_raw
+
             return TemplateResponse(
                 id=result['id'],
                 template_name=result['template_name'],
                 report_type=result['report_type'],
                 header_content=json.loads(result['header_content']) if result.get('header_content') else None,
                 footer_content=json.loads(result['footer_content']) if result.get('footer_content') else None,
-                sections=json.loads(result['sections']),
+                sections=sections_list,
                 styles=json.loads(result['styles']) if result.get('styles') else None,
                 is_default=result['is_default'],
                 created_by=result.get('created_by'),
@@ -137,13 +141,17 @@ class TemplateService:
             
             templates = []
             for row in results or []:
+                # Handle potentially wrapped sections
+                sections_raw = json.loads(row['sections'])
+                sections_list = sections_raw['sections'] if isinstance(sections_raw, dict) and 'sections' in sections_raw else sections_raw
+
                 templates.append(TemplateResponse(
                     id=row['id'],
                     template_name=row['template_name'],
                     report_type=row['report_type'],
                     header_content=json.loads(row['header_content']) if row.get('header_content') else None,
                     footer_content=json.loads(row['footer_content']) if row.get('footer_content') else None,
-                    sections=json.loads(row['sections']),
+                    sections=sections_list,
                     styles=json.loads(row['styles']) if row.get('styles') else None,
                     is_default=row['is_default'],
                     created_by=row.get('created_by'),
