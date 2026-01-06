@@ -35,7 +35,8 @@ async def send_downtime_notification(
         result = await service.send_downtime_notification(
             tenant_name=tenant_name,
             request=request,
-            sender_email=current_user.get("email")
+            sender_email=current_user.get("email"),
+            sender_id=current_user.get("user_id")
         )
         
         return NotificationResponse(
