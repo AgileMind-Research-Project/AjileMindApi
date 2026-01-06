@@ -24,7 +24,7 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, documents
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, documents, transcripts, reports, templates
 from app.db.database import db
 from app.middleware.audit_middleware import AuditLoggingMiddleware
 from app.core.redis_chat_client import init_redis_chat
@@ -269,6 +269,9 @@ app.include_router(projects.router, prefix=f"{settings.API_PREFIX}/projects", ta
 app.include_router(backlog.router, prefix=f"{settings.API_PREFIX}/backlog", tags=["Backlog"])
 app.include_router(redis_chat.router, prefix=f"{settings.API_PREFIX}/chat", tags=["Redis Chat"])
 app.include_router(documents.router, prefix=f"{settings.API_PREFIX}/documents", tags=["Documents & RAG Chatbot"])
+app.include_router(transcripts.router, prefix=f"{settings.API_PREFIX}/transcripts", tags=["Transcripts"])
+app.include_router(reports.router, prefix=f"{settings.API_PREFIX}/reports", tags=["Reports"])
+app.include_router(templates.router, prefix=f"{settings.API_PREFIX}/report-templates", tags=["Report Templates"])
 # app.include_router(tenants.router, prefix=f"{settings.API_PREFIX}/tenants", tags=["Tenants"])
 
 if __name__ == "__main__":    
