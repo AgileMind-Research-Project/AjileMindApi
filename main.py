@@ -271,14 +271,11 @@ app.include_router(projects.router, prefix=f"{settings.API_PREFIX}/projects", ta
 app.include_router(backlog.router, prefix=f"{settings.API_PREFIX}/backlog", tags=["Backlog"])
 app.include_router(redis_chat.router, prefix=f"{settings.API_PREFIX}/chat", tags=["Redis Chat"])
 app.include_router(documents.router, prefix=f"{settings.API_PREFIX}/documents", tags=["Documents & RAG Chatbot"])
-<<<<<<< HEAD
 app.include_router(meetings_router.router, prefix=f"{settings.API_PREFIX}/meetings", tags=["Meetings"])
 app.include_router(task_updates_router.router, prefix=f"{settings.API_PREFIX}/task-updates", tags=["Task Updates"])
-=======
 app.include_router(transcripts.router, prefix=f"{settings.API_PREFIX}/transcripts", tags=["Transcripts"])
 app.include_router(reports.router, prefix=f"{settings.API_PREFIX}/reports", tags=["Reports"])
 app.include_router(templates.router, prefix=f"{settings.API_PREFIX}/report-templates", tags=["Report Templates"])
->>>>>>> origin/merge-branches
 # app.include_router(tenants.router, prefix=f"{settings.API_PREFIX}/tenants", tags=["Tenants"])
 
 if __name__ == "__main__":    
