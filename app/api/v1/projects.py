@@ -18,7 +18,10 @@ from app.schemas.project_schemas import (
     ProjectResponse,
     ProjectListResponse,
     UpdateProjectRequest,
-    StandardResponse
+    StandardResponse,
+    SprintListResponse,
+    SprintListResponse,
+    SprintFilterRequest
 )
 
 
@@ -427,4 +430,110 @@ async def delete_project(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete project: {str(e)}"
+        )
+
+
+@router.get(
+    "/{project_id}/sprints",
+    response_model=SprintListResponse,
+    summary="Get Project Sprints",
+    description="Get list of sprints for a project"
+)
+async def get_project_sprints(
+    project_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    project_service: ProjectService = Depends(get_project_service)
+) -> Dict[str, Any]:
+    """
+    Get list of sprints for a project.
+    
+    **Access:** All authenticated users
+    
+    **Path Parameters:**
+    - `project_id`: Project ID
+    
+    **Returns:**
+    - List of sprints
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+            
+        sprints = await project_service.get_project_sprints(
+            tenant_name=tenant_name,
+            project_id=project_id
+        )
+        
+        return {
+            "success": True,
+            "message": f"Found {len(sprints)} sprint(s)",
+            "data": sprints,
+            "total": len(sprints)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting project sprints: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get project sprints: {str(e)}"
+        )
+
+@router.post(
+    "/{project_id}/sprints/active",
+    response_model=StandardResponse,
+    summary="Get Active Sprints with Tasks",
+    description="Get sprints active on the given date, including their backlog tasks"
+)
+async def get_active_sprints_with_tasks(
+    project_id: int,
+    request: SprintFilterRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    project_service: ProjectService = Depends(get_project_service)
+) -> Dict[str, Any]:
+    """
+    Get active sprints with tasks.
+    
+    Payload:
+    ```json
+    {
+        "date": "2026-01-06"
+    }
+    ```
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+            
+        result = await project_service.get_active_sprints_with_tasks(
+            tenant_name=tenant_name,
+            project_id=project_id,
+            date_filter=request.date
+        )
+        
+        return {
+            "success": True,
+            "message": f"Found {len(result)} active sprint(s)",
+            "data": {
+                "sprints": result,
+                "total": len(result)
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting active sprints: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get active sprints: {str(e)}"
         )

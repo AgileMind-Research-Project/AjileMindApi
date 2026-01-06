@@ -41,6 +41,7 @@ class MeetingService:
                 ),
                 commit=True,
                 schema=tenant_name
+
             )
             
             # Fetch created meeting
