@@ -26,6 +26,7 @@ from config_test import run_config_test
 # Import routers
 from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, documents
 from app.meeting_config import routes as meetings_router
+from app.task_updates_config import routes as task_updates_router
 from app.db.database import db
 from app.middleware.audit_middleware import AuditLoggingMiddleware
 from app.core.redis_chat_client import init_redis_chat
@@ -271,6 +272,7 @@ app.include_router(backlog.router, prefix=f"{settings.API_PREFIX}/backlog", tags
 app.include_router(redis_chat.router, prefix=f"{settings.API_PREFIX}/chat", tags=["Redis Chat"])
 app.include_router(documents.router, prefix=f"{settings.API_PREFIX}/documents", tags=["Documents & RAG Chatbot"])
 app.include_router(meetings_router.router, prefix=f"{settings.API_PREFIX}/meetings", tags=["Meetings"])
+app.include_router(task_updates_router.router, prefix=f"{settings.API_PREFIX}/task-updates", tags=["Task Updates"])
 # app.include_router(tenants.router, prefix=f"{settings.API_PREFIX}/tenants", tags=["Tenants"])
 
 if __name__ == "__main__":    
