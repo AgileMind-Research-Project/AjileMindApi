@@ -79,6 +79,7 @@ async def get_prioritized_backlog(
             )
         
         # Query to get prioritized backlog items with details
+        # Only show items NOT assigned to a sprint yet
         query = """
             SELECT 
                 pbp.backlog_id,
@@ -93,7 +94,7 @@ async def get_prioritized_backlog(
                 pb.story_points
             FROM project_backlog_priority pbp
             INNER JOIN project_backlog pb ON pbp.backlog_id = pb.id
-            WHERE pbp.project_id = %s
+            WHERE pbp.project_id = %s AND pbp.sprint_id IS NULL
             ORDER BY pbp.`rank` ASC
         """
         
@@ -226,4 +227,241 @@ async def update_backlog_ranks(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update backlog ranks: {str(e)}"
+        )
+
+
+@router.get(
+    "/projects/{project_id}/available-backlog",
+    summary="Get Available Backlog Items",
+    description="Get backlog items that are NOT yet in the priority list"
+)
+async def get_available_backlog(
+    project_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    database: Database = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Get backlog items that are not yet prioritized.
+    
+    Returns items from project_backlog that are NOT in project_backlog_priority.
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+        
+        # Query to get backlog items NOT in priority table
+        query = """
+            SELECT 
+                pb.id as backlog_id,
+                pb.summary,
+                pb.description,
+                pb.issue_type,
+                pb.status,
+                pb.priority,
+                pb.assignee,
+                pb.story_points
+            FROM project_backlog pb
+            WHERE pb.project_id = %s
+            AND pb.id NOT IN (
+                SELECT backlog_id 
+                FROM project_backlog_priority 
+                WHERE project_id = %s
+            )
+            ORDER BY pb.created_at DESC
+        """
+        
+        results = await database.execute_query(
+            query,
+            (project_id, project_id),
+            fetch_all=True,
+            schema=tenant_name
+        )
+        
+        items = []
+        for row in results:
+            items.append({
+                "backlog_id": row["backlog_id"],
+                "summary": row["summary"],
+                "description": row.get("description"),
+                "issue_type": row["issue_type"],
+                "status": row["status"],
+                "priority": row.get("priority"),
+                "assignee": row.get("assignee"),
+                "story_points": row.get("story_points", 0)
+            })
+        
+        logger.info(f"Retrieved {len(items)} available backlog items for project {project_id}")
+        
+        return {
+            "success": True,
+            "message": f"Found {len(items)} available item(s)",
+            "data": {
+                "project_id": project_id,
+                "items": items
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting available backlog: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve available backlog: {str(e)}"
+        )
+
+
+@router.post(
+    "/projects/{project_id}/prioritized-backlog/add",
+    summary="Add Item to Priority List",
+    description="Add a backlog item to the priority list"
+)
+async def add_to_priority_list(
+    project_id: int,
+    request: Dict[str, Any],
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    database: Database = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Add a backlog item to the priority list.
+    
+    Request body: { "backlog_id": "ITEM-123" }
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+        
+        backlog_id = request.get("backlog_id")
+        if not backlog_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="backlog_id is required"
+            )
+        
+        # Get next rank (max + 1)
+        max_rank_query = """
+            SELECT COALESCE(MAX(`rank`), 0) as max_rank
+            FROM project_backlog_priority
+            WHERE project_id = %s
+        """
+        
+        rank_result = await database.execute_query(
+            max_rank_query,
+            (project_id,),
+            fetch_one=True,
+            schema=tenant_name
+        )
+        
+        next_rank = (rank_result["max_rank"] if rank_result else 0) + 1
+        
+        # Insert into priority table
+        insert_query = """
+            INSERT INTO project_backlog_priority 
+            (project_id, backlog_id, `rank`, sprint_id, created_at, updated_at)
+            VALUES (%s, %s, %s, NULL, NOW(), NOW())
+        """
+        
+        result = await database.execute_query(
+            insert_query,
+            (project_id, backlog_id, next_rank),
+            commit=True,
+            schema=tenant_name
+        )
+        
+        if result:
+            logger.info(f"Added item {backlog_id} to priority list with rank {next_rank}")
+            return {
+                "success": True,
+                "message": "Item added to priority list",
+                "data": {
+                    "project_id": project_id,
+                    "backlog_id": backlog_id,
+                    "rank": next_rank
+                }
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to add item to priority list"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding to priority list: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to add item: {str(e)}"
+        )
+
+
+@router.delete(
+    "/projects/{project_id}/prioritized-backlog/{backlog_id}",
+    summary="Remove Item from Priority List",
+    description="Remove a backlog item from the priority list"
+)
+async def remove_from_priority_list(
+    project_id: int,
+    backlog_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    database: Database = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Remove a backlog item from the priority list.
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+        
+        # Delete from priority table
+        delete_query = """
+            DELETE FROM project_backlog_priority
+            WHERE project_id = %s AND backlog_id = %s
+        """
+        
+        result = await database.execute_query(
+            delete_query,
+            (project_id, backlog_id),
+            commit=True,
+            schema=tenant_name
+        )
+        
+        if result:
+            logger.info(f"Removed item {backlog_id} from priority list")
+            return {
+                "success": True,
+                "message": "Item removed from priority list",
+                "data": {
+                    "project_id": project_id,
+                    "backlog_id": backlog_id
+                }
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Item not found in priority list"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing from priority list: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to remove item: {str(e)}"
         )
