@@ -20,8 +20,8 @@ class MeetingService:
                 INSERT INTO meetings (
                     meeting_id, project_id, title, description,
                     date, start_time, end_time, status, category,
-                    created_by, created_at, updated_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    attendees, created_by, created_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             """
             
             await self.db.execute_query(
@@ -36,6 +36,7 @@ class MeetingService:
                     meeting_data.end_time,
                     MeetingStatus.SCHEDULED.value,
                     meeting_data.category,
+                    json.dumps(meeting_data.attendees) if meeting_data.attendees else None,
                     created_by
                 ),
                 commit=True,

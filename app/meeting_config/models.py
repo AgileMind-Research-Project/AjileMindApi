@@ -1,3 +1,4 @@
+import json
 from datetime import date, time, datetime, timedelta
 from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator
@@ -41,6 +42,8 @@ class MeetingResponse(BaseModel):
     end_time: time
     status: MeetingStatus
     category: str
+    meeting_transcript: Optional[str] = None
+    attendees: Optional[List[str]] = None
     created_at: datetime
     created_by: Optional[str]
     
@@ -56,4 +59,14 @@ class MeetingResponse(BaseModel):
             minutes = (total_seconds % 3600) // 60
             seconds = total_seconds % 60
             return time(hour=hours, minute=minutes, second=seconds)
+        return v
+
+    @field_validator('attendees', mode='before')
+    @classmethod
+    def parse_attendees(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return []
         return v
