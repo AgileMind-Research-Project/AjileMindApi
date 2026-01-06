@@ -265,6 +265,7 @@ CREATE TABLE IF NOT EXISTS `meetings` (
     -- Content
     `meeting_transcript` LONGTEXT NULL COMMENT 'AI generated or manual transcript',
     `recording_url` VARCHAR(500) NULL COMMENT 'Link to meeting recording',
+    `attendees` JSON NULL COMMENT 'List of meeting attendees (emails or user IDs)',
     
     -- Metadata
     `created_by` VARCHAR(100) NULL COMMENT 'User ID who created the meeting',
