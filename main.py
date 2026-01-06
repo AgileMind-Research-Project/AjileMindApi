@@ -31,6 +31,8 @@ from app.db.database import db
 from app.middleware.audit_middleware import AuditLoggingMiddleware
 from app.core.redis_chat_client import init_redis_chat
 
+from app.services.scheduler import start_scheduler
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events"""
@@ -54,8 +56,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️  Redis Chat initialization warning: {e}\n")
         # Don't raise - chat is optional
+
+    # Initialize Scheduler
+    print("⏰ Initializing Background Scheduler...")
+    try:
+        start_scheduler()
+        print("✅ Scheduler started successfully\n")
+    except Exception as e:
+        print(f"❌ Failed to start scheduler: {e}\n")
     
     yield
+    
+    # Cleanup
     
     # Cleanup
     print("\n" + "="*70)
