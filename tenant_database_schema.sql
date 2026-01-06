@@ -491,11 +491,11 @@ CREATE TABLE IF NOT EXISTS `downtime_notifications` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `type` ENUM('PLANNED_MAINTENANCE', 'EMERGENCY_OUTAGE', 'FEATURE_UPGRADE', 'SERVICE_DEGRADATION') NOT NULL,
     `priority` ENUM('HIGH', 'MEDIUM', 'LOW') NOT NULL DEFAULT 'MEDIUM',
-    `affected_components` JSON NOT NULL COMMENT 'List of affected services',
+    `affected_components` JSON NULL COMMENT 'List of affected services',
     
     -- Schedule
-    `start_time` DATETIME NOT NULL,
-    `end_time` DATETIME NOT NULL,
+    `start_time` DATETIME NULL,
+    `end_time` DATETIME NULL,
     `timezone` VARCHAR(50) DEFAULT 'UTC',
     
     -- Content
@@ -507,14 +507,18 @@ CREATE TABLE IF NOT EXISTS `downtime_notifications` (
     `project_id` BIGINT NULL COMMENT 'If audience is PROJECT_MEMBERS',
     
     -- Metadata
-    `sent_by_user_id` VARCHAR(50) NULL COMMENT 'Admin/User ID who sent it',
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `status` VARCHAR(50) DEFAULT 'PENDING' COMMENT 'PENDING, SCHEDULED, SENT, FAILED',
+    `created_by` VARCHAR(255) NULL COMMENT 'Email of user who created notification',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `scheduled_at` DATETIME NULL COMMENT 'When the notification is scheduled to be sent',
+    `sent_at` DATETIME NULL COMMENT 'When the notification was actually sent',
     
     -- Indexes
     INDEX `idx_type` (`type`),
+    INDEX `idx_status` (`status`),
     INDEX `idx_start_time` (`start_time`),
     INDEX `idx_project_id` (`project_id`),
+    INDEX `idx_created_at` (`created_at`),
     
     -- Foreign Key
     CONSTRAINT `fk_downtime_project`
