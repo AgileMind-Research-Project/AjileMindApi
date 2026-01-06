@@ -58,8 +58,10 @@ class LLMReportService:
         if not self.available:
             raise RuntimeError("LLM service is not available")
         
-        prompt = custom_prompt or f"""
-You are an expert meeting analyzer. Analyze this daily standup transcript and extract structured information.
+        intro_instruction = custom_prompt if custom_prompt else "Analyze this daily standup transcript and extract structured information."
+        
+        prompt = f"""
+You are an expert meeting analyzer. {intro_instruction}
 
 Transcript:
 {transcript}
@@ -83,7 +85,7 @@ JSON Response:
 """
         
         try:
-            response = self.llm(prompt)
+            response = self.llm.invoke(prompt)
             logger.info(f"LLM Response: {response[:200]}...")
             
             report_data = self._extract_json_from_response(response)
@@ -103,8 +105,10 @@ JSON Response:
         if not self.available:
             raise RuntimeError("LLM service is not available")
         
-        prompt = custom_prompt or f"""
-You are an expert Agile coach. Analyze this sprint meeting transcript and create a comprehensive summary.
+        intro_instruction = custom_prompt if custom_prompt else "Analyze this sprint meeting transcript and create a comprehensive summary."
+        
+        prompt = f"""
+You are an expert Agile coach. {intro_instruction}
 
 Transcript:
 {transcript}
@@ -132,7 +136,7 @@ JSON Response:
 """
         
         try:
-            response = self.llm(prompt)
+            response = self.llm.invoke(prompt)
             logger.info(f"LLM Response: {response[:200]}...")
             
             report_data = self._extract_json_from_response(response)
@@ -152,8 +156,10 @@ JSON Response:
         if not self.available:
             raise RuntimeError("LLM service is not available")
         
-        prompt = custom_prompt or f"""
-You are an expert Agile retrospective facilitator. Analyze this retrospective transcript.
+        intro_instruction = custom_prompt if custom_prompt else "Analyze this retrospective transcript."
+        
+        prompt = f"""
+You are an expert Agile retrospective facilitator. {intro_instruction}
 
 Transcript:
 {transcript}
@@ -181,7 +187,7 @@ JSON Response:
 """
         
         try:
-            response = self.llm(prompt)
+            response = self.llm.invoke(prompt)
             logger.info(f"LLM Response: {response[:200]}...")
             
             report_data = self._extract_json_from_response(response)

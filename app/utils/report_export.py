@@ -66,7 +66,7 @@ class ReportExporter:
             styles = getSampleStyleSheet()
             
             # Apply custom styles if provided
-            if template_config and 'styles' in template_config:
+            if template_config and template_config.get('styles'):
                 custom_styles = template_config['styles']
                 
                 # Update heading style
@@ -80,7 +80,7 @@ class ReportExporter:
             story = []
             
             # Add header if provided
-            if template_config and 'header_content' in template_config:
+            if template_config and template_config.get('header_content'):
                 header = template_config['header_content']
                 if header.get('text'):
                     alignment = TA_CENTER if header.get('alignment') == 'center' else TA_LEFT
@@ -108,7 +108,7 @@ class ReportExporter:
                 ReportExporter._add_retrospective_content(story, report_data, styles)
             
             # Add footer if provided
-            if template_config and 'footer_content' in template_config:
+            if template_config and template_config.get('footer_content'):
                 footer = template_config['footer_content']
                 if footer.get('text'):
                     story.append(Spacer(1, 0.5*inch))
@@ -140,21 +140,21 @@ class ReportExporter:
         # Yesterday's work
         story.append(Paragraph("Yesterday's Work:", styles['Heading2']))
         story.append(Spacer(1, 0.1*inch))
-        for item in data.get('yesterday_work', []):
+        for item in (data.get('yesterday_work') or []):
             story.append(Paragraph(f"• {item}", styles['Normal']))
         story.append(Spacer(1, 0.2*inch))
         
         # Today's plan
         story.append(Paragraph("Today's Plan:", styles['Heading2']))
         story.append(Spacer(1, 0.1*inch))
-        for item in data.get('today_plan', []):
+        for item in (data.get('today_plan') or []):
             story.append(Paragraph(f"• {item}", styles['Normal']))
         story.append(Spacer(1, 0.2*inch))
         
         # Blockers
         story.append(Paragraph("Blockers & Issues:", styles['Heading2']))
         story.append(Spacer(1, 0.1*inch))
-        blockers = data.get('blockers', [])
+        blockers = data.get('blockers') or []
         if blockers:
             for item in blockers:
                 story.append(Paragraph(f"• {item}", styles['Normal']))
@@ -167,34 +167,39 @@ class ReportExporter:
         # Sprint goals
         story.append(Paragraph("Sprint Goals:", styles['Heading2']))
         story.append(Spacer(1, 0.1*inch))
-        for item in data.get('sprint_goals', []):
+        for item in (data.get('sprint_goals') or []):
             story.append(Paragraph(f"• {item}", styles['Normal']))
         story.append(Spacer(1, 0.2*inch))
         
         # Progress summary
         story.append(Paragraph("Progress Summary:", styles['Heading2']))
         story.append(Spacer(1, 0.1*inch))
-        for item in data.get('progress_summary', []):
+        # Handle string or list for progress_summary just in case
+        prog = data.get('progress_summary') or []
+        if isinstance(prog, str):
+            prog = [prog]
+        for item in prog:
             story.append(Paragraph(f"• {item}", styles['Normal']))
         story.append(Spacer(1, 0.2*inch))
         
         # Issues & risks
         story.append(Paragraph("Issues & Risks:", styles['Heading2']))
         story.append(Spacer(1, 0.1*inch))
-        for item in data.get('issues_risks', []):
+        for item in (data.get('issues_risks') or []):
             story.append(Paragraph(f"• {item}", styles['Normal']))
         story.append(Spacer(1, 0.2*inch))
         
         # Action items
         story.append(Paragraph("Action Items:", styles['Heading2']))
         story.append(Spacer(1, 0.1*inch))
-        action_items = data.get('action_items', [])
+        action_items = data.get('action_items') or []
         if action_items:
             for item in action_items:
                 assignee = item.get('assignee', 'Unassigned')
                 due_date = item.get('due_date', 'No deadline')
+                action = item.get('task') or item.get('action') or 'Unknown Task'
                 story.append(Paragraph(
-                    f"• {item['action']} (Assignee: {assignee}, Due: {due_date})",
+                    f"• {action} (Assignee: {assignee}, Due: {due_date})",
                     styles['Normal']
                 ))
         else:
@@ -206,29 +211,37 @@ class ReportExporter:
         # What went well
         story.append(Paragraph("What Went Well:", styles['Heading2']))
         story.append(Spacer(1, 0.1*inch))
-        for item in data.get('what_went_well', []):
+        for item in (data.get('what_went_well') or []):
             story.append(Paragraph(f"• {item}", styles['Normal']))
         story.append(Spacer(1, 0.2*inch))
         
         # What didn't go well
         story.append(Paragraph("What Didn't Go Well:", styles['Heading2']))
         story.append(Spacer(1, 0.1*inch))
-        for item in data.get('what_didnt_go_well', []):
+        for item in (data.get('what_didnt_go_well') or []):
             story.append(Paragraph(f"• {item}", styles['Normal']))
         story.append(Spacer(1, 0.2*inch))
         
         # Improvements
         story.append(Paragraph("Improvements:", styles['Heading2']))
         story.append(Spacer(1, 0.1*inch))
-        for item in data.get('improvements', []):
+        for item in (data.get('improvements') or []):
             story.append(Paragraph(f"• {item}", styles['Normal']))
         story.append(Spacer(1, 0.2*inch))
         
         # Action points
         story.append(Paragraph("Action Points:", styles['Heading2']))
         story.append(Spacer(1, 0.1*inch))
-        for item in data.get('action_points', []):
-            story.append(Paragraph(f"• {item}", styles['Normal']))
+        for item in (data.get('action_points') or []):
+             # Action points might be dicts (ActionItem) or strings depending on legacy...
+             # Schema says List[ActionItem]
+             if isinstance(item, dict):
+                 action = item.get('task') or item.get('action') or 'Unknown'
+                 assignee = item.get('assignee', '')
+                 txt = f"• {action}" + (f" ({assignee})" if assignee else "")
+                 story.append(Paragraph(txt, styles['Normal']))
+             else:
+                 story.append(Paragraph(f"• {item}", styles['Normal']))
     
     @staticmethod
     def export_to_docx(
@@ -251,7 +264,7 @@ class ReportExporter:
             doc = Document()
             
             # Add header if provided
-            if template_config and 'header_content' in template_config:
+            if template_config and template_config.get('header_content'):
                 header = template_config['header_content']
                 if header.get('text'):
                     p = doc.add_paragraph(header['text'])
@@ -272,7 +285,7 @@ class ReportExporter:
                 ReportExporter._add_retrospective_content_docx(doc, report_data)
             
             # Add footer if provided
-            if template_config and 'footer_content' in template_config:
+            if template_config and template_config.get('footer_content'):
                 footer = template_config['footer_content']
                 if footer.get('text'):
                     doc.add_paragraph()
@@ -297,15 +310,15 @@ class ReportExporter:
     def _add_daily_standup_content_docx(doc, data):
         """Add daily standup content to DOCX"""
         doc.add_heading("Yesterday's Work:", level=2)
-        for item in data.get('yesterday_work', []):
+        for item in (data.get('yesterday_work') or []):
             doc.add_paragraph(item, style='List Bullet')
         
         doc.add_heading("Today's Plan:", level=2)
-        for item in data.get('today_plan', []):
+        for item in (data.get('today_plan') or []):
             doc.add_paragraph(item, style='List Bullet')
         
         doc.add_heading("Blockers & Issues:", level=2)
-        blockers = data.get('blockers', [])
+        blockers = data.get('blockers') or []
         if blockers:
             for item in blockers:
                 doc.add_paragraph(item, style='List Bullet')
@@ -316,25 +329,30 @@ class ReportExporter:
     def _add_sprint_meeting_content_docx(doc, data):
         """Add sprint meeting content to DOCX"""
         doc.add_heading("Sprint Goals:", level=2)
-        for item in data.get('sprint_goals', []):
+        for item in (data.get('sprint_goals') or []):
             doc.add_paragraph(item, style='List Bullet')
         
         doc.add_heading("Progress Summary:", level=2)
-        for item in data.get('progress_summary', []):
+        # Handle potential string vs list
+        prog = data.get('progress_summary') or []
+        if isinstance(prog, str):
+            prog = [prog]
+        for item in prog:
             doc.add_paragraph(item, style='List Bullet')
         
         doc.add_heading("Issues & Risks:", level=2)
-        for item in data.get('issues_risks', []):
+        for item in (data.get('issues_risks') or []):
             doc.add_paragraph(item, style='List Bullet')
         
         doc.add_heading("Action Items:", level=2)
-        action_items = data.get('action_items', [])
+        action_items = data.get('action_items') or []
         if action_items:
             for item in action_items:
                 assignee = item.get('assignee', 'Unassigned')
                 due_date = item.get('due_date', 'No deadline')
+                action = item.get('task') or item.get('action') or 'Unknown'
                 doc.add_paragraph(
-                    f"{item['action']} (Assignee: {assignee}, Due: {due_date})",
+                    f"{action} (Assignee: {assignee}, Due: {due_date})",
                     style='List Bullet'
                 )
         else:
@@ -344,20 +362,26 @@ class ReportExporter:
     def _add_retrospective_content_docx(doc, data):
         """Add retrospective content to DOCX"""
         doc.add_heading("What Went Well:", level=2)
-        for item in data.get('what_went_well', []):
+        for item in (data.get('what_went_well') or []):
             doc.add_paragraph(item, style='List Bullet')
         
         doc.add_heading("What Didn't Go Well:", level=2)
-        for item in data.get('what_didnt_go_well', []):
+        for item in (data.get('what_didnt_go_well') or []):
             doc.add_paragraph(item, style='List Bullet')
         
         doc.add_heading("Improvements:", level=2)
-        for item in data.get('improvements', []):
+        for item in (data.get('improvements') or []):
             doc.add_paragraph(item, style='List Bullet')
         
         doc.add_heading("Action Points:", level=2)
-        for item in data.get('action_points', []):
-            doc.add_paragraph(item, style='List Bullet')
+        for item in (data.get('action_points') or []):
+            if isinstance(item, dict):
+                 action = item.get('task') or item.get('action') or 'Unknown'
+                 assignee = item.get('assignee', '')
+                 txt = f"{action}" + (f" ({assignee})" if assignee else "")
+                 doc.add_paragraph(txt, style='List Bullet')
+            else:
+                 doc.add_paragraph(item, style='List Bullet')
 
 
 def export_report(
