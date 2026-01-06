@@ -16,17 +16,11 @@ class NotificationService:
         Uses the {tenant_name} table in the central database.
         """
         try:
-            # Query the table named after tenant_name
-            query = f"SELECT user_id, email, first_name, last_name, role, projects FROM `{tenant_name}` WHERE status = 'ACTIVE'"
-            
-            # Since this is a dynamic table name in the default DB, we don't pass schema=tenant_name 
-            # unless the tenant_name table is actually inside the tenant DB. 
-            # Looking at users.py, it seems `users.py` does `SELECT ... FROM {tenant_name}` without specifying schema 
-            # if `database.execute_query` defaults to main DB. 
-            # But meeting_config/service.py explicitly uses `{settings.DB_NAME}.{tenant_name}`.
-            # I'll stick to just `{tenant_name}` if I rely on the default connection.
+            # Use fully qualified table name like MeetingService
+            query = f"SELECT user_id, email, first_name, last_name, role, projects FROM `{settings.DB_NAME}`.`{tenant_name}` WHERE status = 'ACTIVE'"
             
             users = await self.db.execute_query(query, fetch_all=True) or []
+            logger.info(f"DEBUG: Fetched {len(users)} users from table {settings.DB_NAME}.{tenant_name}. Searching for project_id {project_id}...")
             
             project_users = []
             for user in users:
@@ -38,20 +32,26 @@ class NotificationService:
                         else:
                             projects = projects_json # Already list or dict
                         
-                        if isinstance(projects, list) and project_id in projects:
-                            # Remove sensitive info and projects list
-                            user_clean = {
-                                "user_id": user.get("user_id"),
-                                "email": user.get("email"),
-                                "first_name": user.get("first_name"),
-                                "last_name": user.get("last_name"),
-                                "role": user.get("role")
-                            }
-                            project_users.append(user_clean)
+                        if isinstance(projects, list):
+                            # Handle potential string/int mismatch
+                            project_id_str = str(project_id)
+                            projects_str_list = [str(p) for p in projects]
+                            
+                            if project_id_str in projects_str_list:
+                                # Remove sensitive info and projects list
+                                user_clean = {
+                                    "user_id": user.get("user_id"),
+                                    "email": user.get("email"),
+                                    "first_name": user.get("first_name"),
+                                    "last_name": user.get("last_name"),
+                                    "role": user.get("role")
+                                }
+                                project_users.append(user_clean)
                     except Exception as e:
                         logger.warning(f"Error parsing projects for user {user.get('user_id')}: {e}")
                         continue
             
+            logger.info(f"DEBUG: Found {len(project_users)} members for project {project_id}")
             return project_users
         except Exception as e:
             logger.error(f"Error fetching project members: {e}")
