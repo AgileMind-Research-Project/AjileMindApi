@@ -241,6 +241,104 @@ CREATE TABLE IF NOT EXISTS `project_backlog_priority` (
 -- Optional: Add tenant_id if multi-tenancy is needed
 -- ALTER TABLE documents ADD COLUMN tenant_id INT NOT NULL AFTER id;
 -- ALTER TABLE documents ADD FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
+-- ============================================
+-- MEETINGS TABLE
+-- ============================================
+-- Stores meeting records for the tenant
+CREATE TABLE IF NOT EXISTS `meetings` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `meeting_id` VARCHAR(50) NOT NULL UNIQUE COMMENT 'Unique meeting identifier (UUID)',
+    `project_id` BIGINT NULL COMMENT 'Associated project ID (optional)',
+    `title` VARCHAR(255) NOT NULL COMMENT 'Meeting title',
+    `description` TEXT NULL COMMENT 'Meeting agenda or description',
+    
+    -- Schedule
+    `date` DATE NOT NULL COMMENT 'Meeting date',
+    `start_time` TIME NOT NULL COMMENT 'Start time',
+    `end_time` TIME NOT NULL COMMENT 'End time',
+    
+    -- Status & Type
+    `status` ENUM('SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') DEFAULT 'SCHEDULED',
+    `category` VARCHAR(100) DEFAULT 'Daily Meeting' COMMENT 'Meeting category (e.g., Daily, Sprint Planning)',
+    
+    -- Content
+    `meeting_transcript` LONGTEXT NULL COMMENT 'AI generated or manual transcript',
+    `recording_url` VARCHAR(500) NULL COMMENT 'Link to meeting recording',
+    `attendees` JSON NULL COMMENT 'List of meeting attendees (emails or user IDs)',
+    
+    -- Metadata
+    `created_by` VARCHAR(100) NULL COMMENT 'User ID who created the meeting',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    -- Indexes
+    INDEX `idx_project_id` (`project_id`),
+    INDEX `idx_date` (`date`),
+    INDEX `idx_status` (`status`),
+    INDEX `idx_category` (`category`),
+
+    -- Foreign Key
+    CONSTRAINT `fk_meetings_project`
+        FOREIGN KEY (`project_id`)
+        REFERENCES `projects` (`project_id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Meeting records and schedules';
+
+-- ============================================
+-- TASK_UPDATES TABLE  
+-- ============================================
+-- AI-extracted task updates from meeting transcripts with human approval workflow
+CREATE TABLE IF NOT EXISTS `task_updates` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `meeting_id` VARCHAR(50) NOT NULL COMMENT 'Reference to meetings table',
+    `ticket_id` VARCHAR(50) NOT NULL COMMENT 'Jira ticket ID (e.g., API-400, BUG-102)',
+    `task_id` INT NULL COMMENT 'Reference to task table if matched',
+    `project_id` BIGINT NOT NULL COMMENT 'Project this task belongs to',
+    
+    -- AI Extracted Data
+    `detected_status` ENUM('TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED') NOT NULL COMMENT 'Status detected by AI',
+    `blocker_description` TEXT NULL COMMENT 'Blocker details if status is BLOCKED',
+    `ai_confidence_score` DECIMAL(3,2) DEFAULT 0.00 COMMENT 'AI confidence (0.00-1.00)',
+    `ai_reasoning` TEXT NULL COMMENT 'Chain of Thought reasoning from AI',
+    `extracted_context` TEXT NULL COMMENT 'Relevant excerpt from transcript',
+    
+    -- Approval Workflow
+    `approval_status` ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING',
+    `reviewed_by` VARCHAR(100) NULL COMMENT 'User who reviewed',
+    `review_timestamp` DATETIME NULL,
+    `reviewer_remark` TEXT NULL COMMENT 'Optional remark from reviewer',
+    
+    -- Jira Integration
+    `jira_sync_status` ENUM('NOT_SYNCED', 'SYNCED', 'FAILED') DEFAULT 'NOT_SYNCED',
+    `jira_sync_timestamp` DATETIME NULL,
+    `jira_error_message` TEXT NULL,
+    
+    -- Metadata
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    -- Indexes
+    INDEX `idx_meeting_id` (`meeting_id`),
+    INDEX `idx_ticket_id` (`ticket_id`),
+    INDEX `idx_project_id` (`project_id`),
+    INDEX `idx_approval_status` (`approval_status`),
+    INDEX `idx_jira_sync_status` (`jira_sync_status`),
+    
+    -- Foreign Keys
+    CONSTRAINT `fk_task_updates_meeting`
+        FOREIGN KEY (`meeting_id`)
+        REFERENCES `meetings` (`meeting_id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    
+    CONSTRAINT `fk_task_updates_project`
+        FOREIGN KEY (`project_id`)
+        REFERENCES `projects` (`project_id`)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI-extracted task updates with approval workflow';
 -- ALTER TABLE documents ADD INDEX idx_tenant_id (tenant_id);
 
 -- ============================================
