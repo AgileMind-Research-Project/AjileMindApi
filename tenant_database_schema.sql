@@ -339,3 +339,115 @@ CREATE TABLE IF NOT EXISTS `task_updates` (
         ON UPDATE CASCADE
         ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI-extracted task updates with approval workflow';
+-- ALTER TABLE documents ADD INDEX idx_tenant_id (tenant_id);
+
+-- ============================================
+-- TRANSCRIPTS TABLE
+-- ============================================
+-- Stores meeting transcripts for AI report generation
+-- Date: 2026-01-05
+
+CREATE TABLE IF NOT EXISTS `transcripts` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `title` VARCHAR(255) NOT NULL COMMENT 'Transcript title',
+    `category` ENUM('daily_standup', 'sprint_meeting', 'retrospective') NOT NULL COMMENT 'Meeting type',
+    `transcript_content` LONGTEXT NOT NULL COMMENT 'Full transcript text',
+    `transcript_date` DATE NOT NULL COMMENT 'Date of the meeting',
+    `tags` JSON DEFAULT NULL COMMENT 'Tags for categorization',
+    `file_name` VARCHAR(255) COMMENT 'Original uploaded filename',
+    `uploaded_by` VARCHAR(50) COMMENT 'User ID who uploaded',
+    `tenant_schema` VARCHAR(100) COMMENT 'Tenant schema identifier',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX `idx_category` (`category`),
+    INDEX `idx_date` (`transcript_date`),
+    INDEX `idx_tenant` (`tenant_schema`),
+    FULLTEXT INDEX `idx_content` (`transcript_content`),
+    FULLTEXT INDEX `idx_title` (`title`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Meeting transcripts for AI report generation';
+
+-- ============================================
+-- REPORTS TABLE
+-- ============================================
+-- Stores AI-generated reports from transcripts
+-- Date: 2026-01-05
+
+CREATE TABLE IF NOT EXISTS `reports` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `transcript_id` INT NOT NULL COMMENT 'Reference to transcript',
+    `report_type` ENUM('daily_standup', 'sprint_meeting', 'retrospective') NOT NULL COMMENT 'Report type',
+    `report_content` JSON NOT NULL COMMENT 'Structured report content',
+    `template_id` INT DEFAULT NULL COMMENT 'Template used for generation',
+    `version` INT DEFAULT 1 COMMENT 'Report version number',
+    `status` ENUM('draft', 'published') DEFAULT 'draft' COMMENT 'Report status',
+    `generated_by` VARCHAR(50) DEFAULT 'llama3.2' COMMENT 'LLM model used',
+    `generated_by_user` VARCHAR(50) COMMENT 'User who generated the report',
+    `tenant_schema` VARCHAR(100) COMMENT 'Tenant schema identifier',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (`transcript_id`) REFERENCES `transcripts`(`id`) ON DELETE CASCADE,
+    INDEX `idx_transcript` (`transcript_id`),
+    INDEX `idx_type` (`report_type`),
+    INDEX `idx_tenant` (`tenant_schema`),
+    INDEX `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='AI-generated reports from transcripts';
+
+-- ============================================
+-- REPORT_TEMPLATES TABLE
+-- ============================================
+-- Stores report templates for consistent formatting
+-- Date: 2026-01-05
+
+CREATE TABLE IF NOT EXISTS `report_templates` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `template_name` VARCHAR(255) NOT NULL COMMENT 'Template name',
+    `report_type` ENUM('daily_standup', 'sprint_meeting', 'retrospective') NOT NULL COMMENT 'Report type',
+    `header_content` JSON DEFAULT NULL COMMENT 'Template header',
+    `footer_content` JSON DEFAULT NULL COMMENT 'Template footer',
+    `sections` JSON NOT NULL COMMENT 'Template sections structure',
+    `styles` JSON DEFAULT NULL COMMENT 'Styling configuration',
+    `is_default` BOOLEAN DEFAULT FALSE COMMENT 'Default template flag',
+    `created_by` VARCHAR(50) COMMENT 'User who created the template',
+    `tenant_schema` VARCHAR(100) COMMENT 'Tenant schema identifier',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX `idx_type` (`report_type`),
+    INDEX `idx_tenant` (`tenant_schema`),
+    INDEX `idx_default` (`is_default`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Report templates for AI report generation';
+
+-- ============================================
+-- DEFAULT REPORT TEMPLATES DATA
+-- ============================================
+-- Insert default templates for each report type
+
+INSERT INTO `report_templates` (`template_name`, `report_type`, `sections`, `is_default`) VALUES
+('Default Daily Standup', 'daily_standup', JSON_OBJECT(
+    'sections', JSON_ARRAY(
+        JSON_OBJECT('title', 'Yesterday Work', 'type', 'bullet_list'),
+        JSON_OBJECT('title', 'Today Plan', 'type', 'bullet_list'),
+        JSON_OBJECT('title', 'Blockers', 'type', 'bullet_list')
+    )
+), TRUE),
+('Default Sprint Meeting', 'sprint_meeting', JSON_OBJECT(
+    'sections', JSON_ARRAY(
+        JSON_OBJECT('title', 'Sprint Goals', 'type', 'bullet_list'),
+        JSON_OBJECT('title', 'Progress Summary', 'type', 'paragraph'),
+        JSON_OBJECT('title', 'Issues & Risks', 'type', 'bullet_list'),
+        JSON_OBJECT('title', 'Action Items', 'type', 'table')
+    )
+), TRUE),
+('Default Retrospective', 'retrospective', JSON_OBJECT(
+    'sections', JSON_ARRAY(
+        JSON_OBJECT('title', 'What Went Well', 'type', 'bullet_list'),
+        JSON_OBJECT('title', 'What Didn\'t Go Well', 'type', 'bullet_list'),
+        JSON_OBJECT('title', 'Improvements', 'type', 'bullet_list'),
+        JSON_OBJECT('title', 'Action Points', 'type', 'table')
+    )
+), TRUE);
