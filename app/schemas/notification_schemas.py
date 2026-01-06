@@ -36,6 +36,7 @@ class DowntimeNotificationRequest(BaseModel):
     schedule: Schedule
     audience: Audience
     project_id: Optional[int] = None # Added based on requirements to select project
+    target_roles: Optional[List[str]] = None # Filter recipients by role
     content: Content
     scheduled_at: Optional[datetime] = None  # New field for scheduling send time
     sender_id: Optional[str] = None # Can be inferred from token
