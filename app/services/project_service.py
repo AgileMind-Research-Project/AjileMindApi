@@ -306,3 +306,68 @@ class ProjectService:
             )
         
         return await self.project_repo.delete_project(tenant_name, project_id)
+
+    async def get_project_sprints(
+        self,
+        tenant_name: str,
+        project_id: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all sprints for a project.
+
+        Args:
+            tenant_name: Tenant database name
+            project_id: Project ID
+
+        Returns:
+            List of sprints
+        """
+        # Check if project exists
+        project = await self.project_repo.get_project_by_id(tenant_name, project_id)
+        if not project:
+             raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project with ID {project_id} not found"
+            )
+            
+        return await self.project_repo.get_sprints_by_project(tenant_name, project_id)
+
+    async def get_active_sprints_with_tasks(
+        self,
+        tenant_name: str,
+        project_id: int,
+        date_filter: date
+    ) -> List[Dict[str, Any]]:
+        """
+        Get active sprints for a project on a specific date, including their tasks.
+
+        Args:
+            tenant_name: Tenant database name
+            project_id: Project ID
+            date_filter: Date to check for active sprints
+
+        Returns:
+            List of sprints with tasks included
+        """
+        # Check if project exists
+        project = await self.project_repo.get_project_by_id(tenant_name, project_id)
+        if not project:
+             raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project with ID {project_id} not found"
+            )
+            
+        sprints = await self.project_repo.get_sprints_by_project(tenant_name, project_id, date_filter)
+        
+        # Import BacklogRepository locally to avoid circular imports
+        from app.db.repositories.backlog_repository import BacklogRepository
+        backlog_repo = BacklogRepository(self.db)
+        
+        result = []
+        for sprint in sprints:
+            # Fetch tasks for this sprint
+            tasks = await backlog_repo.list_backlog_by_sprint(tenant_name, sprint['sprint_id'])
+            sprint['tasks'] = tasks
+            result.append(sprint)
+            
+        return result
