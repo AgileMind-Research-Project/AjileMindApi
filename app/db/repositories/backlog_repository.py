@@ -28,7 +28,8 @@ class BacklogRepository:
         priority: Optional[str],
         assignee: Optional[str],
         tags: Optional[List[str]],
-        severity: Optional[str]
+        severity: Optional[str],
+        sprint_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Create a backlog item in the database.
@@ -45,6 +46,7 @@ class BacklogRepository:
             assignee: Assigned person
             tags: List of tags
             severity: Severity (for bugs)
+            sprint_id: Sprint ID
         
         Returns:
             Created backlog item data
@@ -56,10 +58,10 @@ class BacklogRepository:
             query = """
                 INSERT INTO project_backlog (
                     id, project_id, summary, description, issue_type,
-                    status, priority, assignee, tags, severity,
+                    status, priority, assignee, tags, severity, sprint_id,
                     created_at, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                 ON DUPLICATE KEY UPDATE
                     summary = VALUES(summary),
                     description = VALUES(description),
@@ -69,13 +71,14 @@ class BacklogRepository:
                     assignee = VALUES(assignee),
                     tags = VALUES(tags),
                     severity = VALUES(severity),
+                    sprint_id = VALUES(sprint_id),
                     updated_at = NOW()
             """
             
             await self.db.execute_query(
                 query,
                 (item_id, project_id, summary, description, issue_type,
-                 status, priority, assignee, tags_json, severity),
+                 status, priority, assignee, tags_json, severity, sprint_id),
                 commit=True,
                 schema=tenant_name
             )
@@ -97,8 +100,7 @@ class BacklogRepository:
         """Get a single backlog item by ID"""
         try:
             query = """
-                SELECT 
-                    id, project_id, summary, description, issue_type,
+                    id, project_id, sprint_id, summary, description, issue_type,
                     status, priority, assignee, tags, severity,
                     created_at, updated_at
                 FROM project_backlog
@@ -133,7 +135,7 @@ class BacklogRepository:
         try:
             query = """
                 SELECT 
-                    id, project_id, summary, description, issue_type,
+                    id, project_id, sprint_id, summary, description, issue_type,
                     status, priority, assignee, tags, severity,
                     created_at, updated_at
                 FROM project_backlog
@@ -161,6 +163,45 @@ class BacklogRepository:
             
         except Exception as e:
             logger.error(f"Error listing backlog items: {str(e)}")
+            raise
+
+    async def list_backlog_by_sprint(
+        self,
+        tenant_name: str,
+        sprint_id: int
+    ) -> List[Dict[str, Any]]:
+        """List all backlog items for a sprint"""
+        try:
+            query = """
+                SELECT 
+                    id, project_id, sprint_id, summary, description, issue_type,
+                    status, priority, assignee, tags, severity,
+                    created_at, updated_at
+                FROM project_backlog
+                WHERE sprint_id = %s
+                ORDER BY priority ASC, created_at DESC
+            """
+            
+            results = await self.db.execute_query(
+                query,
+                (sprint_id,),
+                fetch_all=True,
+                schema=tenant_name
+            )
+            
+            # Deserialize tags for each item
+            if results:
+                for item in results:
+                    if item.get('tags'):
+                        try:
+                            item['tags'] = json.loads(item['tags'])
+                        except:
+                            item['tags'] = None
+            
+            return results or []
+            
+        except Exception as e:
+            logger.error(f"Error listing backlog items for sprint: {str(e)}")
             raise
     
     async def delete_backlog_item(

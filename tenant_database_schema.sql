@@ -133,6 +133,25 @@ CREATE TABLE IF NOT EXISTS `projects` (
   COLLATE=utf8mb4_unicode_ci
   COMMENT='Project records and timelines';
 
+-- ============================================ sprint TABLE
+-- Stores sprint details for projects
+CREATE TABLE IF NOT EXISTS `sprint` (
+  `sprint_id` int NOT NULL,
+  `project_id` bigint NOT NULL,
+  `sprint_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `sprint_goal` text COLLATE utf8mb4_unicode_ci,
+  `start_date` date NOT NULL,
+  `end_date` date NOT NULL,
+  `sprint_status` enum('Not Started','In Progress','Completed','Closed') COLLATE utf8mb4_unicode_ci DEFAULT 'Not Started',
+  `total_estimated_hours` int DEFAULT '0',
+  `total_completed_hours` int DEFAULT '0',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`sprint_id`),
+  KEY `project_id` (`project_id`),
+  CONSTRAINT `sprint_ibfk_1` FOREIGN KEY (`project_id`) REFERENCES `projects` (`project_id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================ project_backlog TABLE
 -- Stores backlog items for projects
 
@@ -142,6 +161,9 @@ CREATE TABLE IF NOT EXISTS `projects` (
 
     `project_id` BIGINT NOT NULL
         COMMENT 'Project ID this backlog item belongs to',
+
+    `sprint_id` INT NULL
+        COMMENT 'Sprint ID this item is assigned to',
 
     `summary` VARCHAR(255) NOT NULL
         COMMENT 'Backlog item name / summary',
@@ -175,13 +197,20 @@ CREATE TABLE IF NOT EXISTS `projects` (
     INDEX `idx_issue_type` (`issue_type`),
     INDEX `idx_status` (`status`),
     INDEX `idx_priority` (`priority`),
+    INDEX `idx_sprint_id` (`sprint_id`),
 
     -- Foreign Key
     CONSTRAINT `fk_backlog_project`
         FOREIGN KEY (`project_id`)
         REFERENCES `projects` (`project_id`)
         ON UPDATE CASCADE
-        ON DELETE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT `fk_backlog_sprint`
+        FOREIGN KEY (`sprint_id`)
+        REFERENCES `sprint` (`sprint_id`)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
 
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
