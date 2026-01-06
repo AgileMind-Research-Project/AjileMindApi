@@ -64,3 +64,4 @@ htmlcov/
 Thumbs.db
 .DS_Store
 gitcom.sh
+app/ai/agent/models/mistral-7b-instruct-v0.2.Q4_K_S.gguf
