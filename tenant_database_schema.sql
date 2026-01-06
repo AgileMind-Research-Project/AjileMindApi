@@ -480,3 +480,46 @@ INSERT INTO `report_templates` (`template_name`, `report_type`, `sections`, `is_
         JSON_OBJECT('title', 'Action Points', 'type', 'table')
     )
 ), TRUE);
+
+-- ============================================
+-- DOWNTIME_NOTIFICATIONS TABLE
+-- ============================================
+-- Stores history of system downtime/maintenance notifications
+-- Date: 2026-01-06
+
+CREATE TABLE IF NOT EXISTS `downtime_notifications` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `type` ENUM('PLANNED_MAINTENANCE', 'EMERGENCY_OUTAGE', 'FEATURE_UPGRADE', 'SERVICE_DEGRADATION') NOT NULL,
+    `priority` ENUM('HIGH', 'MEDIUM', 'LOW') NOT NULL DEFAULT 'MEDIUM',
+    `affected_components` JSON NOT NULL COMMENT 'List of affected services',
+    
+    -- Schedule
+    `start_time` DATETIME NOT NULL,
+    `end_time` DATETIME NOT NULL,
+    `timezone` VARCHAR(50) DEFAULT 'UTC',
+    
+    -- Content
+    `subject` VARCHAR(255) NOT NULL,
+    `message_body` TEXT NOT NULL,
+    
+    -- Audience & Targeting
+    `audience` ENUM('ALL_USERS', 'INTERNAL_TEAM', 'PROJECT_MEMBERS', 'ADMINS') NOT NULL,
+    `project_id` BIGINT NULL COMMENT 'If audience is PROJECT_MEMBERS',
+    
+    -- Metadata
+    `sent_by_user_id` VARCHAR(50) NULL COMMENT 'Admin/User ID who sent it',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `scheduled_at` DATETIME NULL COMMENT 'When the notification is scheduled to be sent',
+    
+    -- Indexes
+    INDEX `idx_type` (`type`),
+    INDEX `idx_start_time` (`start_time`),
+    INDEX `idx_project_id` (`project_id`),
+    
+    -- Foreign Key
+    CONSTRAINT `fk_downtime_project`
+        FOREIGN KEY (`project_id`)
+        REFERENCES `projects` (`project_id`)
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='History of system downtime and maintenance notifications';
