@@ -71,10 +71,15 @@ class NotificationService:
         
         # 2. Persist Notification to DB
         try:
+            # Convert affected_components list to JSON string
+            import json
+            affected_components_json = json.dumps(request.affected_components) if request.affected_components else json.dumps([])
+            
             insert_query = f"""
                 INSERT INTO `{tenant_name}`.downtime_notifications 
-                (type, priority, subject, message_body, audience, project_id, scheduled_at, status, created_by, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                (type, priority, affected_components, start_time, end_time, timezone, 
+                 subject, message_body, audience, project_id, scheduled_at, status, created_by, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             """
             
             # Map enum values to strings
@@ -82,6 +87,10 @@ class NotificationService:
             params = (
                 request.type.value,
                 request.priority.value,
+                affected_components_json,
+                request.schedule.start_time.replace(tzinfo=None) if request.schedule.start_time else None,
+                request.schedule.end_time.replace(tzinfo=None) if request.schedule.end_time else None,
+                request.schedule.timezone,
                 request.content.subject,
                 request.content.message_body,
                 request.audience.value,
