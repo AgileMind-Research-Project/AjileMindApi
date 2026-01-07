@@ -48,11 +48,11 @@ class ReleaseNoteResponse(BaseModel):
     content: Dict[str, Any]
     summary: Optional[str]
     status: str
-    created_by: int
+    created_by: str
     created_at: datetime
     updated_at: datetime
     published_at: Optional[datetime]
-    published_by: Optional[int]
+    published_by: Optional[str]
     
     class Config:
         from_attributes = True
