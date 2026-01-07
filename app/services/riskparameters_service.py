@@ -7,9 +7,19 @@ import aiomysql
 class RiskParametersService:
 
     # CREATE
-    async def create_parameters(self, params: RiskParameters):
+    async def create_parameters(self, tenant_name: str, params: RiskParameters):
+        """
+        Create risk parameters for a project in the tenant database.
+        
+        Args:
+            tenant_name: Tenant database name
+            params: Risk parameters data
+            
+        Returns:
+            Success message
+        """
         # Check if parameters already exist for this project
-        existing = await self.get_parameters(params.project_id)
+        existing = await self.get_parameters(tenant_name, params.project_id)
         if existing:
             raise HTTPException(
                 status_code=400,
@@ -44,22 +54,32 @@ class RiskParametersService:
             params.sprint_completion_level, params.sprint_completion_level_weight
         )
 
-        async with db.pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(query, values)
-                await conn.commit()
+        # Use tenant database schema
+        await db.execute_query(query, values, commit=True, schema=tenant_name)
 
         return {"message": "Risk parameters saved successfully"}
 
 
     # GET BY PROJECT
-    async def get_parameters(self, project_id: int):
+    async def get_parameters(self, tenant_name: str, project_id: int):
+        """
+        Get risk parameters for a project from the tenant database.
+        
+        Args:
+            tenant_name: Tenant database name
+            project_id: Project ID
+            
+        Returns:
+            Risk parameters dict or None if not found
+        """
         query = "SELECT * FROM tbl_risk_parameters_selection WHERE project_id=%s"
 
-        async with db.pool.acquire() as conn:
-            async with conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute(query, (project_id,))
-                result = await cur.fetchone()
+        result = await db.execute_query(
+            query, 
+            (project_id,), 
+            fetch_one=True, 
+            schema=tenant_name
+        )
 
         if not result:
             return None
@@ -68,7 +88,17 @@ class RiskParametersService:
 
 
     # UPDATE
-    async def update_parameters(self, params: RiskParameters):
+    async def update_parameters(self, tenant_name: str, params: RiskParameters):
+        """
+        Update risk parameters for a project in the tenant database.
+        
+        Args:
+            tenant_name: Tenant database name
+            params: Updated risk parameters data
+            
+        Returns:
+            Success message
+        """
         query = """
             UPDATE tbl_risk_parameters_selection SET
                 uncompleted_tasks=%s, uncompleted_tasks_weight=%s,
@@ -96,9 +126,7 @@ class RiskParametersService:
             params.project_id
         )
 
-        async with db.pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(query, values)
-                await conn.commit()
+        # Use tenant database schema
+        await db.execute_query(query, values, commit=True, schema=tenant_name)
 
         return {"message": "Risk parameters updated successfully"}
