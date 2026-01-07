@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.logger import logger
 import boto3
 import json
+import os
 from botocore.exceptions import ClientError
 
 
@@ -225,8 +226,9 @@ async def get_current_user_from_token(authorization: str = Header(None, alias="A
     
     return user_info
 
+
 def get_secrets():
-    client = boto3.client("secretsmanager")
+    client = boto3.client("secretsmanager", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
 
     secrets_result = {}
 
@@ -256,8 +258,9 @@ def get_secrets():
 
     return secrets_result
 
+
 def create_secret(secret_name, secret_value):
-    client = boto3.client("secretsmanager")
+    client = boto3.client("secretsmanager", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
     
     try:
         response = client.create_secret(
@@ -287,7 +290,7 @@ def get_secret(secret_name):
     Returns:
         Dict with success status and secret_value or error message
     """
-    client = boto3.client("secretsmanager")
+    client = boto3.client("secretsmanager", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
     
     try:
         response = client.get_secret_value(SecretId=secret_name)
