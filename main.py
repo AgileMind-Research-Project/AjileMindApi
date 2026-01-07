@@ -24,12 +24,14 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, documents, transcripts, reports, templates, notifications
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, documents, transcripts, reports, templates, notifications, release_notes
 from app.meeting_config import routes as meetings_router
 from app.task_updates_config import routes as task_updates_router
 from app.db.database import db
 from app.middleware.audit_middleware import AuditLoggingMiddleware
 from app.core.redis_chat_client import init_redis_chat
+
+from app.services.scheduler import start_scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -54,8 +56,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️  Redis Chat initialization warning: {e}\n")
         # Don't raise - chat is optional
+
+    # Initialize Scheduler
+    print("⏰ Initializing Background Scheduler...")
+    try:
+        start_scheduler()
+        print("✅ Scheduler started successfully\n")
+    except Exception as e:
+        print(f"❌ Failed to start scheduler: {e}\n")
     
     yield
+    
+    # Cleanup
     
     # Cleanup
     print("\n" + "="*70)
@@ -277,6 +289,7 @@ app.include_router(transcripts.router, prefix=f"{settings.API_PREFIX}/transcript
 app.include_router(reports.router, prefix=f"{settings.API_PREFIX}/reports", tags=["Reports"])
 app.include_router(templates.router, prefix=f"{settings.API_PREFIX}/report-templates", tags=["Report Templates"])
 app.include_router(notifications.router, prefix=f"{settings.API_PREFIX}/notifications", tags=["Notifications"])
+app.include_router(release_notes.router, prefix=f"{settings.API_PREFIX}/release-notes", tags=["Release Notes"])
 # app.include_router(tenants.router, prefix=f"{settings.API_PREFIX}/tenants", tags=["Tenants"])
 
 if __name__ == "__main__":    

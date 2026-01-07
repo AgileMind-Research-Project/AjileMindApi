@@ -35,7 +35,8 @@ async def send_downtime_notification(
         result = await service.send_downtime_notification(
             tenant_name=tenant_name,
             request=request,
-            sender_email=current_user.get("email")
+            sender_email=current_user.get("email"),
+            sender_id=current_user.get("user_id")
         )
         
         return NotificationResponse(
@@ -46,5 +47,34 @@ async def send_downtime_notification(
         
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/downtime",
+    status_code=status.HTTP_200_OK,
+    summary="List Downtime Notifications",
+    description="Get a paginated list of sent and scheduled downtime notifications"
+)
+async def list_downtime_notifications(
+    page: int = 1,
+    page_size: int = 20,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    service: NotificationService = Depends(get_notification_service)
+):
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+             raise HTTPException(status_code=400, detail="Tenant name not found")
+             
+        result = await service.list_downtime_notifications(
+            tenant_name=tenant_name,
+            page=page,
+            page_size=page_size
+        )
+        
+        return result
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
