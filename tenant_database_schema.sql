@@ -169,20 +169,22 @@ SET NEW.next_sprint_start_date = NEW.start_date;
   `sprint_id` INT DEFAULT NULL
     COMMENT 'Sprint ID if assigned to a sprint',
 
-  `parent_task_id` INT DEFAULT NULL
-    COMMENT 'Parent task ID for subtasks',
+  `parent_task_id` VARCHAR(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Parent task ID for subtasks (supports Jira keys like TAM-48)',
 
-  `start_date` DATE NOT NULL
+  `start_date` DATE DEFAULT NULL
     COMMENT 'Planned start date',
 
   `actual_start_date` DATE DEFAULT NULL
     COMMENT 'Actual start date',
 
-  `end_date` DATE NOT NULL
+  `end_date` DATE DEFAULT NULL
     COMMENT 'Planned end date',
 
   `actual_end_date` DATE DEFAULT NULL
     COMMENT 'Actual end date',
+
+  `is_jira` TINYINT(1) NOT NULL DEFAULT 1
+    COMMENT 'Is this backlog item created from Jira?',
 
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     COMMENT 'Record creation time',
@@ -215,7 +217,7 @@ COMMENT='Backlog items before project start and future changes/features';
 -- ============================================ sprint TABLE
 -- Stores sprint information for projects
 CREATE TABLE IF NOT EXISTS `sprint` (
-    `sprint_id` INT NOT NULL   PRIMARY KEY
+    `sprint_id` INT NOT NULL  
         COMMENT 'Unique sprint identifier',
 
     `project_id` BIGINT NOT NULL
@@ -245,6 +247,9 @@ CREATE TABLE IF NOT EXISTS `sprint` (
     INDEX `idx_status` (`status`),
     INDEX `idx_start_date` (`start_date`),
     INDEX `idx_end_date` (`end_date`),
+
+    -- Primary Key
+    PRIMARY KEY (`sprint_id`, `project_id`),
 
     -- Foreign Keys
     CONSTRAINT `fk_sprint_project`
