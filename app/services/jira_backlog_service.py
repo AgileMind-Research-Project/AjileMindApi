@@ -116,6 +116,82 @@ class JiraBacklogService:
             logger.error(f"Error creating Jira issue: {str(e)}")
             raise Exception(f"Failed to create Jira issue: {str(e)}")
     
+    def create_subtask(
+        self,
+        project_key: str,
+        parent_jira_key: str,
+        summary: str,
+        description: Optional[str] = None,
+        priority: Optional[str] = None,
+        assignee: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        estimated_hours: int = 0,
+        story_points: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Create a Sub-task in Jira linked to a parent task.
+        
+        Args:
+            project_key: Jira project key (e.g., "PROJ")
+            parent_jira_key: Parent issue key (e.g., "PROJ-123")
+            summary: Subtask summary
+            description: Subtask description
+            priority: Priority level
+            assignee: Assignee email
+            tags: List of labels
+            estimated_hours: Estimated hours
+            story_points: Story points
+        
+        Returns:
+            Dictionary with Jira subtask key and details
+        """
+        try:
+            # Build subtask fields
+            fields = {
+                "project": {"key": project_key},
+                "parent": {"key": parent_jira_key},
+                "summary": summary,
+                "description": description or "",
+                "issuetype": {"name": "Sub-task"}
+            }
+            
+            # Add priority if specified
+            if priority:
+                priority_mapping = {
+                    "high": "High",
+                    "medium": "Medium",
+                    "low": "Low"
+                }
+                fields["priority"] = {
+                    "name": priority_mapping.get(priority.lower(), "Medium")
+                }
+            
+            # Add assignee if specified
+            if assignee:
+                fields["assignee"] = {"emailAddress": assignee}
+            
+            # Add labels (tags)
+            if tags:
+                fields["labels"] = tags
+            
+            logger.info(f"Creating Jira Sub-task under {parent_jira_key}: {summary}")
+            
+            # Create the subtask
+            issue = self.jira_client.create_issue(fields=fields)
+            
+            issue_key = issue.get("key")
+            logger.info(f"Successfully created Jira Sub-task: {issue_key}")
+            
+            return {
+                "issue_key": issue_key,
+                "issue_id": issue.get("id"),
+                "self_link": issue.get("self")
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating Jira Sub-task: {str(e)}")
+            raise Exception(f"Failed to create Jira Sub-task: {str(e)}")
+    
     def bulk_create_issues(
         self,
         project_key: str,

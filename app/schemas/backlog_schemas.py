@@ -16,6 +16,7 @@ class IssueType(str, Enum):
     FEATURE = "feature"
     CHANGE = "change"
     BUG = "bug"
+    SUB_TASK = "sub_task"
 
 
 class Priority(str, Enum):
@@ -88,6 +89,7 @@ class BacklogItemResponse(BacklogItemBase):
     """Backlog item response"""
     id: str = Field(..., description="Jira issue key (e.g., PROJ-123)")
     project_id: int
+    parent_task_id: Optional[str] = Field(None, description="Parent task ID if this is a subtask")
     status: Status
     created_at: datetime
     updated_at: datetime
