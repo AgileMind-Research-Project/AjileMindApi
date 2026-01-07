@@ -168,8 +168,21 @@ class TaskUpdatesService:
         project_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """List pending task updates"""
-        query = "SELECT * FROM task_updates WHERE approval_status = 'PENDING'"
+        return await self.list_updates(tenant_name, project_id, 'PENDING')
+
+    async def list_updates(
+        self,
+        tenant_name: str,
+        project_id: Optional[int] = None,
+        status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """List task updates with optional status filter"""
+        query = "SELECT * FROM task_updates WHERE 1=1"
         params = []
+
+        if status:
+            query += " AND approval_status = %s"
+            params.append(status)
         
         if project_id:
             query += " AND project_id = %s"
@@ -208,7 +221,44 @@ class TaskUpdatesService:
             schema=tenant_name
         )
         
+        # Helper to update backlog
+        await self._sync_to_backlog(tenant_name, update_id)
+        
         return await self.get_by_id(tenant_name, update_id)
+
+    async def _sync_to_backlog(self, tenant_name: str, update_id: int):
+        """Sync approved task status to project_backlog"""
+        try:
+            # Get the update details
+            task_update = await self.get_by_id(tenant_name, update_id)
+            if not task_update or not task_update.get('ticket_id'):
+                return
+
+            ticket_id = task_update['ticket_id']
+            detected_status = task_update['detected_status'] # e.g. DONE, IN_PROGRESS
+            
+            # Map to backlog status
+            status_map = {
+                'TODO': 'todo',
+                'IN_PROGRESS': 'in_progress',
+                'DONE': 'done'
+            }
+            
+            new_status = status_map.get(detected_status)
+            
+            if new_status:
+                logger.info(f"Syncing task update {update_id} to backlog item {ticket_id}: {new_status}")
+                query = "UPDATE project_backlog SET status = %s, updated_at = NOW() WHERE id = %s"
+                await self.db.execute_query(
+                    query,
+                    (new_status, ticket_id),
+                    commit=True,
+                    schema=tenant_name
+                )
+        except Exception as e:
+            logger.error(f"Failed to sync backlog for update {update_id}: {e}")
+            # Don't fail the approval if sync fails
+
     
     async def reject_update(
         self, 

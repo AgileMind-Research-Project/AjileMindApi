@@ -122,6 +122,32 @@ async def list_pending_approvals(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get(
+    "/",
+    response_model=List[TaskUpdateResponse],
+    summary="List Task Updates",
+    description="List task updates with optional status filter (PENDING, APPROVED, REJECTED)"
+)
+async def list_updates(
+    project_id: Optional[int] = Query(None, description="Filter by project"),
+    status: Optional[str] = Query(None, description="Filter by status (PENDING, APPROVED, REJECTED)"),
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    service: TaskUpdatesService = Depends(get_service)
+):
+    """List task updates"""
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(status_code=400, detail="Tenant name not found")
+        
+        updates = await service.list_updates(tenant_name, project_id, status)
+        return updates
+    
+    except Exception as e:
+        logger.error(f"Error listing updates: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.put(
     "/{update_id}/approve",
     response_model=TaskUpdateResponse,
