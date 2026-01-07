@@ -163,7 +163,7 @@ class TenantUserRepository:
                     # Extract table name for logging
                     table_match = re.search(r'`(\w+)`\s*\(', statement)
                     table_name = table_match.group(1) if table_match else 'unknown'
-                    logger.info(f"✓ Created table: {db_name}.{table_name}")
+                    logger.info(f"Created table: {db_name}.{table_name}")
                 except Exception as e:
                     logger.error(f"Error creating table: {e}")
                     raise

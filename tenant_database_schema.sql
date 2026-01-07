@@ -126,7 +126,7 @@ SET NEW.next_sprint_start_date = NEW.start_date;
 -- ============================================ project_backlog TABLE
 -- Stores backlog items for projects
 
-  CREATE TABLE `project_backlog` (
+CREATE TABLE IF NOT EXISTS `project_backlog` (
   `id` VARCHAR(128) COLLATE utf8mb4_unicode_ci NOT NULL
     COMMENT 'Backlog unique ID created by jira',
 
@@ -200,13 +200,7 @@ SET NEW.next_sprint_start_date = NEW.start_date;
   KEY `idx_status` (`status`),
   KEY `idx_priority` (`priority`),
   KEY `idx_sprint_id` (`sprint_id`),
-  KEY `idx_parent_task_id` (`parent_task_id`),
-
-  CONSTRAINT `fk_backlog_project`
-    FOREIGN KEY (`project_id`)
-    REFERENCES `projects` (`project_id`)
-    ON DELETE CASCADE
-    ON UPDATE CASCADE
+  KEY `idx_parent_task_id` (`parent_task_id`)
 
 ) ENGINE=InnoDB
 DEFAULT CHARSET=utf8mb4
@@ -217,7 +211,7 @@ COMMENT='Backlog items before project start and future changes/features';
 -- ============================================ sprint TABLE
 -- Stores sprint information for projects
 CREATE TABLE IF NOT EXISTS `sprint` (
-    `sprint_id` INT NOT NULL  
+    `sprint_id` INT NOT NULL AUTO_INCREMENT
         COMMENT 'Unique sprint identifier',
 
     `project_id` BIGINT NOT NULL
@@ -242,21 +236,15 @@ CREATE TABLE IF NOT EXISTS `sprint` (
         ON UPDATE CURRENT_TIMESTAMP
         COMMENT 'Last update time',
 
+    -- Primary Key
+    PRIMARY KEY (`sprint_id`),
+
     -- Indexes
     INDEX `idx_project_id` (`project_id`),
     INDEX `idx_status` (`status`),
     INDEX `idx_start_date` (`start_date`),
     INDEX `idx_end_date` (`end_date`),
-
-    -- Primary Key
-    PRIMARY KEY (`sprint_id`, `project_id`),
-
-    -- Foreign Keys
-    CONSTRAINT `fk_sprint_project`
-        FOREIGN KEY (`project_id`)
-        REFERENCES `projects` (`project_id`)
-        ON DELETE CASCADE
-        ON UPDATE CASCADE
+    UNIQUE KEY `uk_sprint_project` (`sprint_id`, `project_id`)
 
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
@@ -290,25 +278,7 @@ CREATE TABLE IF NOT EXISTS `project_backlog_priority` (
 
     -- Indexes
     INDEX `idx_project_rank` (`project_id`, `rank`),
-
-    -- Foreign Keys
-    CONSTRAINT `fk_priority_project`
-        FOREIGN KEY (`project_id`)
-        REFERENCES `projects` (`project_id`)
-        ON UPDATE CASCADE
-        ON DELETE CASCADE,
-
-    CONSTRAINT `fk_priority_backlog`
-        FOREIGN KEY (`backlog_id`)
-        REFERENCES `project_backlog` (`id`)
-        ON UPDATE CASCADE
-        ON DELETE CASCADE,
-
-    CONSTRAINT `fk_priority_sprint`
-        FOREIGN KEY (`sprint_id`)
-        REFERENCES `sprint` (`sprint_id`)
-        ON UPDATE CASCADE
-        ON DELETE CASCADE
+    INDEX `idx_sprint_id` (`sprint_id`)
 
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
@@ -337,6 +307,50 @@ CREATE TABLE IF NOT EXISTS `notifications` (
   DEFAULT CHARSET=utf8mb4 
   COLLATE=utf8mb4_unicode_ci
   COMMENT='User notifications';
+
+-- ============================================
+-- FOREIGN KEY CONSTRAINTS
+-- ============================================
+-- Adding foreign keys after all tables are created
+-- ============================================
+
+-- project_backlog foreign keys
+ALTER TABLE `project_backlog`
+ADD CONSTRAINT `fk_backlog_project`
+    FOREIGN KEY (`project_id`)
+    REFERENCES `projects` (`project_id`)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE;
+
+-- sprint foreign keys
+ALTER TABLE `sprint`
+ADD CONSTRAINT `fk_sprint_project`
+    FOREIGN KEY (`project_id`)
+    REFERENCES `projects` (`project_id`)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE;
+
+-- project_backlog_priority foreign keys
+ALTER TABLE `project_backlog_priority`
+ADD CONSTRAINT `fk_priority_project`
+    FOREIGN KEY (`project_id`)
+    REFERENCES `projects` (`project_id`)
+    ON UPDATE CASCADE
+    ON DELETE CASCADE;
+
+ALTER TABLE `project_backlog_priority`
+ADD CONSTRAINT `fk_priority_backlog`
+    FOREIGN KEY (`backlog_id`)
+    REFERENCES `project_backlog` (`id`)
+    ON UPDATE CASCADE
+    ON DELETE CASCADE;
+
+ALTER TABLE `project_backlog_priority`
+ADD CONSTRAINT `fk_priority_sprint`
+    FOREIGN KEY (`sprint_id`)
+    REFERENCES `sprint` (`sprint_id`)
+    ON UPDATE CASCADE
+    ON DELETE CASCADE;
 
 
 
