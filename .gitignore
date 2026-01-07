@@ -1,7 +1,7 @@
 # Environment files
-# .env
-# .env.local
-# .env.*.local
+.env
+.env.local
+.env.*.local
 
 # Python
 __pycache__/
@@ -64,3 +64,5 @@ htmlcov/
 Thumbs.db
 .DS_Store
 gitcom.sh
+app/ai/agent/models/mistral-7b-instruct-v0.2.Q4_K_S.gguf
+venv312/Scripts/python.exe
