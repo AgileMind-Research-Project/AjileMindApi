@@ -12,6 +12,7 @@ from app.db.database import db, Database
 from app.core.logger import logger
 from app.utils.jwt import get_current_user_from_token
 from app.services.project_service import ProjectService
+from app.services.delay_calculation_service import DelayCalculationService
 from app.schemas.project_schemas import (
     CreateProjectRequest,
     CreateProjectResponse,
@@ -19,6 +20,10 @@ from app.schemas.project_schemas import (
     ProjectListResponse,
     UpdateProjectRequest,
     StandardResponse
+)
+from app.schemas.delay_schemas import (
+    DelayAnalysisResponse,
+    DelayAnalysisErrorResponse
 )
 
 
@@ -37,6 +42,11 @@ async def get_database() -> Database:
 async def get_project_service(database: Database = Depends(get_database)) -> ProjectService:
     """Dependency to get Project service instance"""
     return ProjectService(database)
+
+
+async def get_delay_service(database: Database = Depends(get_database)) -> DelayCalculationService:
+    """Dependency to get Delay Calculation service instance"""
+    return DelayCalculationService(database)
 
 
 async def verify_project_creation_access(
@@ -411,4 +421,93 @@ async def delete_project(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete project: {str(e)}"
+        )
+
+
+# ============================================
+# DELAY ANALYSIS ENDPOINT
+# ============================================
+
+@router.get(
+    "/{project_id}/delay-analysis",
+    response_model=DelayAnalysisResponse,
+    summary="Calculate Project Delay",
+    description="Calculate comprehensive project delay analysis using Agile metrics"
+)
+async def get_project_delay_analysis(
+    project_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    delay_service: DelayCalculationService = Depends(get_delay_service)
+) -> Dict[str, Any]:
+    """
+    Calculate comprehensive project delay analysis.
+    
+    **Algorithm Steps:**
+    1. Calculate project duration
+    2. Calculate planned number of sprints
+    3. Calculate story point completion rate
+    4. Calculate expected velocity
+    5. Calculate actual velocity
+    6. Calculate remaining story points
+    7. Forecast remaining sprints
+    8. Calculate total forecasted sprints
+    9. Calculate sprint delay
+    10. Convert sprint delay to days
+    11. Calculate developer availability factor (aggregated sprint-wise)
+    12. Adjust delay using availability
+    13. Calculate delay percentage
+    14. Determine delay risk level (LOW/MEDIUM/HIGH/CRITICAL)
+    
+    **Access:** All authenticated users
+    
+    **Returns:**
+    - Planned end date (PED)
+    - Forecasted end date (PED + Adjusted Delay Days)
+    - Delay in days
+    - Delay percentage
+    - Risk level
+    - Velocity metrics (expected vs actual)
+    - Sprint-wise breakdown
+    - Developer availability metrics
+    
+    **Risk Levels:**
+    - **LOW**: < 10% delay
+    - **MEDIUM**: 10-25% delay
+    - **HIGH**: 25-40% delay
+    - **CRITICAL**: ≥ 40% delay
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+        
+        # Calculate delay analysis
+        delay_result = await delay_service.calculate_project_delay(
+            project_id=project_id,
+            tenant_db=tenant_name
+        )
+        
+        logger.info(
+            f"Delay analysis calculated for project {project_id} by {current_user['email']}: "
+            f"{delay_result['delay_days']} days delay, {delay_result['risk_level']} risk"
+        )
+        
+        return delay_result
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Validation error in delay analysis: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error calculating delay analysis for project {project_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to calculate delay analysis: {str(e)}"
         )
