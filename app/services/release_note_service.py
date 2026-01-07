@@ -18,7 +18,7 @@ class ReleaseNoteService:
         self,
         tenant_name: str,
         request: CreateReleaseNoteRequest,
-        user_id: int
+        user_id: str
     ) -> Dict[str, Any]:
         """Create a new release note"""
         try:
@@ -240,7 +240,7 @@ class ReleaseNoteService:
         self,
         tenant_name: str,
         release_note_id: int,
-        user_id: int
+        user_id: str
     ) -> Dict[str, Any]:
         """Publish a draft release note"""
         try:

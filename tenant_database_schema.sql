@@ -550,11 +550,11 @@ CREATE TABLE IF NOT EXISTS `release_notes` (
     `status` ENUM('DRAFT', 'PUBLISHED', 'ARCHIVED') DEFAULT 'DRAFT' COMMENT 'Publication status',
     
     -- Metadata
-    `created_by` INT NOT NULL COMMENT 'User ID of creator (must be PROJECT_MANAGER)',
+    `created_by` VARCHAR(255) NOT NULL COMMENT 'User ID of creator (must be PROJECT_MANAGER)',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `published_at` DATETIME NULL COMMENT 'When the release note was published',
-    `published_by` INT NULL COMMENT 'User ID who published the release note',
+    `published_by` VARCHAR(255) NULL COMMENT 'User ID who published the release note',
     
     -- Indexes for performance
     INDEX `idx_project_id` (`project_id`),
