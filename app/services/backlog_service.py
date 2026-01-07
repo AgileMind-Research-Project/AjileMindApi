@@ -76,7 +76,8 @@ class BacklogService:
                         priority=str(row.get('priority', '')).strip().lower() if pd.notna(row.get('priority')) else None,
                         assignee=str(row.get('assignee', '')) if pd.notna(row.get('assignee')) else None,
                         tags=str(row.get('tags', '')) if pd.notna(row.get('tags')) else None,
-                        severity=str(row.get('severity', '')) if pd.notna(row.get('severity')) else None
+                        severity=str(row.get('severity', '')) if pd.notna(row.get('severity')) else None,
+                        sprint_id=int(row['sprint_id']) if pd.notna(row.get('sprint_id')) else None
                     )
                     items.append(item)
                 except Exception as e:
@@ -187,7 +188,8 @@ class BacklogService:
                         priority=backlog_item.priority.value if backlog_item.priority else None,
                         assignee=backlog_item.assignee,
                         tags=backlog_item.tags,
-                        severity=backlog_item.severity
+                        severity=backlog_item.severity,
+                        sprint_id=backlog_item.sprint_id
                     )
                     jira_issues_created.append(issue_key)
                 except Exception as e:
@@ -228,4 +230,20 @@ class BacklogService:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to list backlog items: {str(e)}"
+            )
+
+    async def list_sprint_backlog(
+        self,
+        tenant_name: str,
+        sprint_id: int
+    ) -> List[BacklogItemResponse]:
+        """List all backlog items for a sprint"""
+        try:
+            items = await self.backlog_repo.list_backlog_by_sprint(tenant_name, sprint_id)
+            return [BacklogItemResponse(**item) for item in items]
+        except Exception as e:
+            logger.error(f"Error listing sprint backlog: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to list sprint backlog items: {str(e)}"
             )
