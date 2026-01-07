@@ -505,3 +505,53 @@ class ProjectRepository:
         except Exception as e:
             logger.error(f"Error checking project existence: {str(e)}")
             return False
+
+    async def get_sprints_by_project(
+        self,
+        tenant_name: str,
+        project_id: int,
+        date_filter: Optional[date] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all sprints for a project, optionally filtering by date (active sprints).
+        
+        Args:
+            tenant_name: Tenant database name
+            project_id: Project ID
+            date_filter: Optional date to check if sprint is active
+        
+        Returns:
+            List of sprints
+        """
+        try:
+            query = """
+                SELECT 
+                    sprint_id, project_id, sprint_name, sprint_goal,
+                    start_date, end_date, sprint_status,
+                    total_estimated_hours, total_completed_hours,
+                    created_at, updated_at
+                FROM sprint
+                WHERE project_id = %s
+            """
+            params = [project_id]
+
+            if date_filter:
+                query += " AND start_date <= %s AND end_date >= %s"
+                params.append(date_filter)
+                params.append(date_filter)
+
+            query += " ORDER BY start_date DESC"
+            
+            sprints = await self.db.execute_query(
+                query,
+                tuple(params),
+                fetch_all=True,
+                schema=tenant_name
+            )
+            
+            return sprints or []
+            
+        except Exception as e:
+            logger.error(f"Error fetching sprints for project {project_id}: {str(e)}")
+            return []
+
