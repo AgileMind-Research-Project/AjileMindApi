@@ -8,10 +8,14 @@
 -- 
 -- Tables created:
 -- 1. tenant_info - Tenant metadata and configuration
--- 2. sprints - Sprint management
--- 3. tasks - Task/issue tracking
--- 4. meetings - Meeting records
--- 5. retrospectives - Retrospective data
+-- 2. jira_integrations - Jira account integration details
+-- 3. projects - Project records and timelines
+-- 4. project_backlog - Backlog items for projects
+-- 5. sprint - Sprint management and tracking
+-- 6. sprint_leave - Developer leave tracking within sprints
+-- 7. task - Task and work item tracking
+-- 8. tbl_blocker - Project blockers tracking
+-- 9. tbl_risk_parameters_selection - Risk parameter configuration
 -- ============================================
 
 -- NOTE: Replace {TENANT_DB} with actual tenant database name
@@ -314,6 +318,154 @@ CREATE TABLE IF NOT EXISTS `project_backlog_priority` (
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci
   COMMENT='Priority ranking of backlog items per project';
+
+
+-- ============================================ sprint TABLE
+-- Stores sprint information for projects
+CREATE TABLE IF NOT EXISTS `sprint` (
+  `sprint_id` INT NOT NULL AUTO_INCREMENT,
+  `project_id` BIGINT NOT NULL,
+  `sprint_name` VARCHAR(255) NOT NULL,
+  `sprint_goal` TEXT,
+  `start_date` DATE NOT NULL,
+  `end_date` DATE NOT NULL,
+  `sprint_status` ENUM('Not Started','In Progress','Completed','Closed') DEFAULT 'Not Started',
+  `total_estimated_hours` INT DEFAULT 0,
+  `total_completed_hours` INT DEFAULT 0,
+  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`sprint_id`),
+  INDEX `idx_sprint_project` (`project_id`),
+  INDEX `idx_sprint_status` (`sprint_status`),
+  INDEX `idx_sprint_dates` (`start_date`, `end_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
+COMMENT='Sprint management and tracking';
+
+-- ============================================ sprint_leave TABLE
+-- Stores developer leave information during sprints
+CREATE TABLE IF NOT EXISTS `sprint_leave` (
+  `leave_id` INT NOT NULL AUTO_INCREMENT,
+  `sprint_id` INT NOT NULL,
+  `project_id` BIGINT NOT NULL,
+  `developer_name` VARCHAR(255) NOT NULL,
+  `leave_date` DATE NOT NULL,
+  `leave_hours` INT NOT NULL CHECK (`leave_hours` >= 0),
+  `reason` VARCHAR(500) DEFAULT NULL,
+  `leave_type` ENUM('Full Day','Half Day','Short Leave') DEFAULT 'Full Day',
+  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`leave_id`),
+  INDEX `idx_leave_sprint` (`sprint_id`),
+  INDEX `idx_leave_project` (`project_id`),
+  INDEX `idx_leave_date` (`leave_date`),
+  INDEX `idx_developer_name` (`developer_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
+COMMENT='Developer leave tracking within sprints';
+
+-- ============================================ task TABLE
+-- Stores tasks, bugs, stories, and other work items
+CREATE TABLE IF NOT EXISTS `task` (
+  `task_id` INT NOT NULL AUTO_INCREMENT,
+  `project_id` BIGINT NOT NULL,
+  `sprint_id` INT DEFAULT NULL,
+  `parent_task_id` INT DEFAULT NULL,
+  `task_name` VARCHAR(255) NOT NULL,
+  `description` TEXT,
+  `task_type` ENUM('Task','Bug','Story','Epic','Spike') DEFAULT 'Task',
+  `priority` ENUM('Low','Medium','High','Critical') DEFAULT 'Medium',
+  `status` ENUM('To Do','In Progress','In Review','Blocked','Completed') DEFAULT 'To Do',
+  `estimated_hours` INT DEFAULT 0,
+  `logged_hours` INT DEFAULT 0,
+  `story_points` INT DEFAULT 0,
+  `assignee` VARCHAR(255) DEFAULT NULL,
+  `start_date` DATE NOT NULL,
+  `actual_start_date` DATE DEFAULT NULL,
+  `end_date` DATE NOT NULL,
+  `actual_end_date` DATE DEFAULT NULL,
+  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`task_id`),
+  INDEX `idx_task_project` (`project_id`),
+  INDEX `idx_task_sprint` (`sprint_id`),
+  INDEX `idx_task_parent` (`parent_task_id`),
+  INDEX `idx_task_type` (`task_type`),
+  INDEX `idx_task_priority` (`priority`),
+  INDEX `idx_task_status` (`status`),
+  INDEX `idx_task_assignee` (`assignee`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
+COMMENT='Task and work item tracking';
+
+-- ============================================ tbl_blocker TABLE
+-- Stores project blockers that prevent work from progressing
+CREATE TABLE IF NOT EXISTS `tbl_blocker` (
+  `blocker_id` INT NOT NULL AUTO_INCREMENT,
+  `project_id` BIGINT NOT NULL,
+  `sprint_id` INT DEFAULT NULL,
+  `task_id` INT DEFAULT NULL,
+  `blocker_title` VARCHAR(255) NOT NULL,
+  `blocker_description` TEXT DEFAULT NULL,
+  `blocker_type` ENUM('Technical','Dependency','Resource','Requirement','Infrastructure','External','Other') NOT NULL,
+  `severity` ENUM('Low','Medium','High','Critical') DEFAULT 'Medium',
+  `status` ENUM('Open','In Progress','Resolved') DEFAULT 'Open',
+  `reported_by` VARCHAR(255) NOT NULL,
+  `assigned_to` VARCHAR(255) DEFAULT NULL,
+  `reported_date` DATE NOT NULL,
+  `resolved_date` DATE DEFAULT NULL,
+  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`blocker_id`),
+  INDEX `idx_blocker_project` (`project_id`),
+  INDEX `idx_blocker_sprint` (`sprint_id`),
+  INDEX `idx_blocker_task` (`task_id`),
+  INDEX `idx_blocker_type` (`blocker_type`),
+  INDEX `idx_blocker_severity` (`severity`),
+  INDEX `idx_blocker_status` (`status`),
+  INDEX `idx_blocker_reported_date` (`reported_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
+COMMENT='Project blockers tracking with severity and resolution status';
+
+-- ============================================ tbl_risk_parameters_selection TABLE
+-- Stores risk parameter selection and weights for projects
+CREATE TABLE IF NOT EXISTS `tbl_risk_parameters_selection` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `project_id` BIGINT NOT NULL,
+
+    `uncompleted_tasks` BOOLEAN DEFAULT FALSE,
+    `uncompleted_tasks_weight` INT DEFAULT 0,
+
+    `detected_bugs` BOOLEAN DEFAULT FALSE,
+    `detected_bugs_weight` INT DEFAULT 0,
+
+    `blockers_count` BOOLEAN DEFAULT FALSE,
+    `blockers_count_weight` INT DEFAULT 0,
+
+    `developer_workload` BOOLEAN DEFAULT FALSE,
+    `developer_workload_weight` INT DEFAULT 0,
+
+    `task_dependency` BOOLEAN DEFAULT FALSE,
+    `task_dependency_weight` INT DEFAULT 0,
+
+    `timeline_conflict` BOOLEAN DEFAULT FALSE,
+    `timeline_conflict_weight` INT DEFAULT 0,
+
+    `developer_availability` BOOLEAN DEFAULT FALSE,
+    `developer_availability_weight` INT DEFAULT 0,
+
+    `task_progress` BOOLEAN DEFAULT FALSE,
+    `task_progress_weight` INT DEFAULT 0,
+
+    `sprint_completion_level` BOOLEAN DEFAULT FALSE,
+    `sprint_completion_level_weight` INT DEFAULT 0,
+
+    `project_budget` BOOLEAN DEFAULT FALSE,
+    `project_budget_weight` INT DEFAULT 0,
+
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX `idx_risk_project` (`project_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
+COMMENT='Risk parameter selection and weights for project risk analysis';
 
 
 -- ============================================
