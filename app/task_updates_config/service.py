@@ -65,6 +65,10 @@ class TaskUpdatesService:
                         "already_processed": True
                     }
             
+            # If forcing re-extraction, delete existing ones first
+            if force_reextract:
+                await self.delete_for_meeting(tenant_name, meeting_id)
+            
             # Extract using AI
             extractions, processing_time = self.extractor.extract_from_transcript(transcript, meeting_id)
             
@@ -240,3 +244,8 @@ class TaskUpdatesService:
         """Get task update by ID"""
         query = "SELECT * FROM task_updates WHERE id = %s"
         return await self.db.execute_query(query, (update_id,), fetch_one=True, schema=tenant_name)
+
+    async def delete_for_meeting(self, tenant_name: str, meeting_id: str):
+        """Delete all task updates for a meeting"""
+        query = "DELETE FROM task_updates WHERE meeting_id = %s"
+        await self.db.execute_query(query, (meeting_id,), commit=True, schema=tenant_name)

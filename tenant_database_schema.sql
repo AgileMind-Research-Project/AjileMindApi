@@ -491,11 +491,11 @@ CREATE TABLE IF NOT EXISTS `downtime_notifications` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `type` ENUM('PLANNED_MAINTENANCE', 'EMERGENCY_OUTAGE', 'FEATURE_UPGRADE', 'SERVICE_DEGRADATION') NOT NULL,
     `priority` ENUM('HIGH', 'MEDIUM', 'LOW') NOT NULL DEFAULT 'MEDIUM',
-    `affected_components` JSON NOT NULL COMMENT 'List of affected services',
+    `affected_components` JSON NULL COMMENT 'List of affected services',
     
     -- Schedule
-    `start_time` DATETIME NOT NULL,
-    `end_time` DATETIME NOT NULL,
+    `start_time` DATETIME NULL,
+    `end_time` DATETIME NULL,
     `timezone` VARCHAR(50) DEFAULT 'UTC',
     
     -- Content
@@ -507,14 +507,18 @@ CREATE TABLE IF NOT EXISTS `downtime_notifications` (
     `project_id` BIGINT NULL COMMENT 'If audience is PROJECT_MEMBERS',
     
     -- Metadata
-    `sent_by_user_id` VARCHAR(50) NULL COMMENT 'Admin/User ID who sent it',
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `status` VARCHAR(50) DEFAULT 'PENDING' COMMENT 'PENDING, SCHEDULED, SENT, FAILED',
+    `created_by` VARCHAR(255) NULL COMMENT 'Email of user who created notification',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `scheduled_at` DATETIME NULL COMMENT 'When the notification is scheduled to be sent',
+    `sent_at` DATETIME NULL COMMENT 'When the notification was actually sent',
     
     -- Indexes
     INDEX `idx_type` (`type`),
+    INDEX `idx_status` (`status`),
     INDEX `idx_start_time` (`start_time`),
     INDEX `idx_project_id` (`project_id`),
+    INDEX `idx_created_at` (`created_at`),
     
     -- Foreign Key
     CONSTRAINT `fk_downtime_project`
@@ -523,3 +527,48 @@ CREATE TABLE IF NOT EXISTS `downtime_notifications` (
         ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='History of system downtime and maintenance notifications';
+
+-- ============================================
+-- RELEASE_NOTES TABLE
+-- ============================================
+-- Stores project release notes with versioning and AI-generated content
+-- Date: 2026-01-07
+
+CREATE TABLE IF NOT EXISTS `release_notes` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `project_id` BIGINT NOT NULL COMMENT 'Associated project',
+    `version` VARCHAR(50) NOT NULL COMMENT 'Semantic version (e.g., 1.0.0, 2.1.3)',
+    `title` VARCHAR(255) NOT NULL COMMENT 'Release title',
+    `release_date` DATE NULL COMMENT 'Scheduled or actual release date',
+    `release_type` ENUM('MAJOR', 'MINOR', 'PATCH', 'HOTFIX') DEFAULT 'MINOR' COMMENT 'Release classification',
+    
+    -- Content (JSON structure)
+    `content` JSON NULL COMMENT 'Structured content: {features: [], bug_fixes: [], improvements: [], breaking_changes: [], known_issues: []}',
+    `summary` TEXT NULL COMMENT 'Executive summary or overview',
+    
+    -- Status management
+    `status` ENUM('DRAFT', 'PUBLISHED', 'ARCHIVED') DEFAULT 'DRAFT' COMMENT 'Publication status',
+    
+    -- Metadata
+    `created_by` VARCHAR(255) NOT NULL COMMENT 'User ID of creator (must be PROJECT_MANAGER)',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `published_at` DATETIME NULL COMMENT 'When the release note was published',
+    `published_by` VARCHAR(255) NULL COMMENT 'User ID who published the release note',
+    
+    -- Indexes for performance
+    INDEX `idx_project_id` (`project_id`),
+    INDEX `idx_status` (`status`),
+    INDEX `idx_created_by` (`created_by`),
+    INDEX `idx_version` (`version`),
+    INDEX `idx_release_date` (`release_date`),
+    INDEX `idx_published_at` (`published_at`),
+    
+    -- Foreign key constraints
+    CONSTRAINT `fk_release_notes_project`
+        FOREIGN KEY (`project_id`)
+        REFERENCES `projects` (`project_id`)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Project release notes with versioning and structured content';
