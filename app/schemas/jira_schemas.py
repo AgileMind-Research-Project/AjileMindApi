@@ -70,3 +70,10 @@ class JiraProjectsResponse(BaseModel):
     success: bool
     message: str
     data: List[Dict[str, Any]]
+
+
+class JiraTransitionRequest(BaseModel):
+    """Request model for transitioning a Jira issue"""
+    target_status: str = Field(default="Done", description="Target status name (e.g., Done, In Progress)")
+    comment: Optional[str] = Field(None, description="Optional comment for the transition")
+
