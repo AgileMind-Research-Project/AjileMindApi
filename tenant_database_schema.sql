@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS `sprint` (
 -- ============================================ project_backlog TABLE
 -- Stores backlog items for projects
 
-  CREATE TABLE `project_backlog` (
+CREATE TABLE IF NOT EXISTS `project_backlog` (
   `id` VARCHAR(128) COLLATE utf8mb4_unicode_ci NOT NULL
     COMMENT 'Backlog unique ID created by jira',
 
@@ -252,13 +252,7 @@ CREATE TABLE IF NOT EXISTS `sprint` (
   KEY `idx_status` (`status`),
   KEY `idx_priority` (`priority`),
   KEY `idx_sprint_id` (`sprint_id`),
-  KEY `idx_parent_task_id` (`parent_task_id`),
-
-  CONSTRAINT `fk_backlog_project`
-    FOREIGN KEY (`project_id`)
-    REFERENCES `projects` (`project_id`)
-    ON DELETE CASCADE
-    ON UPDATE CASCADE
+  KEY `idx_parent_task_id` (`parent_task_id`)
 
 ) ENGINE=InnoDB
 DEFAULT CHARSET=utf8mb4
@@ -269,7 +263,7 @@ COMMENT='Backlog items before project start and future changes/features';
 -- ============================================ sprint TABLE
 -- Stores sprint information for projects
 CREATE TABLE IF NOT EXISTS `sprint` (
-    `sprint_id` INT NOT NULL  
+    `sprint_id` INT NOT NULL AUTO_INCREMENT
         COMMENT 'Unique sprint identifier',
 
     `project_id` BIGINT NOT NULL
@@ -293,6 +287,9 @@ CREATE TABLE IF NOT EXISTS `sprint` (
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP
         COMMENT 'Last update time',
+
+    -- Primary Key
+    PRIMARY KEY (`sprint_id`),
 
     -- Indexes
     INDEX `idx_project_id` (`project_id`),
@@ -350,25 +347,7 @@ CREATE TABLE IF NOT EXISTS `project_backlog_priority` (
 
     -- Indexes
     INDEX `idx_project_rank` (`project_id`, `rank`),
-
-    -- Foreign Keys
-    CONSTRAINT `fk_priority_project`
-        FOREIGN KEY (`project_id`)
-        REFERENCES `projects` (`project_id`)
-        ON UPDATE CASCADE
-        ON DELETE CASCADE,
-
-    CONSTRAINT `fk_priority_backlog`
-        FOREIGN KEY (`backlog_id`)
-        REFERENCES `project_backlog` (`id`)
-        ON UPDATE CASCADE
-        ON DELETE CASCADE,
-
-    CONSTRAINT `fk_priority_sprint`
-        FOREIGN KEY (`sprint_id`)
-        REFERENCES `sprint` (`sprint_id`)
-        ON UPDATE CASCADE
-        ON DELETE CASCADE
+    INDEX `idx_sprint_id` (`sprint_id`)
 
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
