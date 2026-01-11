@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.logger import logger
 from app.utils.jwt import get_current_user_from_token
 from app.utils.password import hash_password
+from app.utils.permissions import require_admin, is_super_admin
 from app.services.email_service import email_service
 from pydantic import BaseModel, EmailStr, Field
 
@@ -37,8 +38,9 @@ class InviteUserRequest(BaseModel):
     first_name: str = Field(..., min_length=1, max_length=50)
     last_name: str = Field(..., min_length=1, max_length=50)
     email: EmailStr
-    role: str = Field(..., min_length=1, max_length=50)
+    roles: List[str] = Field(..., min_items=1, description="List of roles to assign to user")
     project_ids: List[int] = Field(default=[], description="List of project IDs to assign user to")
+    user_data: Optional[UserDataRequest] = Field(None, description="User profile data (stack, technologies, experience)")
 
 
 class InviteUserResponse(BaseModel):
@@ -58,7 +60,12 @@ async def verify_admin_or_super_admin(
     """
     Verify that the user is an Admin or Super Admin.
     """
-    if current_user.get("role") not in ["SUPER_ADMIN", "ADMIN"]:
+    user_roles = current_user.get("roles", [])
+    # Fallback to single role for backward compatibility
+    if not user_roles and current_user.get("role"):
+        user_roles = [current_user.get("role")]
+    
+    if not any(role in ["SUPER_ADMIN", "ADMIN"] for role in user_roles):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin or Super Admin access required"
@@ -149,6 +156,16 @@ async def invite_user(
         # Generate user ID
         user_id = f"usr-{uuid.uuid4().hex[:16]}"
         
+        # Prepare user_data JSON
+        import json
+        user_data_json = None
+        if request.user_data:
+            user_data_json = json.dumps({
+                "stack": request.user_data.stack or [],
+                "technologies": request.user_data.technologies or [],
+                "experience_years": request.user_data.experience_years or 0
+            })
+        
         # Create user in domain table
         insert_query = f"""
             INSERT INTO `{settings.DB_NAME}`.`{tenant_name}` (
@@ -157,15 +174,17 @@ async def invite_user(
                 password_hash,
                 first_name,
                 last_name,
-                role,
+                roles,
+                user_data,
                 status,
                 password_change_required,
                 created_at,
                 updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         now = datetime.utcnow()
+        roles_json = json.dumps(request.roles)
         
         await database.execute_query(
             insert_query,
@@ -175,7 +194,8 @@ async def invite_user(
                 password_hash,
                 request.first_name,
                 request.last_name,
-                request.role,
+                roles_json,
+                user_data_json,
                 'ACTIVE',  # status
                 1,  # password_change_required
                 now,
@@ -226,7 +246,7 @@ async def invite_user(
             first_name=request.first_name,
             last_name=request.last_name,
             company_name=company_name,
-            role=request.role,
+            role=', '.join(request.roles),  # Join roles for email display
             temporary_password=auto_password
         )
         
@@ -242,7 +262,7 @@ async def invite_user(
                 "email": request.email,
                 "first_name": request.first_name,
                 "last_name": request.last_name,
-                "role": request.role,
+                "roles": request.roles,
                 "project_ids": request.project_ids,
                 "email_sent": email_sent,
                 "password_change_required": True
@@ -284,9 +304,10 @@ async def list_users(
                 email,
                 first_name,
                 last_name,
-                role,
+                roles,
                 status,
                 projects,
+                user_data,
                 password_change_required,
                 created_at
             FROM `{settings.DB_NAME}`.`{tenant_name}`
@@ -310,14 +331,33 @@ async def list_users(
                 except:
                     user_projects = []
             
+            # Parse user_data JSON
+            user_data = None
+            if user.get("user_data"):
+                try:
+                    user_data = json.loads(user["user_data"]) if isinstance(user["user_data"], str) else user["user_data"]
+                except:
+                    user_data = None
+            
+            # Parse roles JSON
+            user_roles = []
+            if user.get("roles"):
+                try:
+                    user_roles = json.loads(user["roles"]) if isinstance(user["roles"], str) else user["roles"]
+                except:
+                    # Fallback to legacy single role field if exists
+                    if user.get("role"):
+                        user_roles = [user["role"]]
+            
             result.append({
                 "user_id": user["user_id"],
                 "email": user["email"],
                 "first_name": user["first_name"],
                 "last_name": user["last_name"],
-                "role": user["role"],
+                "roles": user_roles,
                 "status": user["status"],
                 "project_ids": user_projects,
+                "user_data": user_data,
                 "password_change_required": bool(user["password_change_required"]),
                 "created_at": user["created_at"].isoformat() if user["created_at"] else ""
             })
@@ -371,23 +411,27 @@ async def get_users_by_role(
                 detail="Tenant name not found in token"
             )
         
-        # Query users with specific role
+        # Query users with specific role (using JSON_CONTAINS for roles array)
         query = f"""
             SELECT 
                 user_id,
                 email,
                 first_name,
                 last_name,
-                role,
+                roles,
                 status
             FROM `{settings.DB_NAME}`.`{tenant_name}`
             WHERE JSON_CONTAINS(roles, %s, '$') AND status = 'ACTIVE'
             ORDER BY first_name, last_name
         """
         
+        # JSON_CONTAINS requires the value to be JSON encoded
+        import json
+        role_json = json.dumps(role)
+        
         users = await database.execute_query(
             query,
-            (role,),
+            (role_json,),
             fetch_all=True
         )
         
@@ -425,7 +469,8 @@ class UpdateUserRequest(BaseModel):
     """Request model for updating user basic details"""
     first_name: Optional[str] = Field(None, min_length=1, max_length=50)
     last_name: Optional[str] = Field(None, min_length=1, max_length=50)
-    role: Optional[str] = Field(None, min_length=1, max_length=50)
+    roles: Optional[List[str]] = Field(None, description="List of roles to assign to user")
+    user_data: Optional[UserDataRequest] = Field(None, description="User profile data")
 
 
 @router.put(
@@ -493,8 +538,20 @@ async def update_user(
                         detail=f"Role '{role_name}' not found"
                     )
             
-            update_fields.append("role = %s")
-            params.append(request.role)
+            import json
+            roles_json = json.dumps(request.roles)
+            update_fields.append("roles = %s")
+            params.append(roles_json)
+        
+        if request.user_data is not None:
+            import json
+            user_data_json = json.dumps({
+                "stack": request.user_data.stack or [],
+                "technologies": request.user_data.technologies or [],
+                "experience_years": request.user_data.experience_years or 0
+            })
+            update_fields.append("user_data = %s")
+            params.append(user_data_json)
         
         if not update_fields:
             raise HTTPException(
@@ -523,7 +580,7 @@ async def update_user(
                 "user_id": user_id,
                 "first_name": request.first_name,
                 "last_name": request.last_name,
-                "role": request.role
+                "roles": request.roles
             }
         }
         
