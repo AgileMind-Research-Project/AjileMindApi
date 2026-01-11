@@ -13,8 +13,8 @@ The core differentiator of AgileMind is its deep integration of **Generative AI 
 The system is a single deployment unit (`FastAPI`) where "Services" are internal Python modules (packages). There is no separate API Gateway; the application itself handles routing and cross-cutting concerns (Auth, Logging) via middleware.
 
 ```mermaid
-C4Context
-    title AgileMind System Context (Modular Monolith)
+C4Container
+    title AgileMind System Architecture (Modular Monolith)
     
     Person(user, "User", "Project Manager, Developer, Admin")
     
@@ -36,11 +36,23 @@ C4Context
     }
 
     System_Ext(llm, "LLM Service", "OpenAI / Ollama", "GenAI Inference")
+    System_Ext(jira, "Jira Cloud", "Project Sync")
 
-    Rel(user, frontend, "Uses")
-    Rel(frontend, backend, "HTTPS/JSON")
-    Rel(backend, db, "Reads/Writes")
-    Rel(backend, llm, "Inference Calls")
+    Rel(user, frontend, "Uses", "HTTPS")
+    Rel(frontend, backend, "API Calls", "JSON/HTTPS")
+    
+    Rel(backend, authMod, "Routes to")
+    Rel(backend, algoMod, "Invokes")
+    Rel(backend, aiMod, "Invokes")
+    
+    Rel(authMod, dataMod, "Use")
+    Rel(algoMod, dataMod, "Use")
+    
+    Rel(dataMod, db, "Reads/Writes", "SQL")
+    Rel(aiMod, vector, "Reads/Writes", "Embeddings")
+    Rel(aiMod, llm, "Inference Calls", "API")
+    Rel(backend, redis, "Cache/PubSub", "Redis Protocol")
+    Rel(backend, jira, "Syncs", "REST API")
 ```
 
 ---
