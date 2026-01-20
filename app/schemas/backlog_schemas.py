@@ -54,7 +54,6 @@ class BacklogItemBase(BaseModel):
 class BacklogItemCreate(BacklogItemBase):
     """Create backlog item request"""
     project_id: int = Field(..., description="Project ID this item belongs to")
-    sprint_id: Optional[int] = Field(None, description="Sprint ID to assign (optional)")
 
 
 class BacklogItemFromFile(BaseModel):
@@ -64,10 +63,8 @@ class BacklogItemFromFile(BaseModel):
     issue_type: str  # Will be validated and converted to IssueType
     priority: Optional[str] = None
     assignee: Optional[str] = None
-    assignee: Optional[str] = None
     tags: Optional[str] = None  # Comma-separated string from file
     severity: Optional[str] = None
-    sprint_id: Optional[int] = None
 
     def to_create_request(self, project_id: int) -> BacklogItemCreate:
         """Convert file data to create request"""
@@ -84,8 +81,7 @@ class BacklogItemFromFile(BaseModel):
             priority=Priority(self.priority.lower()) if self.priority else None,
             assignee=self.assignee,
             tags=tags_list,
-            severity=self.severity,
-            sprint_id=self.sprint_id
+            severity=self.severity
         )
 
 
@@ -94,7 +90,6 @@ class BacklogItemResponse(BacklogItemBase):
     id: str = Field(..., description="Jira issue key (e.g., PROJ-123)")
     project_id: int
     parent_task_id: Optional[str] = Field(None, description="Parent task ID if this is a subtask")
-    sprint_id: Optional[int] = None
     status: Status
     created_at: datetime
     updated_at: datetime

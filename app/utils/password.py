@@ -2,37 +2,23 @@
 Password Utilities
 
 Password hashing, validation, and policy enforcement.
-Uses bcrypt directly to avoid passlib compatibility issues with bcrypt 4.1+.
 """
 
 import re
 import secrets
 import string
-import bcrypt
+from passlib.context import CryptContext
 from typing import Tuple, List
 from app.core.config import settings
 from app.core.logger import logger
 
-
-def _truncate_to_72_bytes(s: str) -> str:
-    """Truncate a string so its UTF-8 encoding is at most 72 bytes.
-
-    bcrypt enforces a 72-byte limit (not characters). Truncating by
-    characters can still exceed 72 bytes for multibyte characters.
-    This helper ensures the passed string will be safe for bcrypt.
-    """
-    if s is None:
-        return ""
-    b = s.encode("utf-8", errors="ignore")[:72]
-    try:
-        return b.decode("utf-8")
-    except Exception:
-        return b.decode("utf-8", errors="ignore")
+# Password hashing context
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:
     """
-    Hash password using bcrypt directly.
+    Hash password using bcrypt.
     
     Args:
         password: Plain text password
@@ -40,21 +26,12 @@ def hash_password(password: str) -> str:
     Returns:
         Hashed password
     """
-    # Truncate to 72 bytes (bcrypt limit)
-    safe_password = _truncate_to_72_bytes(password)
-    try:
-        # Generate salt and hash
-        salt = bcrypt.gensalt(rounds=12)
-        hashed = bcrypt.hashpw(safe_password.encode("utf-8"), salt)
-        return hashed.decode("utf-8")
-    except Exception as e:
-        logger.error(f"Error hashing password: {e}")
-        raise
+    return pwd_context.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
-    Verify plain password against hashed password using bcrypt directly.
+    Verify plain password against hashed password.
     
     Args:
         plain_password: Plain text password
@@ -63,26 +40,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns:
         True if password matches, False otherwise
     """
-    # Truncate plain password by bytes to avoid bcrypt errors
-    safe_password = _truncate_to_72_bytes(plain_password)
-    
-    # Debug info
-    try:
-        raw_len = len(plain_password or "")
-        raw_bytes_len = len((plain_password or "").encode("utf-8", errors="ignore"))
-        safe_bytes_len = len(safe_password.encode("utf-8", errors="ignore"))
-        logger.debug(f"Password lengths: chars={raw_len}, bytes={raw_bytes_len}, truncated_bytes={safe_bytes_len}")
-    except Exception:
-        pass
-
-    try:
-        # bcrypt.checkpw requires bytes
-        password_bytes = safe_password.encode("utf-8")
-        hash_bytes = hashed_password.encode("utf-8")
-        return bcrypt.checkpw(password_bytes, hash_bytes)
-    except Exception as e:
-        logger.warning(f"Password verification error: {e}")
-        return False
+    return pwd_context.verify(plain_password, hashed_password)
 
 
 def validate_password(password: str) -> Tuple[bool, List[str]]:

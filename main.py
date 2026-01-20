@@ -8,14 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 import sys
-import os
 from pathlib import Path
-
-# Fix Windows console encoding for Unicode characters
-if sys.platform == 'win32':
-    os.environ['PYTHONIOENCODING'] = 'utf-8'
-    sys.stdout.reconfigure(encoding='utf-8')
-    sys.stderr.reconfigure(encoding='utf-8')
 
 # Add app directory to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -24,14 +17,10 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, notifications, backlog_priority, riskparameters, documents, transcripts, reports, templates, notifications, release_notes
-from app.meeting_config import routes as meetings_router
-from app.task_updates_config import routes as task_updates_router
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, notifications, backlog_priority
 from app.db.database import db
 from app.middleware.audit_middleware import AuditLoggingMiddleware
 from app.core.redis_chat_client import init_redis_chat
-
-from app.services.scheduler import start_scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -56,18 +45,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️  Redis Chat initialization warning: {e}\n")
         # Don't raise - chat is optional
-
-    # Initialize Scheduler
-    print("⏰ Initializing Background Scheduler...")
-    try:
-        start_scheduler()
-        print("✅ Scheduler started successfully\n")
-    except Exception as e:
-        print(f"❌ Failed to start scheduler: {e}\n")
     
     yield
-    
-    # Cleanup
     
     # Cleanup
     print("\n" + "="*70)
@@ -284,15 +263,6 @@ app.include_router(backlog.router, prefix=f"{settings.API_PREFIX}/backlog", tags
 app.include_router(backlog_priority.router, prefix=f"{settings.API_PREFIX}/backlog-priority", tags=["Backlog Priority"])
 app.include_router(notifications.router, prefix=f"{settings.API_PREFIX}/notifications", tags=["Notifications"])
 app.include_router(redis_chat.router, prefix=f"{settings.API_PREFIX}/chat", tags=["Redis Chat"])
-app.include_router(riskparameters.router,prefix=f"{settings.API_PREFIX}/risk-parameters", tags=["Risk Parameters"])
-app.include_router(documents.router, prefix=f"{settings.API_PREFIX}/documents", tags=["Documents & RAG Chatbot"])
-app.include_router(meetings_router.router, prefix=f"{settings.API_PREFIX}/meetings", tags=["Meetings"])
-app.include_router(task_updates_router.router, prefix=f"{settings.API_PREFIX}/task-updates", tags=["Task Updates"])
-app.include_router(transcripts.router, prefix=f"{settings.API_PREFIX}/transcripts", tags=["Transcripts"])
-app.include_router(reports.router, prefix=f"{settings.API_PREFIX}/reports", tags=["Reports"])
-app.include_router(templates.router, prefix=f"{settings.API_PREFIX}/report-templates", tags=["Report Templates"])
-app.include_router(notifications.router, prefix=f"{settings.API_PREFIX}/notifications", tags=["Notifications"])
-app.include_router(release_notes.router, prefix=f"{settings.API_PREFIX}/release-notes", tags=["Release Notes"])
 # app.include_router(tenants.router, prefix=f"{settings.API_PREFIX}/tenants", tags=["Tenants"])
 
 if __name__ == "__main__":    
