@@ -14,6 +14,7 @@ import logging
 from typing import Dict, Set, List
 from datetime import datetime
 import json
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +27,23 @@ cors_origins = settings.CORS_ORIGINS
 if isinstance(cors_origins, str):
     cors_origins = [origin.strip() for origin in cors_origins.split(',')]
 
+# Redis manager for multi-server Socket.IO
+redis_host = os.getenv('REDIS_HOST', 'localhost')
+redis_port = os.getenv('REDIS_PORT', '6379')
+redis_password = os.getenv('REDIS_PASSWORD', '')
+redis_db = os.getenv('REDIS_DB', '0')
+if redis_password:
+    redis_url = f'redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}'
+else:
+    redis_url = f'redis://{redis_host}:{redis_port}/{redis_db}'
+logger.info(f'?? Socket.IO Redis: {redis_host}:{redis_port}')
+mgr = socketio.AsyncRedisManager(redis_url)
+
 # Create Socket.IO server
 # IMPORTANT: Disable Socket.IO's CORS - let FastAPI's CORSMiddleware handle ALL CORS
 # This prevents duplicate Access-Control-Allow-Origin headers which browsers reject
 sio = socketio.AsyncServer(
+    client_manager=mgr,
     cors_allowed_origins=[],  # Empty = Let FastAPI handle CORS (prevents duplicates)
     async_mode='asgi',
     logger=True,
@@ -180,12 +194,14 @@ async def join_meeting(sid, data):
     meeting = get_meeting_data(meeting_id)
     channel_id = meeting.get('channel_id') if meeting else None
     
-    # Store session data with channel_id
+    # Store session data with channel_id and initial media status
     session_data[sid] = {
         'meeting_id': meeting_id,
         'user_id': user_id,
         'username': username,
-        'channel_id': channel_id  # Store channel_id for chat sync
+        'channel_id': channel_id,  # Store channel_id for chat sync
+        'mic_enabled': True,       # Track mic status (default on)
+        'camera_enabled': True     # Track camera status (default on)
     }
     
     # Add to meeting room
@@ -197,7 +213,7 @@ async def join_meeting(sid, data):
         active_meetings[meeting_id] = set()
     active_meetings[meeting_id].add(sid)
     
-    # Get list of existing participants (excluding the new user)
+    # Get list of existing participants (excluding the new user) WITH their media status
     existing_participants = []
     for existing_sid in active_meetings[meeting_id]:
         if existing_sid != sid and existing_sid in session_data:
@@ -205,26 +221,30 @@ async def join_meeting(sid, data):
             existing_participants.append({
                 'user_id': existing_data['user_id'],
                 'username': existing_data['username'],
-                'session_id': existing_sid
+                'session_id': existing_sid,
+                'mic_enabled': existing_data.get('mic_enabled', True),
+                'camera_enabled': existing_data.get('camera_enabled', True)
             })
     
-    # Send existing participants to the new user
+    # Send existing participants to the new user (with their current media status)
     if existing_participants:
         await sio.emit(
             'existing-participants',
             {'participants': existing_participants},
             room=sid
         )
-        logger.info(f"📋 Sent {len(existing_participants)} existing participants to {username}")
+        logger.info(f"📋 Sent {len(existing_participants)} existing participants to {username} (with media status)")
     
-    # Notify others in the room about the new user
+    # Notify others in the room about the new user (with their initial media status)
     logger.info(f"📤 EMITTING user-joined to room {meeting_id} (skip {sid})")
     await sio.emit(
         'user-joined',
         {
             'user_id': user_id,
             'username': username,
-            'session_id': sid
+            'session_id': sid,
+            'mic_enabled': True,    # New user starts with mic on
+            'camera_enabled': True  # New user starts with camera on
         },
         room=meeting_id,
         skip_sid=sid
@@ -386,17 +406,21 @@ async def mic_toggle(sid, data):
     
     sender = session_data[sid]
     meeting_id = sender['meeting_id']
+    enabled = data.get('enabled', True)
+    
+    # Track status in session data for new joiners
+    sender['mic_enabled'] = enabled
     
     await sio.emit(
         'mic-toggle',
         {
             'user_id': sender['user_id'],
-            'enabled': data.get('enabled')
+            'enabled': enabled
         },
         room=meeting_id,
         skip_sid=sid
     )
-    logger.info(f"🎤 {sender['username']} mic: {data.get('enabled')}")
+    logger.info(f"🎤 {sender['username']} mic: {enabled}")
 
 
 @sio.event
@@ -407,17 +431,46 @@ async def camera_toggle(sid, data):
     
     sender = session_data[sid]
     meeting_id = sender['meeting_id']
+    enabled = data.get('enabled', True)
+    
+    # Track status in session data for new joiners
+    sender['camera_enabled'] = enabled
     
     await sio.emit(
         'camera-toggle',
         {
             'user_id': sender['user_id'],
-            'enabled': data.get('enabled')
+            'enabled': enabled
         },
         room=meeting_id,
         skip_sid=sid
     )
-    logger.info(f"📹 {sender['username']} camera: {data.get('enabled')}")
+    logger.info(f"📹 {sender['username']} camera: {enabled}")
+
+
+@sio.event
+async def speaking(sid, data):
+    """Broadcast speaking status to other participants"""
+    if sid not in session_data:
+        return
+    
+    sender = session_data[sid]
+    meeting_id = sender['meeting_id']
+    is_speaking = data.get('speaking', False)
+    
+    await sio.emit(
+        'user-speaking',
+        {
+            'user_id': sender['user_id'],
+            'username': sender['username'],
+            'speaking': is_speaking
+        },
+        room=meeting_id,
+        skip_sid=sid  # Don't send back to the speaker
+    )
+    # Only log when someone starts speaking (not stops) to reduce log noise
+    if is_speaking:
+        logger.debug(f"🗣️ {sender['username']} is speaking")
 
 
 @sio.event
