@@ -27,10 +27,10 @@ if isinstance(cors_origins, str):
     cors_origins = [origin.strip() for origin in cors_origins.split(',')]
 
 # Create Socket.IO server
-# Disable Socket.IO's CORS - let FastAPI's CORSMiddleware handle CORS
-# This prevents duplicate Access-Control-Allow-Origin headers
+# Enable Socket.IO CORS to allow connections from frontend
+# Using the same CORS origins as FastAPI for consistency
 sio = socketio.AsyncServer(
-    cors_allowed_origins=[],  # Empty list disables Socket.IO CORS handling
+    cors_allowed_origins=cors_origins,  # ✅ Enable CORS for Socket.IO connections
     async_mode='asgi',
     logger=True,
     engineio_logger=True,
