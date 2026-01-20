@@ -165,6 +165,9 @@ async def disconnect(sid):
 @sio.event
 async def join_meeting(sid, data):
     """User joins a meeting"""
+    logger.info(f"📥 RECEIVED join_meeting event from {sid}")
+    logger.info(f"📥 Data: {data}")
+    
     meeting_id = data.get('meeting_id')
     user_id = data.get('user_id')
     username = data.get('username')
@@ -215,6 +218,7 @@ async def join_meeting(sid, data):
         logger.info(f"📋 Sent {len(existing_participants)} existing participants to {username}")
     
     # Notify others in the room about the new user
+    logger.info(f"📤 EMITTING user-joined to room {meeting_id} (skip {sid})")
     await sio.emit(
         'user-joined',
         {
@@ -242,6 +246,9 @@ async def offer(sid, data):
         'offer': SDP offer object
     }
     """
+    logger.info(f"📥 RECEIVED offer from {sid}")
+    logger.info(f"📥 Offer data keys: {data.keys()}")
+    
     to_sid = data.get('to')
     offer_data = data.get('offer')
     
@@ -272,6 +279,9 @@ async def answer(sid, data):
         'answer': SDP answer object
     }
     """
+    logger.info(f"📥 RECEIVED answer from {sid}")
+    logger.info(f"📥 Answer to: {data.get('to')}")
+    
     to_sid = data.get('to')
     answer_data = data.get('answer')
     
@@ -504,5 +514,9 @@ async def save_transcript(sid, data):
 
 
 # Create ASGI app
-# When mounted at /socket.io in FastAPI, we keep the default socketio_path
-socket_app = socketio.ASGIApp(sio)
+# When mounted at /socket.io in FastAPI, set socketio_path to empty
+# This tells Socket.IO that FastAPI already handles the /socket.io prefix
+socket_app = socketio.ASGIApp(
+    sio,
+    socketio_path='',  # Empty because FastAPI mounts at /socket.io
+)
