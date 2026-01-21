@@ -39,6 +39,18 @@ else:
 logger.info(f'?? Socket.IO Redis: {redis_host}:{redis_port}')
 mgr = socketio.AsyncRedisManager(redis_url)
 
+# Redis manager for multi-server Socket.IO
+redis_host = os.getenv('REDIS_HOST', 'localhost')
+redis_port = os.getenv('REDIS_PORT', '6379')
+redis_password = os.getenv('REDIS_PASSWORD', '')
+redis_db = os.getenv('REDIS_DB', '0')
+if redis_password:
+    redis_url = f'redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}'
+else:
+    redis_url = f'redis://{redis_host}:{redis_port}/{redis_db}'
+logger.info(f'?? Socket.IO Redis: {redis_host}:{redis_port}')
+mgr = socketio.AsyncRedisManager(redis_url)
+
 # Create Socket.IO server
 # IMPORTANT: Disable Socket.IO's CORS - let FastAPI's CORSMiddleware handle ALL CORS
 # This prevents duplicate Access-Control-Allow-Origin headers which browsers reject
