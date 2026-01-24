@@ -229,3 +229,150 @@ class BacklogService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to list backlog items: {str(e)}"
             )
+
+    async def update_backlog_item(
+        self,
+        tenant_name: str,
+        item_id: str,
+        updates: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Update a backlog item"""
+        try:
+            return await self.backlog_repo.update_subtask(tenant_name, item_id, updates)
+        except Exception as e:
+            logger.error(f"Error updating backlog item: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to update backlog item: {str(e)}"
+            )
+
+    async def merge_backlog_items(
+        self,
+        tenant_name: str,
+        target_id: str,
+        source_ids: List[str],
+        updates: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Merge multiple items into one: update target and delete sources"""
+        try:
+            # 1. Update the target item
+            updated_item = await self.backlog_repo.update_subtask(tenant_name, target_id, updates)
+            
+            # 2. Delete source items
+            for source_id in source_ids:
+                if source_id != target_id: # Prevent accidental self-deletion
+                    await self.backlog_repo.delete_backlog_item(tenant_name, source_id)
+            
+            return updated_item
+        except Exception as e:
+            logger.error(f"Error merging backlog items: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to merge backlog items: {str(e)}"
+            )
+
+    async def delete_backlog_item(
+        self,
+        tenant_name: str,
+        item_id: str
+    ) -> bool:
+        """Delete a backlog item and reorder siblings if it's a subtask"""
+        try:
+            logger.info(f"Attempting to delete item: {item_id}")
+            # 1. Get the item
+            item = await self.backlog_repo.get_backlog_item(tenant_name, item_id)
+            if not item:
+                logger.warning(f"Item {item_id} not found")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Backlog item {item_id} not found"
+                )
+
+            parent_id = item.get('parent_task_id')
+            logger.info(f"Item {item_id} parent: {parent_id}")
+            
+            # If not a subtask, simple delete
+            if not parent_id:
+                return await self.backlog_repo.delete_backlog_item(tenant_name, item_id)
+
+            # 2. It is a subtask. Get all siblings to determining reordering.
+            parent_data = await self.backlog_repo.get_task_with_subtasks(tenant_name, parent_id)
+            if not parent_data:
+                 logger.warning(f"Parent {parent_id} data not found, performing simple delete")
+                 return await self.backlog_repo.delete_backlog_item(tenant_name, item_id)
+
+            siblings = parent_data.get('subtasks', [])
+            logger.info(f"Found {len(siblings)} siblings for parent {parent_id}")
+            
+            # Sort by ID to ensure consistent ordering matching user expectation
+            # We attempt to sort by the numeric suffix if possible to handle "SUB-2" vs "SUB-10" correctly.
+            def intelligent_sort_key(item):
+                try:
+                    # Extract last part of ID after split
+                    parts = item['id'].split('-')
+                    if parts[-1].isdigit():
+                        return int(parts[-1])
+                except:
+                    pass
+                return item['id'].lower()
+
+            siblings.sort(key=intelligent_sort_key)
+            
+            # Log sibling IDs for debug
+            sibling_ids = [s['id'] for s in siblings]
+            logger.info(f"Sorted siblings: {sibling_ids}")
+
+            # 3. Find index
+            try:
+                # Find matching ID using case-insensitive comparison just to be safe
+                target_index = next(i for i, s in enumerate(siblings) if s['id'].lower() == item_id.lower())
+                logger.info(f"Target index for {item_id}: {target_index}")
+            except StopIteration:
+                logger.warning(f"Item {item_id} not found in siblings list (checked {len(siblings)} items), performing simple delete")
+                return await self.backlog_repo.delete_backlog_item(tenant_name, item_id)
+
+            # Store original IDs for shifting (these are the 'slots' available)
+            original_ids = [s['id'] for s in siblings]
+
+            # 4. Delete the item
+            deleted = await self.backlog_repo.delete_backlog_item(tenant_name, item_id)
+            if not deleted:
+                logger.error(f"Failed to delete item {item_id} from DB")
+                return False
+            
+            logger.info(f"Deleted {item_id}, proceeding to shift remaining items")
+
+            # 5. Shift subsequent items
+            # Only shift if we deleted something before the end
+            if target_index < len(siblings) - 1:
+                # We iterate through the remaining siblings that were after the deleted one
+                tasks_to_shift = siblings[target_index+1:]
+                logger.info(f"Found {len(tasks_to_shift)} items to shift")
+                
+                for i, task in enumerate(tasks_to_shift):
+                    old_id = task['id']
+                    # Calculate new ID: it should take the ID of the slot before it
+                    # The task was at index `target_index + 1 + i`
+                    # We want to move it to `target_index + i`
+                    new_id = original_ids[target_index + i] 
+                    
+                    logger.info(f"Shifting: {old_id} -> {new_id}")
+                    
+                    if old_id != new_id: 
+                        try:
+                            await self.backlog_repo.rename_backlog_item(tenant_name, old_id, new_id)
+                        except Exception as e:
+                            logger.error(f"Failed to rename {old_id} to {new_id}: {str(e)}")
+                            # Continue trying to shift others even if one fails? 
+                            # Probably best to log and continue to salvage what we can.
+
+            return True
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting backlog item: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to delete backlog item: {str(e)}"
+            )

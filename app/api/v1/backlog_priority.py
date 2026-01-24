@@ -255,6 +255,7 @@ async def get_available_backlog(
             )
         
         # Query to get backlog items NOT in priority table
+        # AND whose parent (if exists) is NOT in priority table
         query = """
             SELECT 
                 pb.id as backlog_id,
@@ -264,7 +265,8 @@ async def get_available_backlog(
                 pb.status,
                 pb.priority,
                 pb.assignee,
-                pb.story_points
+                pb.story_points,
+                pb.parent_task_id
             FROM project_backlog pb
             WHERE pb.project_id = %s
             AND pb.id NOT IN (
@@ -272,12 +274,20 @@ async def get_available_backlog(
                 FROM project_backlog_priority 
                 WHERE project_id = %s
             )
+            AND (
+                pb.parent_task_id IS NULL 
+                OR pb.parent_task_id NOT IN (
+                    SELECT backlog_id 
+                    FROM project_backlog_priority 
+                    WHERE project_id = %s
+                )
+            )
             ORDER BY pb.created_at DESC
         """
         
         results = await database.execute_query(
             query,
-            (project_id, project_id),
+            (project_id, project_id, project_id),
             fetch_all=True,
             schema=tenant_name
         )
@@ -417,7 +427,7 @@ async def remove_from_priority_list(
     database: Database = Depends(get_database)
 ) -> Dict[str, Any]:
     """
-    Remove a backlog item from the priority list.
+    Remove a backlog item from the priority list and re-rank remaining items.
     """
     try:
         tenant_name = current_user.get("tenant_name")
@@ -427,8 +437,29 @@ async def remove_from_priority_list(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Tenant name not found in token"
             )
+            
+        # 1. Get current rank of the item
+        get_rank_query = """
+            SELECT `rank` FROM project_backlog_priority
+            WHERE project_id = %s AND backlog_id = %s
+        """
         
-        # Delete from priority table
+        rank_result = await database.execute_query(
+            get_rank_query,
+            (project_id, backlog_id),
+            fetch_one=True,
+            schema=tenant_name
+        )
+        
+        if not rank_result:
+             raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Item not found in priority list"
+            )
+            
+        deleted_rank = rank_result["rank"]
+        
+        # 2. Delete from priority table
         delete_query = """
             DELETE FROM project_backlog_priority
             WHERE project_id = %s AND backlog_id = %s
@@ -442,19 +473,35 @@ async def remove_from_priority_list(
         )
         
         if result:
-            logger.info(f"Removed item {backlog_id} from priority list")
+            # 3. Update ranks for remaining items
+            reorder_query = """
+                UPDATE project_backlog_priority
+                SET `rank` = `rank` - 1
+                WHERE project_id = %s AND `rank` > %s
+            """
+            
+            await database.execute_query(
+                reorder_query,
+                (project_id, deleted_rank),
+                commit=True,
+                schema=tenant_name
+            )
+            
+            logger.info(f"Removed item {backlog_id} (rank {deleted_rank}) and re-ordered remaining items")
+            
             return {
                 "success": True,
                 "message": "Item removed from priority list",
                 "data": {
                     "project_id": project_id,
-                    "backlog_id": backlog_id
+                    "backlog_id": backlog_id,
+                    "previous_rank": deleted_rank
                 }
             }
         else:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Item not found in priority list"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to remove item from priority list"
             )
         
     except HTTPException:
