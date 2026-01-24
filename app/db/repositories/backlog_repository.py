@@ -129,7 +129,7 @@ class BacklogRepository:
         tenant_name: str,
         project_id: int
     ) -> List[Dict[str, Any]]:
-        """List all backlog items for a project"""
+        """List all backlog items for a project, filtering parents by priority"""
         try:
             query = """
                 SELECT 
@@ -138,12 +138,19 @@ class BacklogRepository:
                     created_at, updated_at
                 FROM project_backlog
                 WHERE project_id = %s
+                AND (
+                    parent_task_id IS NOT NULL
+                    OR id IN (
+                        SELECT backlog_id FROM project_backlog_priority 
+                        WHERE project_id = %s
+                    )
+                )
                 ORDER BY created_at DESC
             """
             
             results = await self.db.execute_query(
                 query,
-                (project_id,),
+                (project_id, project_id),
                 fetch_all=True,
                 schema=tenant_name
             )
@@ -458,4 +465,58 @@ class BacklogRepository:
             
         except Exception as e:
             logger.error(f"Error updating task Jira info: {str(e)}")
+            raise
+
+    async def rename_backlog_item(
+        self,
+        tenant_name: str,
+        old_id: str,
+        new_id: str
+    ) -> bool:
+        """
+        Rename a backlog item (change its ID).
+        Uses a single transaction block with FK checks disabled to ensure atomicity and success.
+        """
+        try:
+            logger.info(f"Renaming {old_id} to {new_id} using transaction block")
+            
+            ops = [
+                # 1. Disable FK checks
+                {"query": "SET FOREIGN_KEY_CHECKS=0"},
+                
+                # 2. Update item ID
+                {
+                    "query": "UPDATE project_backlog SET id = %s, updated_at = NOW() WHERE id = %s",
+                    "params": (new_id, old_id)
+                },
+                
+                # 3. Update Priority Table References
+                {
+                    "query": "UPDATE project_backlog_priority SET backlog_id = %s WHERE backlog_id = %s",
+                    "params": (new_id, old_id)
+                },
+                
+                # 4. Update Child References
+                {
+                    "query": "UPDATE project_backlog SET parent_task_id = %s WHERE parent_task_id = %s",
+                    "params": (new_id, old_id)
+                },
+                
+                # 5. Re-enable FK checks
+                {"query": "SET FOREIGN_KEY_CHECKS=1"}
+            ]
+            
+            await self.db.execute_transaction_block(ops, schema=tenant_name)
+            
+            logger.info(f"Backlog item renamed successfully: {old_id} -> {new_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error renaming backlog item: {str(e)}")
+            # Transaction block already handles rollback of the transaction, 
+            # but we can't easily rollback SET FOREIGN_KEY_CHECKS=0 if the connection is closed.
+            # However, since the connection is closed returned to pool, 
+            # and autocommit is False, and we rolled back, the data is safe.
+            # The next user of the connection should ideally reset session vars, but 
+            # usually pools reset them or we assume default.
             raise

@@ -119,3 +119,20 @@ class BacklogListResponse(BaseModel):
     success: bool
     data: List[BacklogItemResponse]
     total: int
+
+
+class BacklogItemUpdate(BaseModel):
+    """Update backlog item request"""
+    summary: Optional[str] = Field(None, max_length=255)
+    description: Optional[str] = None
+    priority: Optional[Priority] = None
+    assignee: Optional[str] = Field(None, max_length=255)
+    tags: Optional[List[str]] = None
+    severity: Optional[str] = Field(None, max_length=100)
+
+
+class MergeBacklogItemsRequest(BaseModel):
+    """Request to merge multiple backlog items into one"""
+    target_item_id: str = Field(..., description="The ID of the item to keep and update")
+    source_item_ids: List[str] = Field(..., description="List of item IDs to merge into the target and then delete")
+    updates: BacklogItemUpdate = Field(..., description="The new data for the target item")
