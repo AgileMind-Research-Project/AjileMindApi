@@ -146,7 +146,7 @@ async def save_meeting_transcript(meeting_id: str):
 
 
 @sio.event
-async def connect(sid, environ):
+async def connect(sid, environ, auth=None):
     """Client connected"""
     logger.info(f"🔌 Client connected: {sid}")
 
