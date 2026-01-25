@@ -1,0 +1,53 @@
+# Virtual environments
+venv/
+venv312/
+.venv/
+env/
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Logs
+logs/
+*.log
+
+# Test and demo files
+test_data/
+demo/
+examples/
+
+# Documentation
+*.md
+API Docs/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Local certificates (if any)
+*.pem
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.yml
+Dockerfile
+.dockerignore
