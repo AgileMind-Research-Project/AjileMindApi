@@ -56,7 +56,9 @@ mgr = socketio.AsyncRedisManager(redis_url)
 # This prevents duplicate Access-Control-Allow-Origin headers which browsers reject
 sio = socketio.AsyncServer(
     client_manager=mgr,
-    cors_allowed_origins=[],  # Empty = Let FastAPI handle CORS (prevents duplicates)
+    # Allow all origins in Socket.IO (Validator)
+    # FastAPI CORSMiddleware will still enforce the browser-side headers
+    cors_allowed_origins='*', 
     async_mode='asgi',
     logger=True,
     engineio_logger=True,
