@@ -89,7 +89,7 @@ def get_meeting_data(meeting_id: str) -> dict:
 
 
 async def save_meeting_transcript(meeting_id: str):
-    """Save meeting transcript to Redis"""
+    """Save meeting transcript to Redis in Microsoft Teams conversation style"""
     try:
         meeting_service = get_meeting_service()
         
@@ -100,44 +100,173 @@ async def save_meeting_transcript(meeting_id: str):
             logger.info(f"No transcript to save for meeting {meeting_id}")
             return
         
-        # Format transcript
+        # Get meeting info for metadata
+        meeting = get_meeting_data(meeting_id)
+        meeting_title = meeting.get('title', 'Untitled Meeting')
+        
+        # Calculate meeting duration
+        started_at = meeting.get('started_at')
+        ended_at = datetime.utcnow().isoformat()
+        duration_str = "N/A"
+        
+        if started_at:
+            try:
+                start_time = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
+                end_time = datetime.fromisoformat(ended_at.replace('Z', '+00:00'))
+                duration = end_time - start_time
+                minutes = int(duration.total_seconds() / 60)
+                duration_str = f"{minutes} minutes"
+            except:
+                duration_str = "N/A"
+        
+        # Get unique participants with their roles
+        participants_map = {}
+        for msg in messages:
+            user_id = msg.get('user_id', 'unknown')
+            if user_id not in participants_map:
+                participants_map[user_id] = {
+                    'username': msg.get('username', 'Unknown'),
+                    'role': msg.get('role', 'Participant'),
+                    'email': msg.get('email', '')
+                }
+        
+        # Format transcript in Microsoft Teams style
         transcript_lines = []
-        transcript_lines.append(f"Meeting Transcript - {meeting_id}")
-        transcript_lines.append(f"Generated: {datetime.utcnow().isoformat()}")
+        
+        # Header
+        transcript_lines.append("=" * 80)
+        transcript_lines.append("MEETING TRANSCRIPT")
+        transcript_lines.append("=" * 80)
+        transcript_lines.append(f"Meeting: \"{meeting_title}\"")
+        transcript_lines.append(f"Date: {datetime.utcnow().strftime('%B %d, %Y at %H:%M UTC')}")
+        transcript_lines.append(f"Duration: {duration_str}")
+        transcript_lines.append(f"Participants: {len(participants_map)}")
+        transcript_lines.append("")
+        
+        # Attendees list
+        if participants_map:
+            transcript_lines.append("ATTENDEES:")
+            for user_id, info in participants_map.items():
+                role_display = f" ({info['role']})" if info['role'] else ""
+                email_display = f" - {info['email']}" if info['email'] else ""
+                transcript_lines.append(f"- {info['username']}{role_display}{email_display}")
+            transcript_lines.append("")
+        
+        # Conversation
+        transcript_lines.append("=" * 80)
+        transcript_lines.append("CONVERSATION")
         transcript_lines.append("=" * 80)
         transcript_lines.append("")
         
+        # Group consecutive messages from same speaker
+        grouped_messages = []
+        current_group = None
+        
         for msg in messages:
-            timestamp = msg.get('timestamp', '')
+            user_id = msg.get('user_id', 'unknown')
             username = msg.get('username', 'Unknown')
-            message = msg.get('message', '')
-            transcript_lines.append(f"[{timestamp}] {username}: {message}")
+            role = msg.get('role', 'Participant')
+            timestamp = msg.get('timestamp', '')
+            message_text = msg.get('message', '')
+            msg_type = msg.get('type', 'chat')
+            
+            # Format timestamp to be more readable (HH:MM)
+            try:
+                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                time_display = dt.strftime('%H:%M')
+            except:
+                time_display = timestamp[:5] if len(timestamp) >= 5 else timestamp
+            
+            # Check if we should start a new group
+            if current_group is None or current_group['user_id'] != user_id:
+                # Save previous group
+                if current_group:
+                    grouped_messages.append(current_group)
+                
+                # Start new group
+                current_group = {
+                    'user_id': user_id,
+                    'username': username,
+                    'role': role,
+                    'timestamp': time_display,
+                    'messages': [message_text],
+                    'type': msg_type
+                }
+            else:
+                # Add to current group
+                current_group['messages'].append(message_text)
+        
+        # Don't forget the last group
+        if current_group:
+            grouped_messages.append(current_group)
+        
+        # Format grouped messages
+        for group in grouped_messages:
+            # Speaker header with role
+            role_display = f" ({group['role']})" if group['role'] else ""
+            transcript_lines.append(f"[{group['timestamp']}] {group['username']}{role_display}")
+            
+            # Message content (each message on its own line)
+            for message in group['messages']:
+                transcript_lines.append(message)
+            
+            # Empty line between speakers
+            transcript_lines.append("")
+        
+        # Footer
+        transcript_lines.append("=" * 80)
+        transcript_lines.append(f"END OF TRANSCRIPT - Generated on {datetime.utcnow().strftime('%B %d, %Y at %H:%M:%S UTC')}")
+        transcript_lines.append("=" * 80)
         
         transcript_content = "\n".join(transcript_lines)
         
-        # Get meeting info for metadata
-        meeting = get_meeting_data(meeting_id)
-        
+        # Enhanced metadata
         metadata = {
             'message_count': len(messages),
-            'participants': list(set(msg.get('username', 'Unknown') for msg in messages)),
-            'duration': 'Session ended',
-            'ended_at': datetime.utcnow().isoformat()
+            'grouped_message_count': len(grouped_messages),
+            'participants': [
+                {
+                    'user_id': uid,
+                    'username': info['username'],
+                    'role': info['role'],
+                    'email': info['email']
+                }
+                for uid, info in participants_map.items()
+            ],
+            'participant_names': [info['username'] for info in participants_map.values()],
+            'duration': duration_str,
+            'started_at': started_at,
+            'ended_at': ended_at,
+            'meeting_title': meeting_title,
+            'format_version': 'teams-style-v1'
         }
         
         # Store in Redis
-        result = meeting_service.store_transcript(
+        result = await meeting_service.store_transcript(
             meeting_id=meeting_id,
             content=transcript_content,
-            format='text',
+            format='teams-conversation',
             metadata=metadata
         )
         
         if result:
-            logger.info(f"✅ Saved transcript for meeting {meeting_id} ({len(messages)} messages)")
+            logger.info(f"✅ Saved Teams-style transcript for meeting {meeting_id}")
+            logger.info(f"   📊 {len(messages)} messages from {len(participants_map)} participants")
+            logger.info(f"   📝 Grouped into {len(grouped_messages)} conversation segments")
+            
             # Clean up in-memory transcript
             if meeting_id in meeting_transcripts:
                 del meeting_transcripts[meeting_id]
+                
+            logger.info("="*50)
+            logger.info(f"💾 TRANSCRIPT SAVED SUCCESSFULLY")
+            logger.info(f"🆔 Meeting ID: {meeting_id}")
+            logger.info(f"📊 Messages: {len(messages)} (grouped: {len(grouped_messages)})")
+            logger.info(f"👥 Participants: {len(participants_map)}")
+            logger.info(f"⏱️  Duration: {duration_str}")
+            logger.info(f"🏢 Tenant: {meeting.get('tenant_name')}")
+            logger.info(f"📂 Project ID: {metadata.get('project_id', 1)}")
+            logger.info("="*50)
         else:
             logger.error(f"❌ Failed to save transcript for meeting {meeting_id}")
             
@@ -213,9 +342,11 @@ async def join_meeting(sid, data):
         'meeting_id': meeting_id,
         'user_id': user_id,
         'username': username,
-        'channel_id': channel_id,  # Store channel_id for chat sync
-        'mic_enabled': True,       # Track mic status (default on)
-        'camera_enabled': True     # Track camera status (default on)
+        'role': data.get('role', 'Participant'),   # Get role from data
+        'email': data.get('email', ''),            # Get email from data
+        'channel_id': channel_id,
+        'mic_enabled': True,
+        'camera_enabled': True
     }
     
     # Add to meeting room
@@ -376,6 +507,8 @@ async def chat_message(sid, data):
     message_data = {
         'user_id': sender['user_id'],
         'username': sender['username'],
+        'role': sender.get('role', 'Participant'),
+        'email': sender.get('email', ''),
         'message': data.get('message'),
         'timestamp': data.get('timestamp') or datetime.utcnow().isoformat()
     }
@@ -384,6 +517,11 @@ async def chat_message(sid, data):
     if meeting_id not in meeting_transcripts:
         meeting_transcripts[meeting_id] = []
     meeting_transcripts[meeting_id].append(message_data)
+    
+    logger.info(f"📝 Stored CHAT message in transcript for meeting {meeting_id}")
+    logger.info(f"   User: {sender['username']} ({sender.get('role', 'Participant')})")
+    logger.info(f"   Total messages in transcript: {len(meeting_transcripts[meeting_id])}")
+    logger.info(f"   Message type: 'chat' (not 'speech')")
     
     # NEW: Also save to channel chat if channel is linked
     if channel_id:
@@ -543,6 +681,52 @@ async def get_meeting_info(sid, data):
     except Exception as e:
         logger.error(f"Error getting meeting info: {e}")
         await sio.emit('meeting-info-error', {'error': str(e)}, room=sid)
+
+
+
+@sio.event
+async def transcript_segment(sid, data):
+    """
+    Receive a segment of speech transcription
+    
+    Data: {
+        'text': string,
+        'timestamp': string,
+        'is_final': boolean
+    }
+    """
+    if sid not in session_data:
+        return
+        
+    sender = session_data[sid]
+    meeting_id = sender['meeting_id']
+    
+    # We only care about final results for the permanent transcript
+    # (Optional: broadcast partials for live captions if needed)
+    if not data.get('is_final', False):
+        return
+        
+    segment_data = {
+        'user_id': sender['user_id'],
+        'username': sender['username'],
+        'role': sender.get('role', 'Participant'),
+        'message': data.get('text'),
+        'timestamp': data.get('timestamp') or datetime.utcnow().isoformat(),
+        'type': 'speech'
+    }
+    
+    # Store in transcript list
+    if meeting_id not in meeting_transcripts:
+        meeting_transcripts[meeting_id] = []
+    meeting_transcripts[meeting_id].append(segment_data)
+    
+    logger.info(f"📝 Stored SPEECH segment in transcript for meeting {meeting_id}")
+    logger.info(f"   User: {sender['username']} ({sender.get('role', 'Participant')})")
+    logger.info(f"   Speech: {data.get('text')[:100]}...")
+    logger.info(f"   Total messages in transcript: {len(meeting_transcripts[meeting_id])}")
+    
+    # Broadcast to room (for live captions/transcript view)
+    await sio.emit('transcript-update', segment_data, room=meeting_id)
 
 
 @sio.event
