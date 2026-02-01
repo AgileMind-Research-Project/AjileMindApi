@@ -203,7 +203,12 @@ async def end_meeting(
         )
     
     # End meeting
-    success = meeting_service.end_meeting(meeting_id, tenant_name)
+    success = meeting_service.end_meeting(
+        meeting_id=meeting_id,
+        tenant_name=tenant_name,
+        user_id=user_id,
+        username=current_user.get('username') or current_user.get('email')
+    )
     
     if not success:
         raise HTTPException(
@@ -584,11 +589,13 @@ async def store_transcript(
         )
     
     # Store transcript
-    transcript = meeting_service.store_transcript(
+    transcript = await meeting_service.store_transcript(
         meeting_id=meeting_id,
         content=transcript_request.content,
         format=transcript_request.format,
-        metadata=transcript_request.metadata
+        metadata=transcript_request.metadata,
+        user_id=current_user.get('user_id') or current_user.get('sub'),
+        username=current_user.get('username') or current_user.get('email')
     )
     
     if not transcript:
@@ -632,4 +639,31 @@ async def get_transcript(
     return {
         "success": True,
         "data": transcript
+    }
+
+
+@router.get("/channels/{channel_id}/transcripts", response_model=dict)
+async def get_channel_transcripts(
+    channel_id: str,
+    current_user: dict = Depends(get_current_user_from_token)
+):
+    """
+    Get all transcripts for a channel
+    
+    **Params:**
+    - channel_id: Channel ID
+    
+    **Returns:**
+    - List of transcripts
+    """
+    meeting_service = get_meeting_service()
+    
+    transcripts = meeting_service.get_channel_transcripts(channel_id)
+    
+    return {
+        "success": True,
+        "data": {
+            "transcripts": transcripts,
+            "total": len(transcripts)
+        }
     }
