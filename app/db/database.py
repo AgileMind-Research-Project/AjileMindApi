@@ -86,12 +86,7 @@ class Database:
                 if schema:
                     async with conn.cursor() as temp_cursor:
                         await temp_cursor.execute(f"USE `{schema}`")
-                        logger.info(f"Switched to schema: {schema}")
-                else:
-                    # Ensure we are in the default database
-                    async with conn.cursor() as temp_cursor:
-                        await temp_cursor.execute(f"USE `{settings.DB_NAME}`")
-                
+                        logger.info(f"Switched to schema: {schema}")             
                 async with conn.cursor(aiomysql.DictCursor) as cursor:
                     await cursor.execute(query, params or ())
                     
@@ -158,6 +153,37 @@ class Database:
                     
         except Exception as e:
             logger.exception(f"Batch query failed: {e}")
+            raise
+
+    async def execute_transaction_block(self, operations: List[Dict[str, Any]], schema: str = None):
+        """
+        Execute multiple queries in a single transaction/connection.
+        Crucial for session-level variables like SET FOREIGN_KEY_CHECKS=0.
+        
+        Args:
+            operations: List of dicts with 'query' and 'params' keys
+            schema: Optional schema name
+        """
+        try:
+            async with self.get_connection() as conn:
+                if schema:
+                    async with conn.cursor() as c:
+                        await c.execute(f"USE `{schema}`")
+                
+                async with conn.cursor() as cursor:
+                    try:
+                        for op in operations:
+                            q = op['query']
+                            p = op.get('params', ())
+                            await cursor.execute(q, p)
+                        await conn.commit()
+                        logger.info(f"Executed transaction block with {len(operations)} operations")
+                    except Exception as e:
+                        await conn.rollback()
+                        logger.error(f"Transaction block failed, rolled back: {e}")
+                        raise e
+        except Exception as e:
+            logger.exception(f"Transaction connection failed: {e}")
             raise
 
 

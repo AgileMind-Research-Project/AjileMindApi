@@ -97,26 +97,6 @@ class Settings(BaseSettings):
     AUDIT_LOGGING_ENABLED: bool = True
     AUDIT_RETENTION_DAYS: int = 90
     
-    # LLM Configuration
-    OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4"
-    OPENAI_MAX_TOKENS: int = 2000
-    OPENAI_TEMPERATURE: float = 0.7
-    
-    # Ollama/Llama Configuration (Local LLM)
-    OLLAMA_HOST: str = "http://localhost"
-    OLLAMA_PORT: int = 11434
-    OLLAMA_MODEL: str = "llama2"  # Options: llama2, llama3.2, mistral, neural-chat, etc.
-    OLLAMA_MAX_TOKENS: int = 2000
-    OLLAMA_TEMPERATURE: float = 0.7
-    
-    # LLM Provider Selection
-    LLM_PROVIDER: str = "ollama"  # Options: openai, ollama, gemini, claude, anthropic
-    USE_RAG_WITH_LLM: bool = True
-    RAG_CHUNK_SIZE: int = 1000
-    RAG_OVERLAP: int = 100
-    RAG_TOP_K_RESULTS: int = 5
-    
     class Config:
         env_file = ".env"
         case_sensitive = True
@@ -125,4 +105,3 @@ class Settings(BaseSettings):
 
 # Create global settings instance
 settings = Settings()
-

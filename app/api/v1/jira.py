@@ -16,9 +16,7 @@ from app.schemas.jira_schemas import (
     JiraCredentialsResponse,
     JiraIssueRequest,
     JiraIssueResponse,
-    JiraIssueResponse,
-    JiraProjectsResponse,
-    JiraTransitionRequest
+    JiraProjectsResponse
 )
 
 
@@ -343,87 +341,4 @@ async def disconnect_jira(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to disconnect: {str(e)}"
-        )
-
-
-@router.get(
-    "/issues/{issue_key}/status",
-    summary="Get Issue Status",
-    description="Get current status of a Jira issue"
-)
-async def get_issue_status(
-    issue_key: str,
-    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
-    jira_service: JiraService = Depends(get_jira_service)
-) -> Dict[str, Any]:
-    """
-    Get status of a Jira issue.
-    """
-    try:
-        tenant_name = current_user.get("tenant_name")
-        if not tenant_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tenant name not found in token"
-            )
-        
-        result = await jira_service.get_issue_status(
-            tenant_name=tenant_name,
-            issue_key=issue_key
-        )
-        
-        return {
-            "success": True,
-            "data": result
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting issue status: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get issue status: {str(e)}"
-        )
-
-
-@router.post(
-    "/issues/{issue_key}/transition",
-    summary="Transition Issue",
-    description="Transition a Jira issue to a new status (e.g. Done)"
-)
-async def transition_issue(
-    issue_key: str,
-    request: JiraTransitionRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
-    jira_service: JiraService = Depends(get_jira_service)
-) -> Dict[str, Any]:
-    """
-    Transition a Jira issue.
-    """
-    try:
-        tenant_name = current_user.get("tenant_name")
-        if not tenant_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tenant name not found in token"
-            )
-        
-        result = await jira_service.transition_issue_to_status(
-            tenant_name=tenant_name,
-            issue_key=issue_key,
-            target_status=request.target_status
-        )
-        
-        return {
-            "success": True,
-            "message": f"Issue transitioned to {request.target_status}",
-            "data": result
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error transitioning issue: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to transition issue: {str(e)}"
         )
