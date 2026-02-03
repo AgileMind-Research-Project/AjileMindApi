@@ -6,10 +6,8 @@ REST API for backlog management including file upload and Jira integration.
 
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Form
 from typing import Dict, Any
-from app.schemas.backlog_schemas import BulkUploadResponse, BacklogListResponse
+from app.schemas.backlog_schemas import BulkUploadResponse, BacklogListResponse, BacklogItemUpdate, MergeBacklogItemsRequest
 from app.services.backlog_service import BacklogService
-from app.services.jira_backlog_service import JiraBacklogService
-from app.db.repositories.backlog_repository import BacklogRepository
 from app.db.database import db, Database
 from app.utils.jwt import get_current_user_from_token, get_secret
 from app.core.logger import logger
@@ -187,138 +185,19 @@ async def list_project_backlog(
         )
 
 
-@router.get(
-    "/sprint/{sprint_id}",
-    response_model=BacklogListResponse,
-    summary="List Sprint Backlog Items",
-    description="Get all backlog items for a specific sprint"
+@router.patch(
+    "/{item_id}",
+    summary="Update Backlog Item",
+    description="Update backlog item details (subtask or main task)"
 )
-async def list_sprint_backlog(
-    sprint_id: int,
+async def update_backlog_item(
+    item_id: str,
+    updates: BacklogItemUpdate,
     current_user: Dict[str, Any] = Depends(get_current_user_from_token),
     backlog_service: BacklogService = Depends(get_backlog_service)
-) -> BacklogListResponse:
-    """
-    List all backlog items for a specific sprint.
-    
-    Returns:
-    - List of backlog items for the sprint
-    - Total count
-    """
-    try:
-        tenant_name = current_user.get("tenant_name")
-        if not tenant_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tenant name not found in token"
-            )
-        
-        items = await backlog_service.list_sprint_backlog(tenant_name, sprint_id)
-        
-        return BacklogListResponse(
-            success=True,
-            data=items,
-            total=len(items)
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing sprint backlog: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list sprint backlog: {str(e)}"
-        )
-
-
-@router.post(
-    "/sprint/tasks",
-    response_model=BacklogListResponse,
-    summary="Get Sprint Tasks (POST)",
-    description="Get all backlog items for a specific sprint using POST with sprint_id in payload"
-)
-async def get_sprint_tasks(
-    request: Dict[str, Any],
-    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
-    backlog_service: BacklogService = Depends(get_backlog_service)
-) -> BacklogListResponse:
-    """
-    Get all backlog items for a specific sprint.
-    
-    Request body:
-    ```json
-    {
-        "sprint_id": 2
-    }
-    ```
-    
-    Returns:
-    - List of backlog items for the sprint
-    - Total count
-    """
-    try:
-        tenant_name = current_user.get("tenant_name")
-        if not tenant_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tenant name not found in token"
-            )
-        
-        sprint_id = request.get("sprint_id")
-        if not sprint_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="sprint_id is required in request body"
-            )
-        
-        items = await backlog_service.list_sprint_backlog(tenant_name, sprint_id)
-        
-        return BacklogListResponse(
-            success=True,
-            data=items,
-            total=len(items)
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting sprint tasks: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get sprint tasks: {str(e)}"
-        )
-
-
-@router.post(
-    "/",
-    response_model=Dict[str, Any],
-    status_code=status.HTTP_201_CREATED,
-    summary="Create Backlog Item",
-    description="Create a single backlog item in Jira and database"
-)
-async def create_backlog_item(
-    request: Dict[str, Any],
-    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
-    backlog_service: BacklogService = Depends(get_backlog_service),
-    database: Database = Depends(lambda: db)
 ) -> Dict[str, Any]:
     """
-    Create a single backlog item.
-    
-    Request body:
-    ```json
-    {
-        "project_id": 10204,
-        "sprint_id": 2,
-        "summary": "Task title",
-        "description": "Task description",
-        "issue_type": "story",
-        "priority": "high",
-        "assignee": "user@example.com",
-        "tags": ["tag1", "tag2"],
-        "severity": "critical"
-    }
-    ```
+    Update a backlog item.
     """
     try:
         tenant_name = current_user.get("tenant_name")
@@ -328,108 +207,124 @@ async def create_backlog_item(
                 detail="Tenant name not found in token"
             )
         
-        project_id = request.get("project_id")
-        if not project_id:
+        # Convert updates to dict, excluding None values
+        update_data = {k: v for k, v in updates.dict().items() if v is not None}
+        
+        if not update_data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="project_id is required"
+                detail="No updates provided"
             )
-        
-        # Get Jira credentials
-        jira_query = "SELECT jira_url, email FROM jira_integrations LIMIT 1"
-        jira_result = await database.execute_query(
-            jira_query,
-            fetch_one=True,
-            schema=tenant_name
-        )
-        
-        if not jira_result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Jira integration not configured"
-            )
-        
-        jira_url = jira_result.get("jira_url")
-        jira_email = jira_result.get("email")
-        
-        # Get API token
-        secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
-        secret_result = get_secret(secret_name)
-        
-        if not secret_result.get("success"):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to retrieve Jira API token"
-            )
-        
-        jira_api_token = secret_result.get("secret_value")
-        
-        # Get project key
-        project_query = "SELECT `key` FROM projects WHERE project_id = %s"
-        project_result = await database.execute_query(
-            project_query,
-            (project_id,),
-            fetch_one=True,
-            schema=tenant_name
-        )
-        
-        if not project_result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Project with ID {project_id} not found"
-            )
-        
-        project_key = project_result.get("key")
-        
-        # Create Jira issue
-        jira_service = JiraBacklogService(
-            jira_url=jira_url,
-            email=jira_email,
-            api_token=jira_api_token
-        )
-        
-        jira_issue = await jira_service.create_issue(
-            project_key=project_key,
-            summary=request.get("summary"),
-            description=request.get("description", ""),
-            issue_type=request.get("issue_type", "story"),
-            priority=request.get("priority"),
-            assignee=request.get("assignee")
-        )
-        
-        # Save to database
-        backlog_repo = BacklogRepository(database)
-        await backlog_repo.create_backlog_item(
-            tenant_name=tenant_name,
-            issue_key=jira_issue["key"],
-            project_id=project_id,
-            sprint_id=request.get("sprint_id"),
-            summary=request.get("summary"),
-            description=request.get("description"),
-            issue_type=request.get("issue_type", "story"),
-            priority=request.get("priority"),
-            assignee=request.get("assignee"),
-            tags=request.get("tags"),
-            severity=request.get("severity"),
-            status="todo"
-        )
-        
-        logger.info(f"Created backlog item {jira_issue['key']} for project {project_id}")
+            
+        result = await backlog_service.update_backlog_item(tenant_name, item_id, update_data)
         
         return {
             "success": True,
-            "message": "Backlog item created successfully",
-            "data": {
-                "issue_key": jira_issue["key"],
-                "jira_url": f"{jira_url}/browse/{jira_issue['key']}"
-            }
+            "message": "Item updated successfully",
+            "data": result
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating backlog item: {str(e)}")
+        logger.error(f"Error updating item {item_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create backlog item: {str(e)}"
+            detail=f"Failed to update item: {str(e)}"
+        )
+
+
+@router.post(
+    "/merge",
+    summary="Merge Backlog Items",
+    description="Merge multiple backlog items into one: update target and delete sources"
+)
+async def merge_backlog_items(
+    request: MergeBacklogItemsRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    backlog_service: BacklogService = Depends(get_backlog_service)
+) -> Dict[str, Any]:
+    """
+    Merge backlog items.
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+        
+        # Convert updates to dict, excluding None values
+        update_data = {k: v for k, v in request.updates.dict().items() if v is not None}
+        
+        if not update_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No updates provided for merged item"
+            )
+            
+        result = await backlog_service.merge_backlog_items(
+            tenant_name=tenant_name,
+            target_id=request.target_item_id,
+            source_ids=request.source_item_ids,
+            updates=update_data
+        )
+        
+        return {
+            "success": True,
+            "message": "Items merged successfully",
+            "data": result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to merge items: {str(e)}"
+        )
+
+
+@router.delete(
+    "/{item_id}",
+    summary="Delete Backlog Item",
+    description="Delete a backlog item. If it is a subtask, it reorders subsequent subtasks to fill the ID gap."
+)
+async def delete_backlog_item(
+    item_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    backlog_service: BacklogService = Depends(get_backlog_service)
+) -> Dict[str, Any]:
+    """
+    Delete a backlog item.
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+            
+        success = await backlog_service.delete_backlog_item(tenant_name, item_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Item {item_id} not found"
+            )
+            
+        return {
+            "success": True,
+            "message": "Item deleted successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting items: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete item: {str(e)}"
         )

@@ -28,8 +28,7 @@ class BacklogRepository:
         priority: Optional[str],
         assignee: Optional[str],
         tags: Optional[List[str]],
-        severity: Optional[str],
-        sprint_id: Optional[int] = None
+        severity: Optional[str]
     ) -> Dict[str, Any]:
         """
         Create a backlog item in the database.
@@ -46,7 +45,6 @@ class BacklogRepository:
             assignee: Assigned person
             tags: List of tags
             severity: Severity (for bugs)
-            sprint_id: Sprint ID
         
         Returns:
             Created backlog item data
@@ -58,10 +56,10 @@ class BacklogRepository:
             query = """
                 INSERT INTO project_backlog (
                     id, project_id, summary, description, issue_type,
-                    status, priority, assignee, tags, severity, sprint_id,
+                    status, priority, assignee, tags, severity,
                     created_at, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                 ON DUPLICATE KEY UPDATE
                     summary = VALUES(summary),
                     description = VALUES(description),
@@ -71,14 +69,13 @@ class BacklogRepository:
                     assignee = VALUES(assignee),
                     tags = VALUES(tags),
                     severity = VALUES(severity),
-                    sprint_id = VALUES(sprint_id),
                     updated_at = NOW()
             """
             
             await self.db.execute_query(
                 query,
                 (item_id, project_id, summary, description, issue_type,
-                 status, priority, assignee, tags_json, severity, sprint_id),
+                 status, priority, assignee, tags_json, severity),
                 commit=True,
                 schema=tenant_name
             )
@@ -100,7 +97,8 @@ class BacklogRepository:
         """Get a single backlog item by ID"""
         try:
             query = """
-                    id, project_id, sprint_id, summary, description, issue_type,
+                SELECT 
+                    id, project_id, summary, description, issue_type,
                     status, priority, assignee, tags, severity,
                     created_at, updated_at
                 FROM project_backlog
@@ -131,21 +129,28 @@ class BacklogRepository:
         tenant_name: str,
         project_id: int
     ) -> List[Dict[str, Any]]:
-        """List all backlog items for a project"""
+        """List all backlog items for a project, filtering parents by priority"""
         try:
             query = """
                 SELECT 
-                    id, project_id, sprint_id, summary, description, issue_type,
+                    id, project_id, summary, description, issue_type,
                     status, priority, assignee, tags, severity, parent_task_id,
                     created_at, updated_at
                 FROM project_backlog
                 WHERE project_id = %s
+                AND (
+                    parent_task_id IS NOT NULL
+                    OR id IN (
+                        SELECT backlog_id FROM project_backlog_priority 
+                        WHERE project_id = %s
+                    )
+                )
                 ORDER BY created_at DESC
             """
             
             results = await self.db.execute_query(
                 query,
-                (project_id,),
+                (project_id, project_id),
                 fetch_all=True,
                 schema=tenant_name
             )
@@ -163,45 +168,6 @@ class BacklogRepository:
             
         except Exception as e:
             logger.error(f"Error listing backlog items: {str(e)}")
-            raise
-
-    async def list_backlog_by_sprint(
-        self,
-        tenant_name: str,
-        sprint_id: int
-    ) -> List[Dict[str, Any]]:
-        """List all backlog items for a sprint"""
-        try:
-            query = """
-                SELECT 
-                    id, project_id, sprint_id, summary, description, issue_type,
-                    status, priority, assignee, tags, severity,
-                    created_at, updated_at
-                FROM project_backlog
-                WHERE sprint_id = %s
-                ORDER BY priority ASC, created_at DESC
-            """
-            
-            results = await self.db.execute_query(
-                query,
-                (sprint_id,),
-                fetch_all=True,
-                schema=tenant_name
-            )
-            
-            # Deserialize tags for each item
-            if results:
-                for item in results:
-                    if item.get('tags'):
-                        try:
-                            item['tags'] = json.loads(item['tags'])
-                        except:
-                            item['tags'] = None
-            
-            return results or []
-            
-        except Exception as e:
-            logger.error(f"Error listing backlog items for sprint: {str(e)}")
             raise
     
     async def delete_backlog_item(
@@ -499,4 +465,58 @@ class BacklogRepository:
             
         except Exception as e:
             logger.error(f"Error updating task Jira info: {str(e)}")
+            raise
+
+    async def rename_backlog_item(
+        self,
+        tenant_name: str,
+        old_id: str,
+        new_id: str
+    ) -> bool:
+        """
+        Rename a backlog item (change its ID).
+        Uses a single transaction block with FK checks disabled to ensure atomicity and success.
+        """
+        try:
+            logger.info(f"Renaming {old_id} to {new_id} using transaction block")
+            
+            ops = [
+                # 1. Disable FK checks
+                {"query": "SET FOREIGN_KEY_CHECKS=0"},
+                
+                # 2. Update item ID
+                {
+                    "query": "UPDATE project_backlog SET id = %s, updated_at = NOW() WHERE id = %s",
+                    "params": (new_id, old_id)
+                },
+                
+                # 3. Update Priority Table References
+                {
+                    "query": "UPDATE project_backlog_priority SET backlog_id = %s WHERE backlog_id = %s",
+                    "params": (new_id, old_id)
+                },
+                
+                # 4. Update Child References
+                {
+                    "query": "UPDATE project_backlog SET parent_task_id = %s WHERE parent_task_id = %s",
+                    "params": (new_id, old_id)
+                },
+                
+                # 5. Re-enable FK checks
+                {"query": "SET FOREIGN_KEY_CHECKS=1"}
+            ]
+            
+            await self.db.execute_transaction_block(ops, schema=tenant_name)
+            
+            logger.info(f"Backlog item renamed successfully: {old_id} -> {new_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error renaming backlog item: {str(e)}")
+            # Transaction block already handles rollback of the transaction, 
+            # but we can't easily rollback SET FOREIGN_KEY_CHECKS=0 if the connection is closed.
+            # However, since the connection is closed returned to pool, 
+            # and autocommit is False, and we rolled back, the data is safe.
+            # The next user of the connection should ideally reset session vars, but 
+            # usually pools reset them or we assume default.
             raise

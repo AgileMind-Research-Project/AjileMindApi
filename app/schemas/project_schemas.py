@@ -7,11 +7,7 @@ Pydantic models for project creation and management.
 from pydantic import BaseModel, Field, validator
 from typing import Optional, Dict, Any, List
 from datetime import date, datetime
-from datetime import date, datetime
 from enum import Enum
-from typing import Optional, Dict, Any, List, TYPE_CHECKING
-if TYPE_CHECKING:
-    from app.schemas.backlog_schemas import BacklogItemResponse
 
 
 class ProjectType(str, Enum):
@@ -44,14 +40,6 @@ class StackType(str, Enum):
     FRONTEND = "Frontend"
     BACKEND = "Backend"
     FULLSTACK = "Fullstack"
-
-
-class SprintStatus(str, Enum):
-    """Sprint status enum"""
-    NOT_STARTED = "Not Started"
-    IN_PROGRESS = "In Progress"
-    COMPLETED = "Completed"
-    CLOSED = "Closed"
 
 
 class CreateProjectRequest(BaseModel):
@@ -246,41 +234,3 @@ class StandardResponse(BaseModel):
     success: bool
     message: str
     data: Optional[Dict[str, Any]] = None
-
-
-class SprintResponse(BaseModel):
-    """Response model for Sprint"""
-    sprint_id: int
-    project_id: int
-    sprint_name: str
-    sprint_goal: Optional[str] = None
-    start_date: date
-    end_date: date
-    sprint_status: SprintStatus
-    total_estimated_hours: Optional[int] = 0
-    total_completed_hours: Optional[int] = 0
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat() if v else None
-        }
-
-
-class SprintListResponse(BaseModel):
-    """Response model for listing sprints"""
-    success: bool
-    message: str
-    data: List[SprintResponse]
-    total: int
-
-
-class SprintFilterRequest(BaseModel):
-    """Request model for filtering sprints"""
-    date: date
-
-
-class SprintWithTasksResponse(SprintResponse):
-    """Sprint response including tasks"""
-    tasks: List[Dict[str, Any]] = [] # Using Dict to avoid circular imports at runtime
