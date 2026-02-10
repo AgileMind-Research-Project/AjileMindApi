@@ -5,7 +5,7 @@ Handles user CRUD operations and invitations.
 """
 
 from fastapi import APIRouter, HTTPException, status, Depends
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import uuid
 from datetime import datetime
 
@@ -13,6 +13,7 @@ from app.db.database import db, Database
 from app.core.logger import logger
 from app.utils.jwt import get_current_user_from_token
 from app.utils.password import hash_password
+from app.utils.permissions import require_admin, is_super_admin
 from app.services.email_service import email_service
 from pydantic import BaseModel, EmailStr, Field
 
@@ -24,12 +25,21 @@ router = APIRouter()
 # REQUEST/RESPONSE MODELS
 # ============================================
 
+class UserDataRequest(BaseModel):
+    """User profile data"""
+    stack: Optional[List[str]] = Field(None, description="Technology stack (e.g., backend, frontend, fullstack)")
+    technologies: Optional[List[str]] = Field(None, description="Technologies/frameworks (e.g., java, spring, mysql)")
+    experience_years: Optional[int] = Field(None, description="Years of experience")
+
+
 class InviteUserRequest(BaseModel):
     """Request model for inviting a user"""
     first_name: str = Field(..., min_length=1, max_length=50)
     last_name: str = Field(..., min_length=1, max_length=50)
     email: EmailStr
-    role: str = Field(..., min_length=1, max_length=50)
+    roles: List[str] = Field(..., min_items=1, description="List of roles to assign to user")
+    project_ids: List[int] = Field(default=[], description="List of project IDs to assign user to")
+    user_data: Optional[UserDataRequest] = Field(None, description="User profile data (stack, technologies, experience)")
 
 
 class InviteUserResponse(BaseModel):
@@ -49,7 +59,12 @@ async def verify_admin_or_super_admin(
     """
     Verify that the user is an Admin or Super Admin.
     """
-    if current_user.get("role") not in ["SUPER_ADMIN", "ADMIN"]:
+    user_roles = current_user.get("roles", [])
+    # Fallback to single role for backward compatibility
+    if not user_roles and current_user.get("role"):
+        user_roles = [current_user.get("role")]
+    
+    if not any(role in ["SUPER_ADMIN", "ADMIN"] for role in user_roles):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin or Super Admin access required"
@@ -112,22 +127,23 @@ async def invite_user(
                 detail="User with this email already exists"
             )
         
-        # Validate role exists (check against system roles table)
-        role_query = """
-            SELECT NAME FROM roles 
-            WHERE NAME = %s
-        """
-        role = await database.execute_query(
-            role_query,
-            (request.role,),
-            fetch_one=True
-        )
-        
-        if not role:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Role '{request.role}' not found"
+        # Validate all roles exist (check against system roles table)
+        for role_name in request.roles:
+            role_query = """
+                SELECT name FROM roles 
+                WHERE name = %s
+            """
+            role = await database.execute_query(
+                role_query,
+                (role_name,),
+                fetch_one=True
             )
+            
+            if not role:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Role '{role_name}' not found"
+                )
         
         # Generate password: {FirstName}{EmailLocal}@123
         email_local = request.email.split('@')[0]
@@ -139,6 +155,16 @@ async def invite_user(
         # Generate user ID
         user_id = f"usr-{uuid.uuid4().hex[:16]}"
         
+        # Prepare user_data JSON
+        import json
+        user_data_json = None
+        if request.user_data:
+            user_data_json = json.dumps({
+                "stack": request.user_data.stack or [],
+                "technologies": request.user_data.technologies or [],
+                "experience_years": request.user_data.experience_years or 0
+            })
+        
         # Create user in domain table
         insert_query = f"""
             INSERT INTO `{tenant_name}` (
@@ -147,15 +173,17 @@ async def invite_user(
                 password_hash,
                 first_name,
                 last_name,
-                role,
+                roles,
+                user_data,
                 status,
                 password_change_required,
                 created_at,
                 updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         now = datetime.utcnow()
+        roles_json = json.dumps(request.roles)
         
         await database.execute_query(
             insert_query,
@@ -165,7 +193,8 @@ async def invite_user(
                 password_hash,
                 request.first_name,
                 request.last_name,
-                request.role,
+                roles_json,
+                user_data_json,
                 'ACTIVE',  # status
                 1,  # password_change_required
                 now,
@@ -173,6 +202,25 @@ async def invite_user(
             ),
             commit=True
         )
+        
+        # Assign user to projects if provided
+        if request.project_ids:
+            import json
+            
+            # Update the projects column with JSON array
+            update_projects_query = f"""
+                UPDATE `{tenant_name}` 
+                SET projects = %s 
+                WHERE user_id = %s
+            """
+            projects_json = json.dumps(request.project_ids)
+            await database.execute_query(
+                update_projects_query,
+                (projects_json, user_id),
+                commit=True
+            )
+            logger.info(f"Assigned user {user_id} to {len(request.project_ids)} project(s)")
+
         
         logger.info(f"User invited: {request.email} by {current_user['email']}")
         
@@ -197,7 +245,7 @@ async def invite_user(
             first_name=request.first_name,
             last_name=request.last_name,
             company_name=company_name,
-            role=request.role,
+            role=', '.join(request.roles),  # Join roles for email display
             temporary_password=auto_password
         )
         
@@ -213,7 +261,8 @@ async def invite_user(
                 "email": request.email,
                 "first_name": request.first_name,
                 "last_name": request.last_name,
-                "role": request.role,
+                "roles": request.roles,
+                "project_ids": request.project_ids,
                 "email_sent": email_sent,
                 "password_change_required": True
             }
@@ -254,8 +303,10 @@ async def list_users(
                 email,
                 first_name,
                 last_name,
-                role,
+                roles,
                 status,
+                projects,
+                user_data,
                 password_change_required,
                 created_at
             FROM `{tenant_name}`
@@ -270,13 +321,42 @@ async def list_users(
         # Convert to response format
         result = []
         for user in users:
+            import json
+            # Parse projects JSON
+            user_projects = []
+            if user.get("projects"):
+                try:
+                    user_projects = json.loads(user["projects"]) if isinstance(user["projects"], str) else user["projects"]
+                except:
+                    user_projects = []
+            
+            # Parse user_data JSON
+            user_data = None
+            if user.get("user_data"):
+                try:
+                    user_data = json.loads(user["user_data"]) if isinstance(user["user_data"], str) else user["user_data"]
+                except:
+                    user_data = None
+            
+            # Parse roles JSON
+            user_roles = []
+            if user.get("roles"):
+                try:
+                    user_roles = json.loads(user["roles"]) if isinstance(user["roles"], str) else user["roles"]
+                except:
+                    # Fallback to legacy single role field if exists
+                    if user.get("role"):
+                        user_roles = [user["role"]]
+            
             result.append({
                 "user_id": user["user_id"],
                 "email": user["email"],
                 "first_name": user["first_name"],
                 "last_name": user["last_name"],
-                "role": user["role"],
+                "roles": user_roles,
                 "status": user["status"],
+                "project_ids": user_projects,
+                "user_data": user_data,
                 "password_change_required": bool(user["password_change_required"]),
                 "created_at": user["created_at"].isoformat() if user["created_at"] else ""
             })
@@ -295,3 +375,363 @@ async def list_users(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve users: {str(e)}"
         )
+
+
+@router.get(
+    "/by-role/{role}",
+    summary="Get Users by Role",
+    description="Get all users with a specific role (for dropdowns, etc.)"
+)
+async def get_users_by_role(
+    role: str,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    database: Database = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Get all users with a specific role.
+    
+    Useful for populating dropdowns with users of specific roles.
+    For example: Get all PROJECT_MANAGER users for project assignment.
+    
+    **Access:** All authenticated users
+    
+    **Parameters:**
+    - role: Role to filter by (e.g., PROJECT_MANAGER, ADMIN, DEVELOPER)
+    
+    **Returns:**
+    - List of users with that role (email, name, user_id)
+    """
+    try:
+        # Get tenant domain from JWT
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+        
+        # Query users with specific role (using JSON_CONTAINS for roles array)
+        query = f"""
+            SELECT 
+                user_id,
+                email,
+                first_name,
+                last_name,
+                roles,
+                status
+            FROM `{tenant_name}`
+            WHERE JSON_CONTAINS(roles, %s, '$') AND status = 'ACTIVE'
+            ORDER BY first_name, last_name
+        """
+        
+        # JSON_CONTAINS requires the value to be JSON encoded
+        import json
+        role_json = json.dumps(role)
+        
+        users = await database.execute_query(
+            query,
+            (role_json,),
+            fetch_all=True
+        )
+        
+        # Convert to simple format for dropdown
+        result = []
+        for user in users:
+            full_name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+            result.append({
+                "user_id": user["user_id"],
+                "email": user["email"],
+                "name": full_name or user["email"],  # Fallback to email if no name
+                "first_name": user.get("first_name"),
+                "last_name": user.get("last_name")
+            })
+        
+        logger.info(f"Retrieved {len(result)} users with role {role} for tenant {tenant_name}")
+        
+        return {
+            "success": True,
+            "message": f"Found {len(result)} user(s) with role {role}",
+            "data": result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting users by role: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve users by role: {str(e)}"
+        )
+
+
+class UpdateUserRequest(BaseModel):
+    """Request model for updating user basic details"""
+    first_name: Optional[str] = Field(None, min_length=1, max_length=50)
+    last_name: Optional[str] = Field(None, min_length=1, max_length=50)
+    roles: Optional[List[str]] = Field(None, description="List of roles to assign to user")
+    user_data: Optional[UserDataRequest] = Field(None, description="User profile data")
+
+
+@router.put(
+    "/{user_id}",
+    summary="Update User Details",
+    description="Update user basic information (Admin/Super Admin only)"
+)
+async def update_user(
+    user_id: str,
+    request: UpdateUserRequest,
+    current_user: Dict[str, Any] = Depends(verify_admin_or_super_admin),
+    database: Database = Depends(get_database)
+) -> Dict[str, Any]:
+    """Update user basic details (name, role)"""
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+        
+        # Check if user exists
+        check_query = f"""
+            SELECT user_id FROM `{tenant_name}` 
+            WHERE user_id = %s
+        """
+        user = await database.execute_query(
+            check_query,
+            (user_id,),
+            fetch_one=True
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User {user_id} not found"
+            )
+        
+        # Build update query dynamically
+        update_fields = []
+        params = []
+        
+        if request.first_name is not None:
+            update_fields.append("first_name = %s")
+            params.append(request.first_name)
+        
+        if request.last_name is not None:
+            update_fields.append("last_name = %s")
+            params.append(request.last_name)
+        
+        if request.roles is not None:
+            # Validate all roles exist
+            for role_name in request.roles:
+                role_query = "SELECT name FROM roles WHERE name = %s"
+                role = await database.execute_query(
+                    role_query,
+                    (role_name,),
+                    fetch_one=True
+                )
+                
+                if not role:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Role '{role_name}' not found"
+                    )
+            
+            import json
+            roles_json = json.dumps(request.roles)
+            update_fields.append("roles = %s")
+            params.append(roles_json)
+        
+        if request.user_data is not None:
+            import json
+            user_data_json = json.dumps({
+                "stack": request.user_data.stack or [],
+                "technologies": request.user_data.technologies or [],
+                "experience_years": request.user_data.experience_years or 0
+            })
+            update_fields.append("user_data = %s")
+            params.append(user_data_json)
+        
+        if not update_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No fields to update"
+            )
+        
+        # Add updated_at timestamp
+        update_fields.append("updated_at = NOW()")
+        params.append(user_id)
+        
+        query = f"""
+            UPDATE `{tenant_name}` 
+            SET {', '.join(update_fields)}
+            WHERE user_id = %s
+        """
+        
+        await database.execute_query(query, tuple(params), commit=True)
+        
+        logger.info(f"User {user_id} updated by {current_user['email']}")
+        
+        return {
+            "success": True,
+            "message": "User updated successfully",
+            "data": {
+                "user_id": user_id,
+                "first_name": request.first_name,
+                "last_name": request.last_name,
+                "roles": request.roles
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update user: {str(e)}"
+        )
+
+
+@router.get(
+    "/{user_id}/projects",
+    summary="Get User Projects",
+    description="Get project assignments for a specific user (Admin/Super Admin only)"
+)
+async def get_user_projects(
+    user_id: str,
+    current_user: Dict[str, Any] = Depends(verify_admin_or_super_admin),
+    database: Database = Depends(get_database)
+) -> Dict[str, Any]:
+    """Get projects assigned to a specific user"""
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+        
+        # Get user's projects
+        query = f"""
+            SELECT projects 
+            FROM `{tenant_name}` 
+            WHERE user_id = %s
+        """
+        
+        result = await database.execute_query(
+            query,
+            (user_id,),
+            fetch_one=True
+        )
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User {user_id} not found"
+            )
+        
+        import json
+        project_ids = []
+        if result.get("projects"):
+            try:
+                project_ids = json.loads(result["projects"]) if isinstance(result["projects"], str) else result["projects"]
+            except:
+                project_ids = []
+        
+        return {
+            "success": True,
+            "message": "User projects retrieved successfully",
+            "data": {
+                "user_id": user_id,
+                "project_ids": project_ids or []
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting user projects: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get user projects: {str(e)}"
+        )
+
+
+class UpdateUserProjectsRequest(BaseModel):
+    """Request model for updating user project assignments"""
+    project_ids: List[int] = Field(..., description="List of project IDs to assign to user")
+
+
+@router.put(
+    "/{user_id}/projects",
+    summary="Update User Projects",
+    description="Update project assignments for a specific user (Admin/Super Admin only)"
+)
+async def update_user_projects(
+    user_id: str,
+    request: UpdateUserProjectsRequest,
+    current_user: Dict[str, Any] = Depends(verify_admin_or_super_admin),
+    database: Database = Depends(get_database)
+) -> Dict[str, Any]:
+    """Update projects assigned to a specific user"""
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+        
+        # Check if user exists
+        check_query = f"""
+            SELECT user_id FROM `{tenant_name}` 
+            WHERE user_id = %s
+        """
+        user = await database.execute_query(
+            check_query,
+            (user_id,),
+            fetch_one=True
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User {user_id} not found"
+            )
+        
+        # Update user's projects
+        import json
+        update_query = f"""
+            UPDATE `{tenant_name}` 
+            SET projects = %s, updated_at = NOW()
+            WHERE user_id = %s
+        """
+        
+        projects_json = json.dumps(request.project_ids)
+        await database.execute_query(
+            update_query,
+            (projects_json, user_id),
+            commit=True
+        )
+        
+        logger.info(f"Updated user {user_id} projects by {current_user['email']}")
+        
+        return {
+            "success": True,
+            "message": "User project assignments updated successfully",
+            "data": {
+                "user_id": user_id,
+                "project_ids": request.project_ids
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user projects: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update user projects: {str(e)}"
+        )
+

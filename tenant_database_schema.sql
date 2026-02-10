@@ -8,14 +8,10 @@
 -- 
 -- Tables created:
 -- 1. tenant_info - Tenant metadata and configuration
--- 2. jira_integrations - Jira account integration details
--- 3. projects - Project records and timelines
--- 4. project_backlog - Backlog items for projects
--- 5. sprint - Sprint management and tracking
--- 6. sprint_leave - Developer leave tracking within sprints
--- 7. task - Task and work item tracking
--- 8. tbl_blocker - Project blockers tracking
--- 9. tbl_risk_parameters_selection - Risk parameter configuration
+-- 2. sprints - Sprint management
+-- 3. tasks - Task/issue tracking
+-- 4. meetings - Meeting records
+-- 5. retrospectives - Retrospective data
 -- ============================================
 
 -- NOTE: Replace {TENANT_DB} with actual tenant database name
@@ -72,308 +68,289 @@ CREATE TABLE IF NOT EXISTS `projects` (
     `start_date` DATE NOT NULL COMMENT 'Project start date',
     `end_date` DATE NOT NULL COMMENT 'Project end date',
 
+    -- Project Management Metadata
+    `sprint_size` INT NULL COMMENT 'Sprint duration in weeks (typically 1-4)',
+    `next_sprint_start_date` DATE NULL COMMENT 'Next sprint start date',
+    `project_lead` VARCHAR(255) NULL COMMENT 'Project lead name or email',
+    `project_manager` JSON DEFAULT NULL COMMENT 'Project manager email',
+
+    -- Architecture and Stack Information
+    `architecture_type` ENUM(
+        'Monolithic', 'Microservices', 'Serverless',
+        'Event-Driven', 'Layered', 'Modular', 'Other'
+    ) NULL COMMENT 'Project architecture pattern',
+
+    `stack_type` ENUM('Frontend', 'Backend', 'Fullstack') NULL COMMENT 'Application stack type',
+    
+    -- Technology Stack
+    `frontend_technologies` JSON NULL COMMENT 'Frontend technologies (e.g., ["React","TypeScript"])',
+    `backend_technologies` JSON NULL COMMENT 'Backend technologies (e.g., ["Node.js","Spring Boot"])',
+    
+    -- Infrastructure
+    `cloud_host` VARCHAR(100) NULL COMMENT 'Cloud hosting provider',
+    `budget` DECIMAL(12,2) NULL COMMENT 'Project budget',
+
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP 
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
 
     -- Unique constraints
     UNIQUE KEY `unique_project_key` (`key`),
     UNIQUE KEY `unique_project_name` (`project_name`),
 
-    -- Additional index for faster search on project_name
+    -- Indexes
     INDEX `idx_project_name` (`project_name`),
     INDEX `idx_project_key` (`key`),
     INDEX `idx_start_date` (`start_date`),
-    INDEX `idx_end_date` (`end_date`)
+    INDEX `idx_end_date` (`end_date`),
+    INDEX `idx_next_sprint_start_date` (`next_sprint_start_date`),
+    INDEX `idx_project_lead` (`project_lead`),
+    INDEX `idx_architecture_type` (`architecture_type`),
+    INDEX `idx_stack_type` (`stack_type`),
+    INDEX `idx_cloud_host` (`cloud_host`)
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci
   COMMENT='Project records and timelines';
 
+-- ============================================
+-- DATABASE TRIGGER
+-- ============================================
+-- Automatically sets next_sprint_start_date to start_date on insert
+CREATE TRIGGER IF NOT EXISTS trg_projects_before_insert
+BEFORE INSERT ON projects
+FOR EACH ROW
+SET NEW.next_sprint_start_date = NEW.start_date;
+
+
 -- ============================================ project_backlog TABLE
 -- Stores backlog items for projects
 
-  CREATE TABLE IF NOT EXISTS `project_backlog` (
-    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Backlog unique ID created by system',
+CREATE TABLE IF NOT EXISTS `project_backlog` (
+  `id` VARCHAR(128) COLLATE utf8mb4_unicode_ci NOT NULL
+    COMMENT 'Backlog unique ID created by jira',
 
-    `project_id` BIGINT NOT NULL COMMENT 'Project ID this backlog item belongs to',
-    `name` VARCHAR(255) NOT NULL COMMENT 'Backlog item name / summary',
-    `description` TEXT NULL COMMENT 'Detailed description of the backlog item',
-    `issue_type` VARCHAR(100) NOT NULL COMMENT 'Type: story, feature, change, bug',
-    `status` VARCHAR(100) NOT NULL DEFAULT 'todo' COMMENT 'Current status of the item',
-    `priority` VARCHAR(100) NULL COMMENT 'Priority: high, medium, low',
-    `assignee` VARCHAR(255) NULL COMMENT 'Assigned user/person',
+  `project_id` BIGINT NOT NULL
+    COMMENT 'Project ID this backlog item belongs to',
 
-    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Record creation time',
-    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP 
-        ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update time',
+  `summary` VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL
+    COMMENT 'Backlog item name / summary',
 
-    -- Indexes
-    INDEX `idx_project_id` (`project_id`),
-    INDEX `idx_issue_type` (`issue_type`),
-    INDEX `idx_status` (`status`),
-    INDEX `idx_priority` (`priority`)
+  `description` TEXT COLLATE utf8mb4_unicode_ci
+    COMMENT 'Detailed description of the backlog item',
+
+  `issue_type` VARCHAR(100) COLLATE utf8mb4_unicode_ci NOT NULL
+    COMMENT 'Type: story, feature, change, bug',
+
+  `status` VARCHAR(100) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'todo'
+    COMMENT 'Current status: todo, in_progress, done',
+
+  `priority` VARCHAR(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL
+    COMMENT 'Priority: high, medium, low',
+
+  `severity` VARCHAR(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL
+    COMMENT 'Severity level if applicable',
+
+  `assignee` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL
+    COMMENT 'Assigned user/person',
+
+  `tags` JSON DEFAULT NULL
+    COMMENT 'Tags associated with the backlog item',
+
+  `estimated_hours` INT DEFAULT 0
+    COMMENT 'Estimated effort in hours',
+
+  `logged_hours` INT DEFAULT 0
+    COMMENT 'Actual logged hours',
+
+  `story_points` INT DEFAULT 0
+    COMMENT 'Story point estimation',
+
+  `sprint_id` INT DEFAULT NULL
+    COMMENT 'Sprint ID if assigned to a sprint',
+
+  `parent_task_id` VARCHAR(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Parent task ID for subtasks (supports Jira keys like TAM-48)',
+
+  `start_date` DATE DEFAULT NULL
+    COMMENT 'Planned start date',
+
+  `actual_start_date` DATE DEFAULT NULL
+    COMMENT 'Actual start date',
+
+  `end_date` DATE DEFAULT NULL
+    COMMENT 'Planned end date',
+
+  `actual_end_date` DATE DEFAULT NULL
+    COMMENT 'Actual end date',
+
+  `is_jira` TINYINT(1) NOT NULL DEFAULT 1
+    COMMENT 'Is this backlog item created from Jira?',
+
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    COMMENT 'Record creation time',
+
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ON UPDATE CURRENT_TIMESTAMP
+    COMMENT 'Last update time',
+
+  PRIMARY KEY (`id`),
+
+  KEY `idx_project_id` (`project_id`),
+  KEY `idx_issue_type` (`issue_type`),
+  KEY `idx_status` (`status`),
+  KEY `idx_priority` (`priority`),
+  KEY `idx_sprint_id` (`sprint_id`),
+  KEY `idx_parent_task_id` (`parent_task_id`)
+
 ) ENGINE=InnoDB
-  DEFAULT CHARSET=utf8mb4
-  COLLATE=utf8mb4_unicode_ci
-  COMMENT='Backlog items gathered before project start and new changes/features added later';
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci
+COMMENT='Backlog items before project start and future changes/features';
 
 
 -- ============================================ sprint TABLE
 -- Stores sprint information for projects
 CREATE TABLE IF NOT EXISTS `sprint` (
-  `sprint_id` INT NOT NULL AUTO_INCREMENT,
-  `project_id` BIGINT NOT NULL,
-  `sprint_name` VARCHAR(255) NOT NULL,
-  `sprint_goal` TEXT,
-  `start_date` DATE NOT NULL,
-  `end_date` DATE NOT NULL,
-  `sprint_status` ENUM('Not Started','In Progress','Completed','Closed') DEFAULT 'Not Started',
-  `total_estimated_hours` INT DEFAULT 0,
-  `total_completed_hours` INT DEFAULT 0,
-  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`sprint_id`),
-  INDEX `idx_sprint_project` (`project_id`),
-  INDEX `idx_sprint_status` (`sprint_status`),
-  INDEX `idx_sprint_dates` (`start_date`, `end_date`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
-COMMENT='Sprint management and tracking';
+    `sprint_id` INT NOT NULL AUTO_INCREMENT
+        COMMENT 'Unique sprint identifier',
 
--- ============================================ sprint_leave TABLE
--- Stores developer leave information during sprints
-CREATE TABLE IF NOT EXISTS `sprint_leave` (
-  `leave_id` INT NOT NULL AUTO_INCREMENT,
-  `sprint_id` INT NOT NULL,
-  `project_id` BIGINT NOT NULL,
-  `developer_name` VARCHAR(255) NOT NULL,
-  `leave_date` DATE NOT NULL,
-  `leave_hours` INT NOT NULL CHECK (`leave_hours` >= 0),
-  `reason` VARCHAR(500) DEFAULT NULL,
-  `leave_type` ENUM('Full Day','Half Day','Short Leave') DEFAULT 'Full Day',
-  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`leave_id`),
-  INDEX `idx_leave_sprint` (`sprint_id`),
-  INDEX `idx_leave_project` (`project_id`),
-  INDEX `idx_leave_date` (`leave_date`),
-  INDEX `idx_developer_name` (`developer_name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
-COMMENT='Developer leave tracking within sprints';
+    `project_id` BIGINT NOT NULL
+        COMMENT 'Project this sprint belongs to',
 
--- ============================================ task TABLE
--- Stores tasks, bugs, stories, and other work items
-CREATE TABLE IF NOT EXISTS `task` (
-  `task_id` INT NOT NULL AUTO_INCREMENT,
-  `project_id` BIGINT NOT NULL,
-  `sprint_id` INT DEFAULT NULL,
-  `parent_task_id` INT DEFAULT NULL,
-  `task_name` VARCHAR(255) NOT NULL,
-  `description` TEXT,
-  `task_type` ENUM('Task','Bug','Story','Epic','Spike') DEFAULT 'Task',
-  `priority` ENUM('Low','Medium','High','Critical') DEFAULT 'Medium',
-  `status` ENUM('To Do','In Progress','In Review','Blocked','Completed') DEFAULT 'To Do',
-  `estimated_hours` INT DEFAULT 0,
-  `logged_hours` INT DEFAULT 0,
-  `story_points` INT DEFAULT 0,
-  `assignee` VARCHAR(255) DEFAULT NULL,
-  `start_date` DATE NOT NULL,
-  `actual_start_date` DATE DEFAULT NULL,
-  `end_date` DATE NOT NULL,
-  `actual_end_date` DATE DEFAULT NULL,
-  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`task_id`),
-  INDEX `idx_task_project` (`project_id`),
-  INDEX `idx_task_sprint` (`sprint_id`),
-  INDEX `idx_task_parent` (`parent_task_id`),
-  INDEX `idx_task_type` (`task_type`),
-  INDEX `idx_task_priority` (`priority`),
-  INDEX `idx_task_status` (`status`),
-  INDEX `idx_task_assignee` (`assignee`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
-COMMENT='Task and work item tracking';
+    `sprint_name` VARCHAR(255) NOT NULL
+        COMMENT 'Sprint name/identifier',
 
--- ============================================ tbl_blocker TABLE
--- Stores project blockers that prevent work from progressing
-CREATE TABLE IF NOT EXISTS `tbl_blocker` (
-  `blocker_id` INT NOT NULL AUTO_INCREMENT,
-  `project_id` BIGINT NOT NULL,
-  `sprint_id` INT DEFAULT NULL,
-  `task_id` INT DEFAULT NULL,
-  `blocker_title` VARCHAR(255) NOT NULL,
-  `blocker_description` TEXT DEFAULT NULL,
-  `blocker_type` ENUM('Technical','Dependency','Resource','Requirement','Infrastructure','External','Other') NOT NULL,
-  `severity` ENUM('Low','Medium','High','Critical') DEFAULT 'Medium',
-  `status` ENUM('Open','In Progress','Resolved') DEFAULT 'Open',
-  `reported_by` VARCHAR(255) NOT NULL,
-  `assigned_to` VARCHAR(255) DEFAULT NULL,
-  `reported_date` DATE NOT NULL,
-  `resolved_date` DATE DEFAULT NULL,
-  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`blocker_id`),
-  INDEX `idx_blocker_project` (`project_id`),
-  INDEX `idx_blocker_sprint` (`sprint_id`),
-  INDEX `idx_blocker_task` (`task_id`),
-  INDEX `idx_blocker_type` (`blocker_type`),
-  INDEX `idx_blocker_severity` (`severity`),
-  INDEX `idx_blocker_status` (`status`),
-  INDEX `idx_blocker_reported_date` (`reported_date`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
-COMMENT='Project blockers tracking with severity and resolution status';
+    `start_date` DATE NOT NULL
+        COMMENT 'Sprint start date',
 
--- ============================================ tbl_risk_parameters_selection TABLE
--- Stores risk parameter selection and weights for projects
-CREATE TABLE IF NOT EXISTS `tbl_risk_parameters_selection` (
-    `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `project_id` BIGINT NOT NULL,
+    `end_date` DATE NOT NULL
+        COMMENT 'Sprint end date',
 
-    `uncompleted_tasks` BOOLEAN DEFAULT FALSE,
-    `uncompleted_tasks_weight` INT DEFAULT 0,
+    `status` ENUM('PLANNED', 'ACTIVE', 'COMPLETED') DEFAULT 'PLANNED'
+        COMMENT 'Sprint status',
 
-    `detected_bugs` BOOLEAN DEFAULT FALSE,
-    `detected_bugs_weight` INT DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        COMMENT 'Record creation time',
 
-    `blockers_count` BOOLEAN DEFAULT FALSE,
-    `blockers_count_weight` INT DEFAULT 0,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP
+        COMMENT 'Last update time',
 
-    `developer_workload` BOOLEAN DEFAULT FALSE,
-    `developer_workload_weight` INT DEFAULT 0,
+    -- Primary Key
+    PRIMARY KEY (`sprint_id`),
 
-    `task_dependency` BOOLEAN DEFAULT FALSE,
-    `task_dependency_weight` INT DEFAULT 0,
+    -- Indexes
+    INDEX `idx_project_id` (`project_id`),
+    INDEX `idx_status` (`status`),
+    INDEX `idx_start_date` (`start_date`),
+    INDEX `idx_end_date` (`end_date`),
+    UNIQUE KEY `uk_sprint_project` (`sprint_id`, `project_id`)
 
-    `timeline_conflict` BOOLEAN DEFAULT FALSE,
-    `timeline_conflict_weight` INT DEFAULT 0,
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Sprint management for projects';
 
-    `developer_availability` BOOLEAN DEFAULT FALSE,
-    `developer_availability_weight` INT DEFAULT 0,
 
-    `task_progress` BOOLEAN DEFAULT FALSE,
-    `task_progress_weight` INT DEFAULT 0,
+-- ============================================ project_backlog_priority TABLE
+-- Stores priority ranking of backlog items
+CREATE TABLE IF NOT EXISTS `project_backlog_priority` (
+    `project_id` BIGINT NOT NULL
+        COMMENT 'Project ID this backlog item belongs to',
 
-    `sprint_completion_level` BOOLEAN DEFAULT FALSE,
-    `sprint_completion_level_weight` INT DEFAULT 0,
+    `backlog_id` VARCHAR(128) NOT NULL
+        COMMENT 'Backlog item ID (from project_backlog)',
 
-    `project_budget` BOOLEAN DEFAULT FALSE,
-    `project_budget_weight` INT DEFAULT 0,
+    `rank` INT NOT NULL
+        COMMENT 'Priority rank (1 = highest priority)',
+    `sprint_id` INT DEFAULT NULL
+        COMMENT 'Sprint ID this backlog item belongs to',    
 
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        COMMENT 'Record creation time',
 
-    INDEX `idx_risk_project` (`project_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
-COMMENT='Risk parameter selection and weights for project risk analysis';
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP
+        COMMENT 'Last update time',
 
+    -- Primary Key (Composite)
+    PRIMARY KEY (`project_id`, `backlog_id`),
+
+    -- Indexes
+    INDEX `idx_project_rank` (`project_id`, `rank`),
+    INDEX `idx_sprint_id` (`sprint_id`)
+
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Priority ranking of backlog items per project';
+
+
+-- ============================================
+-- NOTIFICATIONS TABLE
+-- ============================================
+-- Stores notifications for users
+-- ============================================
+CREATE TABLE IF NOT EXISTS `notifications` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Notification ID',
+    `header` VARCHAR(255) NOT NULL COMMENT 'Notification header/title',
+    `description` TEXT NOT NULL COMMENT 'Notification description/message',
+    `related_users` JSON NOT NULL COMMENT 'List of user emails who should see this notification',
+    `is_read` BOOLEAN DEFAULT FALSE COMMENT 'Whether notification has been read',
+    `notification_type` ENUM('INFO', 'WARNING', 'SUCCESS', 'ERROR') DEFAULT 'INFO' COMMENT 'Type of notification',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX `idx_created_at` (`created_at`),
+    INDEX `idx_notification_type` (`notification_type`)
+) ENGINE=InnoDB 
+  DEFAULT CHARSET=utf8mb4 
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='User notifications';
 
 -- ============================================
 -- FOREIGN KEY CONSTRAINTS
 -- ============================================
--- Maintains referential integrity between tables
--- Pattern: ALTER TABLE `child_table` ADD CONSTRAINT `fk_child_parent`
+-- Adding foreign keys after all tables are created
 -- ============================================
 
--- Project Backlog -> Projects relationship
--- Ensures backlog items belong to valid projects
+-- project_backlog foreign keys
 ALTER TABLE `project_backlog`
-    ADD CONSTRAINT `fk_backlog_project`
+ADD CONSTRAINT `fk_backlog_project`
     FOREIGN KEY (`project_id`)
-    REFERENCES `projects`(`project_id`)
-    ON UPDATE CASCADE
-    ON DELETE CASCADE;
+    REFERENCES `projects` (`project_id`)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE;
 
--- Sprint -> Projects relationship
--- Ensures sprints belong to valid projects
+-- sprint foreign keys
 ALTER TABLE `sprint`
-    ADD CONSTRAINT `fk_sprint_project`
+ADD CONSTRAINT `fk_sprint_project`
     FOREIGN KEY (`project_id`)
-    REFERENCES `projects`(`project_id`)
+    REFERENCES `projects` (`project_id`)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE;
+
+-- project_backlog_priority foreign keys
+ALTER TABLE `project_backlog_priority`
+ADD CONSTRAINT `fk_priority_project`
+    FOREIGN KEY (`project_id`)
+    REFERENCES `projects` (`project_id`)
     ON UPDATE CASCADE
     ON DELETE CASCADE;
 
--- Sprint Leave -> Sprint relationship
--- Ensures leave records belong to valid sprints
-ALTER TABLE `sprint_leave`
-    ADD CONSTRAINT `fk_leave_sprint`
+ALTER TABLE `project_backlog_priority`
+ADD CONSTRAINT `fk_priority_backlog`
+    FOREIGN KEY (`backlog_id`)
+    REFERENCES `project_backlog` (`id`)
+    ON UPDATE CASCADE
+    ON DELETE CASCADE;
+
+ALTER TABLE `project_backlog_priority`
+ADD CONSTRAINT `fk_priority_sprint`
     FOREIGN KEY (`sprint_id`)
-    REFERENCES `sprint`(`sprint_id`)
+    REFERENCES `sprint` (`sprint_id`)
     ON UPDATE CASCADE
     ON DELETE CASCADE;
 
--- Sprint Leave -> Projects relationship
--- Ensures leave records belong to valid projects
-ALTER TABLE `sprint_leave`
-    ADD CONSTRAINT `fk_leave_project`
-    FOREIGN KEY (`project_id`)
-    REFERENCES `projects`(`project_id`)
-    ON UPDATE CASCADE
-    ON DELETE CASCADE;
-
--- Task -> Projects relationship
--- Ensures tasks belong to valid projects
-ALTER TABLE `task`
-    ADD CONSTRAINT `fk_task_project`
-    FOREIGN KEY (`project_id`)
-    REFERENCES `projects`(`project_id`)
-    ON UPDATE CASCADE
-    ON DELETE CASCADE;
-
--- Task -> Sprint relationship
--- Ensures tasks belong to valid sprints (nullable)
-ALTER TABLE `task`
-    ADD CONSTRAINT `fk_task_sprint`
-    FOREIGN KEY (`sprint_id`)
-    REFERENCES `sprint`(`sprint_id`)
-    ON UPDATE CASCADE
-    ON DELETE SET NULL;
-
--- Risk Parameters Selection -> Projects relationship
--- Ensures risk parameters belong to valid projects
-ALTER TABLE `tbl_risk_parameters_selection`
-    ADD CONSTRAINT `fk_risk_params_project`
-    FOREIGN KEY (`project_id`)
-    REFERENCES `projects`(`project_id`)
-    ON UPDATE CASCADE
-    ON DELETE CASCADE;
-
--- Blocker -> Projects relationship
--- Ensures blockers belong to valid projects
-ALTER TABLE `tbl_blocker`
-    ADD CONSTRAINT `fk_blocker_project`
-    FOREIGN KEY (`project_id`)
-    REFERENCES `projects`(`project_id`)
-    ON UPDATE CASCADE
-    ON DELETE CASCADE;
-
--- Blocker -> Sprint relationship
--- Ensures blockers belong to valid sprints (nullable)
-ALTER TABLE `tbl_blocker`
-    ADD CONSTRAINT `fk_blocker_sprint`
-    FOREIGN KEY (`sprint_id`)
-    REFERENCES `sprint`(`sprint_id`)
-    ON UPDATE CASCADE
-    ON DELETE SET NULL;
-
--- Blocker -> Task relationship
--- Ensures blockers belong to valid tasks (nullable)
-ALTER TABLE `tbl_blocker`
-    ADD CONSTRAINT `fk_blocker_task`
-    FOREIGN KEY (`task_id`)
-    REFERENCES `task`(`task_id`)
-    ON UPDATE CASCADE
-    ON DELETE SET NULL;
-
--- Add future foreign key constraints below following the same pattern:
--- 
--- Example template:
--- Relationship description goes in comment above the ALTER statement
--- ALTER TABLE `child_table`
---     ADD CONSTRAINT `fk_child_parent`
---     FOREIGN KEY (`parent_id`)
---     REFERENCES `parent_table`(`id`)
---     ON UPDATE CASCADE
---     ON DELETE [CASCADE|SET NULL|RESTRICT];
--- ============================================
 
 

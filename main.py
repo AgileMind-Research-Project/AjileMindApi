@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
+import socketio
 import sys
 from pathlib import Path
 
@@ -17,9 +18,10 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, riskparameters
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, notifications, backlog_priority, meetings
 from app.db.database import db
 from app.middleware.audit_middleware import AuditLoggingMiddleware
+from app.core.redis_chat_client import init_redis_chat
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,6 +37,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"❌ Failed to initialize database pool: {e}\n")
         raise
+    
+    # Initialize Redis chat client
+    print("🔌 Initializing Redis Chat client...")
+    try:
+        init_redis_chat()
+        print("✅ Redis Chat initialized successfully\n")
+    except Exception as e:
+        print(f"⚠️  Redis Chat initialization warning: {e}\n")
+        # Don't raise - chat is optional
     
     yield
     
@@ -249,8 +260,18 @@ app.include_router(audit.router, prefix=f"{settings.API_PREFIX}/audit", tags=["A
 app.include_router(users.router, prefix=f"{settings.API_PREFIX}/users", tags=["Users"])
 app.include_router(jira.router, prefix=f"{settings.API_PREFIX}/jira", tags=["Jira Integration"])
 app.include_router(projects.router, prefix=f"{settings.API_PREFIX}/projects", tags=["Projects"])
-app.include_router(riskparameters.router,prefix=f"{settings.API_PREFIX}/risk-parameters", tags=["Risk Parameters"])
+app.include_router(backlog.router, prefix=f"{settings.API_PREFIX}/backlog", tags=["Backlog"])
+app.include_router(backlog_priority.router, prefix=f"{settings.API_PREFIX}/backlog-priority", tags=["Backlog Priority"])
+app.include_router(notifications.router, prefix=f"{settings.API_PREFIX}/notifications", tags=["Notifications"])
+app.include_router(redis_chat.router, prefix=f"{settings.API_PREFIX}/chat", tags=["Redis Chat"])
+app.include_router(meetings.router, prefix=f"{settings.API_PREFIX}/meetings", tags=["Meetings"])
 # app.include_router(tenants.router, prefix=f"{settings.API_PREFIX}/tenants", tags=["Tenants"])
+
+# Import Socket.IO server and wrap with app
+from app.websocket import sio, socket_app
+
+# Mount Socket.IO at /socket.io - this should handle all Socket.IO traffic
+app.mount("/socket.io", socket_app)
 
 if __name__ == "__main__":    
     uvicorn.run(

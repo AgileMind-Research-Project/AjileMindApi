@@ -73,7 +73,7 @@ class JiraService:
             
             if not existing:
                 # Create a secret for the API token
-                secret_name = f"jira_api_token_{tenant_name}_{jira_url.replace('https://','').replace('/','_')}"
+                secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
                 
                 # Call sync function to create secret (not async)
                 result = create_secret(secret_name, api_token)
@@ -476,7 +476,7 @@ class JiraService:
         email = credentials["email"]
         
         # Get API token from secret manager
-        secret_name = f"jira_api_token_{tenant_name}_{jira_url.replace('https://','').replace('/','_')}"
+        secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
         secret_result = get_secret(secret_name)
         
         if not secret_result.get("success"):
