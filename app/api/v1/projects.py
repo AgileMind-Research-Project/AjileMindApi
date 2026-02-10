@@ -12,6 +12,7 @@ from app.db.database import db, Database
 from app.core.logger import logger
 from app.utils.jwt import get_current_user_from_token
 from app.services.project_service import ProjectService
+from app.services.delay_calculation_service import DelayCalculationService
 from app.schemas.project_schemas import (
     CreateProjectRequest,
     CreateProjectResponse,
@@ -593,3 +594,68 @@ async def get_project_users(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get project users: {str(e)}"
         )
+
+
+@router.get(
+    "/{project_id}/delay-analysis",
+    response_model=StandardResponse,
+    summary="Get Project Delay Analysis",
+    description="Calculate and retrieve delay analysis for a project"
+)
+async def get_delay_analysis(
+    project_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    database: Database = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Calculate delay analysis for a project.
+    
+    **Access:** All authenticated users who have access to the project
+    
+    **Returns:**
+    - Delay level (NO_DELAY, LOW, MEDIUM, HIGH, CRITICAL)
+    - Delay percentage
+    - Detailed breakdown and metrics
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+            
+        # Check access
+        user_roles = current_user.get("roles", [])
+        if not user_roles and current_user.get("role"):
+            user_roles = [current_user.get("role")]
+        user_projects = current_user.get("projects", [])
+        
+        if not any(role in ["ADMIN", "SUPER_ADMIN"] for role in user_roles):
+            if project_id not in user_projects:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have access to this project"
+                )
+        
+        # Calculate delay analysis
+        delay_service = DelayCalculationService(database)
+        delay_data = await delay_service.calculate_project_delay(project_id, tenant_name)
+        
+        return {
+            "success": True,
+            "message": "Delay analysis calculated successfully",
+            "data": delay_data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error calculating delay analysis: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to calculate delay analysis: {str(e)}"
+        )
+
