@@ -115,11 +115,21 @@ class AuthService:
         )
         
         # Generate JWT tokens with domain
+        import json
+        user_roles = user.get("roles", [])
+        if isinstance(user_roles, str):
+            try:
+                user_roles = json.loads(user_roles)
+            except:
+                user_roles = [user.get("role", "USER")]  # Legacy fallback
+        elif not user_roles:
+            user_roles = [user.get("role", "USER")]  # Legacy fallback
+        
         token_data = {
             "sub": user["user_id"],
             "email": user["email"],
             "tenant_name": domain,
-            "role": user["role"]
+            "roles": user_roles
         }
         tokens = create_token_pair(token_data)
         
@@ -144,7 +154,7 @@ class AuthService:
                 "email": user["email"],
                 "first_name": user.get("first_name"),
                 "last_name": user.get("last_name"),
-                "role": user["role"]
+                "roles": user_roles
             },
             "tokens": tokens,
             "redirect_url": f"{settings.AGILEMIND_PLATFORM_URL}/dashboard"
@@ -243,11 +253,21 @@ class AuthService:
         await self.tenant_user_repo.update_last_login(table_name, user["user_id"])
         
         # Generate tokens with domain and projects
+        import json
+        user_roles = user.get("roles", [])
+        if isinstance(user_roles, str):
+            try:
+                user_roles = json.loads(user_roles)
+            except:
+                user_roles = [user.get("role", "USER")]  # Legacy fallback
+        elif not user_roles:
+            user_roles = [user.get("role", "USER")]  # Legacy fallback
+        
         token_data = {
             "sub": user["user_id"],
             "email": user["email"],
             "tenant_name": domain,
-            "role": user["role"],
+            "roles": user_roles,
             "projects": user.get("projects", [])
         }
         tokens = create_token_pair(token_data)
@@ -265,7 +285,7 @@ class AuthService:
                 "email": user["email"],
                 "first_name": user.get("first_name"),
                 "last_name": user.get("last_name"),
-                "role": user["role"],
+                "roles": user_roles,
                 "tenant_name": domain,
                 "projects": user.get("projects", [])
             },
@@ -554,12 +574,27 @@ class AuthService:
                 detail="User not found"
             )
         
+        # Parse roles from database
+        user_roles = []
+        if user.get("roles"):
+            try:
+                import json
+                user_roles = json.loads(user["roles"]) if isinstance(user["roles"], str) else user["roles"]
+            except:
+                # Fallback to legacy single role field
+                if user.get("role"):
+                    user_roles = [user["role"]]
+        elif user.get("role"):
+            # Legacy fallback if no roles field
+            user_roles = [user["role"]]
+        
         return {
             "user_id": user["user_id"],
             "email": user["email"],
             "first_name": user.get("first_name"),
             "last_name": user.get("last_name"),
-            "role": user["role"],
+            "roles": user_roles,
+            "role": user_roles[0] if user_roles else None,  # Legacy field for backward compatibility
             "tenant_name": tenant_name,
             "status": user["status"],
             "projects": user.get("projects", []),

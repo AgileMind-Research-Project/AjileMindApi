@@ -41,7 +41,12 @@ async def verify_admin_access(
     current_user: Dict[str, Any] = Depends(get_current_user_from_token)
 ) -> Dict[str, Any]:
     """Verify that the user has admin access"""
-    if current_user.get("role") not in ["SUPER_ADMIN", "ADMIN"]:
+    user_roles = current_user.get("roles", [])
+    # Fallback to single role for backward compatibility
+    if not user_roles and current_user.get("role"):
+        user_roles = [current_user.get("role")]
+    
+    if not any(role in ["SUPER_ADMIN", "ADMIN"] for role in user_roles):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"

@@ -5,7 +5,7 @@ Pydantic models for authentication requests and responses.
 """
 
 from pydantic import BaseModel, EmailStr, Field, validator
-from typing import Optional
+from typing import Optional, List
 from app.utils.password import validate_password
 
 
@@ -50,7 +50,7 @@ class UserResponse(BaseModel):
     email: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    role: str
+    roles: List[str]
     tenant_id: str
     tenant_name: Optional[str] = None
     status: str = "ACTIVE"
