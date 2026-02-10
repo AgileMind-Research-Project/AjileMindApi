@@ -66,7 +66,7 @@ class TenantUserRepository:
                     `password_hash` VARCHAR(255) NOT NULL,
                     `first_name` VARCHAR(100),
                     `last_name` VARCHAR(100),
-                    `role` VARCHAR(50) NOT NULL DEFAULT 'USER',
+                    `roles` JSON DEFAULT NULL COMMENT 'User roles as JSON array',
                     `projects` JSON DEFAULT NULL,
                     `status` ENUM('ACTIVE', 'SUSPENDED', 'PENDING_ACTIVATION') DEFAULT 'PENDING_ACTIVATION',
                     `password_change_required` BOOLEAN DEFAULT TRUE,
@@ -206,7 +206,8 @@ class TenantUserRepository:
         domain: str,
         email: str,
         password_hash: str,
-        role: str,
+        role: Optional[str] = None,  # Legacy parameter for backward compatibility
+        roles: Optional[List[str]] = None,  # New parameter for multiple roles
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
         status: str = "PENDING_ACTIVATION",
@@ -219,7 +220,8 @@ class TenantUserRepository:
             domain: Company domain (table name)
             email: User email
             password_hash: Hashed password
-            role: User role
+            role: User role (legacy - single role, for backward compatibility)
+            roles: User roles (new - multiple roles as list)
             first_name: First name
             last_name: Last name
             status: User status
@@ -233,11 +235,22 @@ class TenantUserRepository:
         # Table name in centralized DB (just domain, e.g., visionexdigital)
         table_name = domain
         
-        # Insert into centralized users table
+        # Handle roles - support both old (single role) and new (multiple roles) format
+        if roles is None and role is not None:
+            # Legacy: convert single role to roles array
+            roles = [role]
+        elif roles is None:
+            # No roles provided at all
+            roles = []
+        
+        # Convert roles list to JSON
+        roles_json = json.dumps(roles)
+        
+        # Insert into centralized users table (using roles column only)
         query = f"""
             INSERT INTO `{table_name}` (
                 user_id, email, password_hash, 
-                first_name, last_name, role, status, 
+                first_name, last_name, roles, status, 
                 password_change_required, created_at, updated_at
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
@@ -246,16 +259,17 @@ class TenantUserRepository:
         await self.db.execute_query(
             query,
             (user_id, email, password_hash, 
-             first_name, last_name, role, status, password_change_required),
+             first_name, last_name, roles_json, status, password_change_required),
             commit=True
         )
         
-        logger.info(f"User created in centralized {table_name} table: {user_id} - {email}")
+        logger.info(f"User created in centralized {table_name} table: {user_id} - {email} with roles: {roles}")
         
         return {
             "user_id": user_id,
             "email": email,
-            "role": role,
+            "roles": roles,
+            "role": roles[0] if roles else None,  # Legacy field for backward compatibility
             "first_name": first_name,
             "last_name": last_name,
             "status": status,
@@ -285,7 +299,7 @@ class TenantUserRepository:
                 password_hash,
                 first_name,
                 last_name,
-                role,
+                roles,
                 projects,
                 status,
                 password_change_required,
@@ -341,7 +355,7 @@ class TenantUserRepository:
                 password_hash,
                 first_name,
                 last_name,
-                role,
+                roles,
                 projects,
                 status,
                 password_change_required,
@@ -529,8 +543,9 @@ class TenantUserRepository:
         params = []
         
         if role:
-            where_clauses.append("role = %s")
-            params.append(role)
+            # Use JSON_CONTAINS to check if the role exists in the roles JSON array
+            where_clauses.append("JSON_CONTAINS(roles, %s, '$')")
+            params.append(json.dumps(role))  # JSON_CONTAINS requires JSON-encoded value
         
         if status:
             where_clauses.append("status = %s")
@@ -544,7 +559,7 @@ class TenantUserRepository:
                 tenant_id,
                 user_id,
                 email,
-                role,
+                roles,
                 user_data,
                 status,
                 last_login_at,

@@ -47,9 +47,12 @@ async def verify_project_creation_access(
     Only SUPER_ADMIN, ADMIN, and PROJECT_MANAGER can create projects.
     """
     allowed_roles = ["SUPER_ADMIN", "ADMIN", "PROJECT_MANAGER"]
-    user_role = current_user.get("role")
+    user_roles = current_user.get("roles", [])
+    # Fallback to single role for backward compatibility
+    if not user_roles and current_user.get("role"):
+        user_roles = [current_user.get("role")]
     
-    if user_role not in allowed_roles:
+    if not any(role in allowed_roles for role in user_roles):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Access denied. Only {', '.join(allowed_roles)} can create projects."
@@ -61,7 +64,12 @@ async def verify_admin_access(
     current_user: Dict[str, Any] = Depends(get_current_user_from_token)
 ) -> Dict[str, Any]:
     """Verify that the user has admin access"""
-    if current_user.get("role") not in ["SUPER_ADMIN", "ADMIN"]:
+    user_roles = current_user.get("roles", [])
+    # Fallback to single role for backward compatibility
+    if not user_roles and current_user.get("role"):
+        user_roles = [current_user.get("role")]
+    
+    if not any(role in ["SUPER_ADMIN", "ADMIN"] for role in user_roles):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
@@ -226,12 +234,15 @@ async def list_projects(
             limit=limit
         )
         
-        # Get user role and projects for filtering
-        user_role = current_user.get("role")
+        # Get user roles and projects for filtering
+        user_roles = current_user.get("roles", [])
+        # Fallback to old single role for backward compatibility
+        if not user_roles and current_user.get("role"):
+            user_roles = [current_user.get("role")]
         user_projects = current_user.get("projects", [])
         
-        # Filter projects based on user role
-        if user_role in ["ADMIN", "SUPER_ADMIN"]:
+        # Filter projects based on user roles
+        if any(role in ["ADMIN", "SUPER_ADMIN"] for role in user_roles):
             # ADMIN and SUPER_ADMIN see all projects
             filtered_projects = result["projects"]
         else:
@@ -245,7 +256,7 @@ async def list_projects(
         filtered_total = len(filtered_projects)
         
         logger.info(
-            f"User {current_user.get('email')} (role: {user_role}) "
+            f"User {current_user.get('email')} (roles: {user_roles}) "
             f"viewing {filtered_total} of {result['total']} projects"
         )
         
@@ -314,11 +325,14 @@ async def get_project(
             )
         
         # Check if user has access to this project
-        user_role = current_user.get("role")
+        user_roles = current_user.get("roles", [])
+        # Fallback to single role for backward compatibility
+        if not user_roles and current_user.get("role"):
+            user_roles = [current_user.get("role")]
         user_projects = current_user.get("projects", [])
         
         # ADMIN and SUPER_ADMIN can access all projects
-        if user_role not in ["ADMIN", "SUPER_ADMIN"]:
+        if not any(role in ["ADMIN", "SUPER_ADMIN"] for role in user_roles):
             # Other roles can only access assigned projects
             if project_id not in user_projects:
                 raise HTTPException(
@@ -473,4 +487,109 @@ async def delete_project(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete project: {str(e)}"
+        )
+
+
+@router.get(
+    "/{project_id}/users",
+    response_model=StandardResponse,
+    summary="Get Project Users",
+    description="Get of users assigned to this project"
+)
+async def get_project_users(
+    project_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    database: Database = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Get users assigned to a specific project.
+    
+    **Access:** All authenticated users who have access to the project
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+            
+        # Check access (reuse logic from get_project)
+        user_roles = current_user.get("roles", [])
+        if not user_roles and current_user.get("role"):
+            user_roles = [current_user.get("role")]
+        user_projects = current_user.get("projects", [])
+        
+        if not any(role in ["ADMIN", "SUPER_ADMIN"] for role in user_roles):
+            if project_id not in user_projects:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have access to this project"
+                )
+        
+        # Query users who have this project_id in their projects JSON array
+        # We handle both numeric and string representation in JSON for robustness
+        query = f"""
+            SELECT 
+                user_id,
+                email,
+                first_name,
+                last_name,
+                roles,
+                status,
+                projects
+            FROM `{tenant_name}`
+            WHERE (
+                JSON_CONTAINS(projects, %s) 
+                OR JSON_CONTAINS(projects, %s)
+            )
+            AND status = 'ACTIVE'
+            ORDER BY first_name, last_name
+        """
+        
+        # Pass both integer and string version of ID to be safe
+        import json
+        
+        users = await database.execute_query(
+            query,
+            (str(project_id), f'"{project_id}"'),
+            fetch_all=True
+        )
+        
+        # Format results
+        result = []
+        for user in users:
+            # Parse roles
+            u_roles = []
+            if user.get("roles"):
+                try:
+                    u_roles = json.loads(user["roles"]) if isinstance(user["roles"], str) else user["roles"]
+                except:
+                    u_roles = []
+            
+            result.append({
+                "user_id": user["user_id"],
+                "email": user["email"],
+                "first_name": user["first_name"],
+                "last_name": user["last_name"],
+                "roles": u_roles,
+                "role": u_roles[0] if u_roles else "" # Backward compatibility
+            })
+            
+        return {
+            "success": True,
+            "message": f"Found {len(result)} users assigned to project",
+            "data": {
+                "project_id": project_id,
+                "users": result
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting project users: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get project users: {str(e)}"
         )
