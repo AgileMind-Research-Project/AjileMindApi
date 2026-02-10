@@ -57,7 +57,12 @@ async def verify_super_admin(current_user: Dict[str, Any] = Depends(get_current_
     Uses the JWT dependency to extract and validate user.
     """
     # Check if user is Super Admin
-    if current_user.get("role") != "SUPER_ADMIN":
+    user_roles = current_user.get("roles", [])
+    # Fallback to single role for backward compatibility
+    if not user_roles and current_user.get("role"):
+        user_roles = [current_user.get("role")]
+    
+    if "SUPER_ADMIN" not in user_roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super Admin access required"
@@ -103,13 +108,13 @@ async def get_roles(
     try:
         query = """
             SELECT 
-                ROLE_ID as role_id,
-                NAME as role_name,
-                DESCRIPTION as description,
-                CREATED_AT as created_at
+                role_id,
+                name as role_name,
+                description,
+                created_at
             FROM roles
             WHERE is_system_role = TRUE
-            ORDER BY CREATED_AT DESC
+            ORDER BY created_at DESC
         """
         
         roles = await database.execute_query(
@@ -138,6 +143,73 @@ async def get_roles(
         )
 
 
+@router.get(
+    "/assignable",
+    response_model=List[RoleResponse],
+    summary="Get Assignable Roles",
+    description="Retrieve roles that can be assigned by current user (Admin/Super Admin)"
+)
+async def get_assignable_roles(
+    current_user: Dict = Depends(get_current_user_from_token),
+    database: Database = Depends(get_database)
+) -> List[Dict[str, Any]]:
+    """
+    Get roles that can be assigned by the current user.
+    
+    Rules:
+    - Super Admin can see all roles
+    - Admin can see all roles EXCEPT SUPER_ADMIN
+    - Others cannot access this endpoint
+    """
+    try:
+        from app.utils.permissions import is_super_admin, require_admin
+        
+        # Require at least Admin access
+        require_admin(current_user)
+        
+        query = """
+            SELECT 
+                ROLE_ID as role_id,
+                NAME as role_name,
+                DESCRIPTION as description,
+                CREATED_AT as created_at
+            FROM roles
+            WHERE is_system_role = TRUE
+            ORDER BY CREATED_AT DESC
+        """
+        
+        roles = await database.execute_query(
+            query,
+            fetch_all=True
+        )
+        
+        # Convert to response format
+        result = []
+        for role in roles:
+            role_data = {
+                "role_id": role["role_id"],
+                "role_name": role["role_name"],
+                "description": role["description"],
+                "created_at": role["created_at"].isoformat() if role["created_at"] else ""
+            }
+            
+            # Filter out SUPER_ADMIN for non-super-admin users
+            if not is_super_admin(current_user) and role["role_name"] == "SUPER_ADMIN":
+                continue
+            
+            result.append(role_data)
+        
+        logger.info(f"Retrieved {len(result)} assignable roles for user {current_user['user_id']}")
+        return result
+        
+    except Exception as e:
+        logger.exception(f"Failed to get assignable roles: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve assignable roles"
+        )
+
+
 @router.post(
     "",
     response_model=RoleResponse,
@@ -158,9 +230,9 @@ async def create_role(
         
         # Check if role name already exists
         check_query = """
-            SELECT ROLE_ID as role_id 
+            SELECT role_id 
             FROM roles 
-            WHERE NAME = %s
+            WHERE name = %s
         """
         existing = await database.execute_query(
             check_query,
@@ -177,7 +249,7 @@ async def create_role(
         # Insert new role (system-wide, no tenant_id)
         insert_query = """
             INSERT INTO roles (
-                ROLE_ID, NAME, DESCRIPTION, is_system_role
+                role_id, name, description, is_system_role
             ) VALUES (%s, %s, %s, %s)
         """
         
@@ -195,12 +267,12 @@ async def create_role(
         # Fetch created role
         created_role = await database.execute_query(
             """SELECT 
-                ROLE_ID as role_id,
-                NAME as role_name,
-                DESCRIPTION as description,
-                CREATED_AT as created_at 
+                role_id,
+                name as role_name,
+                description,
+                created_at 
             FROM roles 
-            WHERE ROLE_ID = %s""",
+            WHERE role_id = %s""",
             (role_id,),
             fetch_one=True
         )
@@ -241,9 +313,9 @@ async def update_role(
     try:
         # Check if role exists
         check_query = """
-            SELECT ROLE_ID as role_id, NAME as name, is_system_role
+            SELECT role_id, name, is_system_role
             FROM roles 
-            WHERE ROLE_ID = %s
+            WHERE role_id = %s
         """
         existing_role = await database.execute_query(
             check_query,
@@ -267,8 +339,8 @@ async def update_role(
         # Update role (only description, no permission level)
         update_query = """
             UPDATE roles 
-            SET DESCRIPTION = %s, UPDATED_AT = %s
-            WHERE ROLE_ID = %s
+            SET description = %s, updated_at = %s
+            WHERE role_id = %s
         """
         
         await database.execute_query(
@@ -284,12 +356,12 @@ async def update_role(
         # Fetch updated role
         updated_role = await database.execute_query(
             """SELECT 
-                ROLE_ID as role_id,
-                NAME as role_name,
-                DESCRIPTION as description,
-                CREATED_AT as created_at 
+                role_id,
+                name as role_name,
+                description,
+                created_at 
             FROM roles 
-            WHERE ROLE_ID = %s""",
+            WHERE role_id = %s""",
             (role_id,),
             fetch_one=True
         )
@@ -329,9 +401,9 @@ async def delete_role(
     try:
         # Check if role exists
         check_query = """
-            SELECT ROLE_ID as role_id, is_system_role
+            SELECT role_id, is_system_role
             FROM roles 
-            WHERE ROLE_ID = %s
+            WHERE role_id = %s
         """
         existing_role = await database.execute_query(
             check_query,
@@ -352,8 +424,9 @@ async def delete_role(
                 detail="Role not found"
             )
         
-        # Check if any users have this role
-        users_count_query = "SELECT COUNT(*) as count FROM users WHERE ROLE_ID = %s"
+        # Check if any users have this role (Note: This checks old centralized users table structure)
+        # TODO: Update to check tenant-specific tables with JSON_CONTAINS for roles array
+        users_count_query = "SELECT COUNT(*) as count FROM users WHERE role_id = %s"
         users_count = await database.execute_query(
             users_count_query,
             (role_id,),
@@ -367,7 +440,7 @@ async def delete_role(
             )
         
         # Delete role
-        delete_query = "DELETE FROM roles WHERE ROLE_ID = %s"
+        delete_query = "DELETE FROM roles WHERE role_id = %s"
         await database.execute_query(delete_query, (role_id,), commit=True)
         
         logger.info(f"Deleted role {role_id} by user {current_user['user_id']}")
@@ -414,6 +487,7 @@ async def get_user_role(
                 email,
                 first_name,
                 last_name,
+                roles,
                 role
             FROM `{tenant_name}`
             WHERE user_id = %s
@@ -431,12 +505,27 @@ async def get_user_role(
                 detail="User not found"
             )
         
+        # Parse roles from database
+        user_roles = []
+        if user.get("roles"):
+            try:
+                import json
+                user_roles = json.loads(user["roles"]) if isinstance(user["roles"], str) else user["roles"]
+            except:
+                # Fallback to legacy single role field
+                if user.get("role"):
+                    user_roles = [user["role"]]
+        elif user.get("role"):
+            # Legacy fallback if no roles field
+            user_roles = [user["role"]]
+        
         return {
             "user_id": user["user_id"],
             "email": user["email"],
             "name": f"{user['first_name']} {user['last_name']}",
-            "current_role": {
-                "role_name": user["role"]
+            "current_roles": user_roles,
+            "current_role": {  # Legacy field for backward compatibility
+                "role_name": user_roles[0] if user_roles else None
             }
         }
         
