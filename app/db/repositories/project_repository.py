@@ -505,3 +505,68 @@ class ProjectRepository:
         except Exception as e:
             logger.error(f"Error checking project existence: {str(e)}")
             return False
+    async def update_next_sprint_date(
+        self,
+        tenant_name: str,
+        project_id: int
+    ) -> Optional[date]:
+        """
+        Update the next sprint start date based on sprint size.
+        New date = current next_sprint_start_date (or start_date) + (sprint_size * 7) days.
+        
+        Args:
+            tenant_name: Tenant database name
+            project_id: Project ID
+            
+        Returns:
+            New next_sprint_start_date or None if failed/not updated
+        """
+        try:
+            # Fetch current dates and sprint size
+            query = """
+                SELECT start_date, next_sprint_start_date, sprint_size
+                FROM projects
+                WHERE project_id = %s
+            """
+            
+            project = await self.db.execute_query(
+                query,
+                (project_id,),
+                fetch_one=True,
+                schema=tenant_name
+            )
+            
+            if not project or not project.get('sprint_size'):
+                return None
+            
+            sprint_size_weeks = project['sprint_size']
+            current_date = project.get('next_sprint_start_date') or project.get('start_date')
+            
+            if not current_date:
+                return None
+                
+            from datetime import timedelta
+            
+            # Calculate new date
+            new_date = current_date + timedelta(weeks=sprint_size_weeks)
+            
+            # Update project
+            update_query = """
+                UPDATE projects
+                SET next_sprint_start_date = %s, updated_at = NOW()
+                WHERE project_id = %s
+            """
+            
+            await self.db.execute_query(
+                update_query,
+                (new_date, project_id),
+                commit=True,
+                schema=tenant_name
+            )
+            
+            logger.info(f"Updated next sprint date for project {project_id} to {new_date}")
+            return new_date
+            
+        except Exception as e:
+            logger.error(f"Error updating next sprint date: {str(e)}")
+            return None

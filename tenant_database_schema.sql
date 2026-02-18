@@ -352,5 +352,61 @@ ADD CONSTRAINT `fk_priority_sprint`
     ON UPDATE CASCADE
     ON DELETE CASCADE;
 
+-- ============================================
+-- TRANSCRIPTS TABLE
+-- ============================================
+CREATE TABLE `transcripts` (
+    `id` int NOT NULL AUTO_INCREMENT,
+    `title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Transcript title',
+    `category` enum('daily_standup','sprint_meeting','retrospective', 'sprint_planning', 'other') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Meeting type',
+    `transcript_content` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Full transcript text',
+    `transcript_date` date NOT NULL COMMENT 'Date of the meeting',
+    `tags` json DEFAULT NULL COMMENT 'Tags for categorization',
+    `file_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Original uploaded filename',
+    `uploaded_by` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'User ID who uploaded',
+    `tenant_schema` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Tenant schema identifier',
+    `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `project_id` BIGINT DEFAULT 0 COMMENT 'Reference to projects.project_id',
+    PRIMARY KEY (`id`),
+    KEY `idx_category` (`category`),
+    KEY `idx_date` (`transcript_date`),
+    KEY `idx_tenant` (`tenant_schema`),
+    FULLTEXT KEY `idx_content` (`transcript_content`),
+    FULLTEXT KEY `idx_title` (`title`),
+    CONSTRAINT `fk_transcripts_project`
+        FOREIGN KEY (`project_id`)
+        REFERENCES `projects`(`project_id`)
+        ON DELETE SET NULL
+        ON UPDATE CASCADE
+) ENGINE=InnoDB 
+  AUTO_INCREMENT=6 
+  DEFAULT CHARSET=utf8mb4 
+  COLLATE=utf8mb4_unicode_ci 
+  COMMENT='Meeting transcripts for AI report generation';
+
+-- ============================================
+-- SPRINT_LEAVE TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS `sprint_leave` (
+  `leave_id` int NOT NULL AUTO_INCREMENT,
+  `sprint_id` int NOT NULL,
+  `project_id` bigint NOT NULL,
+  `developer_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `leave_date` date NOT NULL,
+  `leave_hours` int NOT NULL,
+  `reason` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `leave_type` enum('Full Day','Half Day','Short Leave') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT 'Full Day',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`leave_id`),
+  KEY `fk_leave_sprint` (`sprint_id`),
+  KEY `fk_leave_project` (`project_id`),
+  CONSTRAINT `fk_leave_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`project_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_leave_sprint` FOREIGN KEY (`sprint_id`) REFERENCES `sprint` (`sprint_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `sprint_leave_chk_1` CHECK ((`leave_hours` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
 
 

@@ -28,7 +28,8 @@ class BacklogRepository:
         priority: Optional[str],
         assignee: Optional[str],
         tags: Optional[List[str]],
-        severity: Optional[str]
+        severity: Optional[str],
+        parent_task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Create a backlog item in the database.
@@ -45,6 +46,7 @@ class BacklogRepository:
             assignee: Assigned person
             tags: List of tags
             severity: Severity (for bugs)
+            parent_task_id: Parent task ID for subtasks
         
         Returns:
             Created backlog item data
@@ -56,10 +58,10 @@ class BacklogRepository:
             query = """
                 INSERT INTO project_backlog (
                     id, project_id, summary, description, issue_type,
-                    status, priority, assignee, tags, severity,
+                    status, priority, assignee, tags, severity, parent_task_id,
                     created_at, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                 ON DUPLICATE KEY UPDATE
                     summary = VALUES(summary),
                     description = VALUES(description),
@@ -69,13 +71,14 @@ class BacklogRepository:
                     assignee = VALUES(assignee),
                     tags = VALUES(tags),
                     severity = VALUES(severity),
+                    parent_task_id = VALUES(parent_task_id),
                     updated_at = NOW()
             """
             
             await self.db.execute_query(
                 query,
                 (item_id, project_id, summary, description, issue_type,
-                 status, priority, assignee, tags_json, severity),
+                 status, priority, assignee, tags_json, severity, parent_task_id),
                 commit=True,
                 schema=tenant_name
             )
@@ -484,9 +487,9 @@ class BacklogRepository:
                 # 1. Disable FK checks
                 {"query": "SET FOREIGN_KEY_CHECKS=0"},
                 
-                # 2. Update item ID
+                # 2. Update item ID and set is_jira to true
                 {
-                    "query": "UPDATE project_backlog SET id = %s, updated_at = NOW() WHERE id = %s",
+                    "query": "UPDATE project_backlog SET id = %s, is_jira = 1, updated_at = NOW() WHERE id = %s",
                     "params": (new_id, old_id)
                 },
                 

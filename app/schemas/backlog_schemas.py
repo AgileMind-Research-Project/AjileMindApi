@@ -136,3 +136,14 @@ class MergeBacklogItemsRequest(BaseModel):
     target_item_id: str = Field(..., description="The ID of the item to keep and update")
     source_item_ids: List[str] = Field(..., description="List of item IDs to merge into the target and then delete")
     updates: BacklogItemUpdate = Field(..., description="The new data for the target item")
+
+
+class SubtaskCreateRequest(BaseModel):
+    """Request model for creating a subtask"""
+    parent_item_id: str = Field(..., description="ID of the parent backlog item")
+    summary: str = Field(..., max_length=255, description="Subtask title")
+    description: Optional[str] = Field(None, description="Detailed description")
+    priority: Optional[Priority] = Field(None, description="Priority level")
+    assignee: Optional[str] = Field(None, max_length=255, description="Assigned person")
+    tags: Optional[List[str]] = Field(None, description="Tags/labels")
+    severity: Optional[str] = Field(None, max_length=100, description="Severity (optional)")

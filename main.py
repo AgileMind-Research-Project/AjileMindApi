@@ -18,7 +18,7 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, notifications, backlog_priority, meetings
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, notifications, backlog_priority, meetings, ai, transcripts
 from app.db.database import db
 from app.middleware.audit_middleware import AuditLoggingMiddleware
 from app.core.redis_chat_client import init_redis_chat
@@ -265,6 +265,8 @@ app.include_router(backlog_priority.router, prefix=f"{settings.API_PREFIX}/backl
 app.include_router(notifications.router, prefix=f"{settings.API_PREFIX}/notifications", tags=["Notifications"])
 app.include_router(redis_chat.router, prefix=f"{settings.API_PREFIX}/chat", tags=["Redis Chat"])
 app.include_router(meetings.router, prefix=f"{settings.API_PREFIX}/meetings", tags=["Meetings"])
+app.include_router(ai.router, prefix=f"{settings.API_PREFIX}/ai", tags=["AI Services"])
+app.include_router(transcripts.router, prefix=f"{settings.API_PREFIX}/transcripts", tags=["Transcripts"])
 # app.include_router(tenants.router, prefix=f"{settings.API_PREFIX}/tenants", tags=["Tenants"])
 
 # Import Socket.IO server and wrap with app
