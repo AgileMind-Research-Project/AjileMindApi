@@ -5,11 +5,12 @@ Handles user CRUD operations and invitations.
 """
 
 from fastapi import APIRouter, HTTPException, status, Depends
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 import uuid
 from datetime import datetime
 
 from app.db.database import db, Database
+from app.core.config import settings
 from app.core.logger import logger
 from app.utils.jwt import get_current_user_from_token
 from app.utils.password import hash_password
@@ -27,7 +28,7 @@ router = APIRouter()
 
 class UserDataRequest(BaseModel):
     """User profile data"""
-    stack: Optional[List[str]] = Field(None, description="Technology stack (e.g., backend, frontend, fullstack)")
+    stack: Optional[Union[str, List[str]]] = Field(None, description="Technology stack: 'backend', 'frontend', 'both', or array format")
     technologies: Optional[List[str]] = Field(None, description="Technologies/frameworks (e.g., java, spring, mysql)")
     experience_years: Optional[int] = Field(None, description="Years of experience")
 
@@ -112,7 +113,7 @@ async def invite_user(
         
         # Check if user already exists in domain table
         check_query = f"""
-            SELECT user_id FROM `{tenant_name}` 
+            SELECT user_id FROM `{settings.DB_NAME}`.`{tenant_name}` 
             WHERE email = %s
         """
         existing_user = await database.execute_query(
@@ -129,8 +130,8 @@ async def invite_user(
         
         # Validate all roles exist (check against system roles table)
         for role_name in request.roles:
-            role_query = """
-                SELECT name FROM roles 
+            role_query = f"""
+                SELECT name FROM `{settings.DB_NAME}`.roles 
                 WHERE name = %s
             """
             role = await database.execute_query(
@@ -167,7 +168,7 @@ async def invite_user(
         
         # Create user in domain table
         insert_query = f"""
-            INSERT INTO `{tenant_name}` (
+            INSERT INTO `{settings.DB_NAME}`.`{tenant_name}` (
                 user_id,
                 email,
                 password_hash,
@@ -209,7 +210,7 @@ async def invite_user(
             
             # Update the projects column with JSON array
             update_projects_query = f"""
-                UPDATE `{tenant_name}` 
+                UPDATE `{settings.DB_NAME}`.`{tenant_name}` 
                 SET projects = %s 
                 WHERE user_id = %s
             """
@@ -309,7 +310,7 @@ async def list_users(
                 user_data,
                 password_change_required,
                 created_at
-            FROM `{tenant_name}`
+            FROM `{settings.DB_NAME}`.`{tenant_name}`
             ORDER BY created_at DESC
         """
         
@@ -419,7 +420,7 @@ async def get_users_by_role(
                 last_name,
                 roles,
                 status
-            FROM `{tenant_name}`
+            FROM `{settings.DB_NAME}`.`{tenant_name}`
             WHERE JSON_CONTAINS(roles, %s, '$') AND status = 'ACTIVE'
             ORDER BY first_name, last_name
         """
@@ -494,7 +495,7 @@ async def update_user(
         
         # Check if user exists
         check_query = f"""
-            SELECT user_id FROM `{tenant_name}` 
+            SELECT user_id FROM `{settings.DB_NAME}`.`{tenant_name}` 
             WHERE user_id = %s
         """
         user = await database.execute_query(
@@ -524,7 +525,7 @@ async def update_user(
         if request.roles is not None:
             # Validate all roles exist
             for role_name in request.roles:
-                role_query = "SELECT name FROM roles WHERE name = %s"
+                role_query = f"SELECT name FROM `{settings.DB_NAME}`.roles WHERE name = %s"
                 role = await database.execute_query(
                     role_query,
                     (role_name,),
@@ -563,7 +564,7 @@ async def update_user(
         params.append(user_id)
         
         query = f"""
-            UPDATE `{tenant_name}` 
+            UPDATE `{settings.DB_NAME}`.`{tenant_name}` 
             SET {', '.join(update_fields)}
             WHERE user_id = %s
         """
@@ -615,7 +616,7 @@ async def get_user_projects(
         # Get user's projects
         query = f"""
             SELECT projects 
-            FROM `{tenant_name}` 
+            FROM `{settings.DB_NAME}`.`{tenant_name}` 
             WHERE user_id = %s
         """
         
@@ -685,7 +686,7 @@ async def update_user_projects(
         
         # Check if user exists
         check_query = f"""
-            SELECT user_id FROM `{tenant_name}` 
+            SELECT user_id FROM `{settings.DB_NAME}`.`{tenant_name}` 
             WHERE user_id = %s
         """
         user = await database.execute_query(
@@ -703,7 +704,7 @@ async def update_user_projects(
         # Update user's projects
         import json
         update_query = f"""
-            UPDATE `{tenant_name}` 
+            UPDATE `{settings.DB_NAME}`.`{tenant_name}` 
             SET projects = %s, updated_at = NOW()
             WHERE user_id = %s
         """

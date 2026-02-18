@@ -490,6 +490,43 @@ async def delete_project(
         )
 
 
+@router.get("/{project_id}/sprints", response_model=Dict[str, Any])
+async def list_project_sprints(
+    project_id: int,
+    db: Database = Depends(get_database),
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token)
+):
+    """
+    List sprints for a specific project.
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+             raise HTTPException(status_code=400, detail="Tenant not found in token")
+
+        # Check if 'sprints' table exists effectively (simplified query)
+        query = """
+            SELECT sprint_id, sprint_name, status, start_date, end_date 
+            FROM sprints 
+            WHERE project_id = %s 
+            ORDER BY start_date DESC
+        """
+        sprints = await db.execute_query(query, (project_id,), fetch_all=True, schema=tenant_name)
+        
+        return {
+            "success": True,
+            "data": {
+                "sprints": sprints or []
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error fetching sprints for project {project_id}: {str(e)}")
+        # If table doesn't exist, return empty list gracefully or error?
+        # For now, return error structure but code 200 so UI doesn't crash?
+        # Or better 500.
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get(
     "/{project_id}/users",
     response_model=StandardResponse,

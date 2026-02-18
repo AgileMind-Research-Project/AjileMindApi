@@ -6,7 +6,7 @@ REST API for backlog management including file upload and Jira integration.
 
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Form
 from typing import Dict, Any
-from app.schemas.backlog_schemas import BulkUploadResponse, BacklogListResponse, BacklogItemUpdate, MergeBacklogItemsRequest
+from app.schemas.backlog_schemas import BulkUploadResponse, BacklogListResponse, BacklogItemUpdate, MergeBacklogItemsRequest, SubtaskCreateRequest
 from app.services.backlog_service import BacklogService
 from app.db.database import db, Database
 from app.utils.jwt import get_current_user_from_token, get_secret
@@ -327,4 +327,43 @@ async def delete_backlog_item(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete item: {str(e)}"
+        )
+
+
+@router.post(
+    "/subtask",
+    summary="Create Subtask",
+    description="Create a subtask for a given parent task, with sequential ID generation (e.g. PARENT-1, PARENT-2)"
+)
+async def create_subtask(
+    request: SubtaskCreateRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    backlog_service: BacklogService = Depends(get_backlog_service)
+) -> Dict[str, Any]:
+    """
+    Create a new subtask.
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+            
+        result = await backlog_service.create_subtask(tenant_name, request)
+        
+        return {
+            "success": True,
+            "message": "Subtask created successfully",
+            "data": result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating subtask: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create subtask: {str(e)}"
         )
