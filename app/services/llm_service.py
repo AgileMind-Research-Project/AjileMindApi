@@ -3,8 +3,7 @@ LLM Service for AI-Powered Recommendations using Ollama + LangChain
 """
 from typing import Dict, Any, List, Optional
 from langchain_ollama import OllamaLLM
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
+from langchain_core.prompts import PromptTemplate
 import json
 
 
