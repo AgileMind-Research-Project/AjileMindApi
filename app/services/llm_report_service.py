@@ -4,7 +4,7 @@ LLM Report Service
 Service for generating AI reports using LLaMA 3.2 via Ollama.
 """
 
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaLLM
 from app.core.config import settings
 from app.core.logger import logger
 from app.schemas.report import DailyStandupReport, SprintMeetingReport, RetrospectiveReport
@@ -20,7 +20,7 @@ class LLMReportService:
         """Initialize Ollama LLM"""
         try:
             ollama_base_url = f"{settings.OLLAMA_HOST}:{settings.OLLAMA_PORT}"
-            self.llm = Ollama(
+            self.llm = OllamaLLM(
                 base_url=ollama_base_url,
                 model=settings.OLLAMA_MODEL,
                 temperature=0.3,  # Lower temperature for structured output
