@@ -18,7 +18,7 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, notifications, backlog_priority, meetings, riskparameters
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, notifications, backlog_priority, meetings, riskparameters, trust_index
 from app.db.database import db
 from app.middleware.audit_middleware import AuditLoggingMiddleware
 from app.core.redis_chat_client import init_redis_chat
@@ -266,6 +266,7 @@ app.include_router(notifications.router, prefix=f"{settings.API_PREFIX}/notifica
 app.include_router(redis_chat.router, prefix=f"{settings.API_PREFIX}/chat", tags=["Redis Chat"])
 app.include_router(meetings.router, prefix=f"{settings.API_PREFIX}/meetings", tags=["Meetings"])
 app.include_router(riskparameters.router, prefix=f"{settings.API_PREFIX}/risk-parameters", tags=["Risk Parameters"])
+app.include_router(trust_index.router, prefix=f"{settings.API_PREFIX}/trust-index", tags=["Trust Index"])
 # app.include_router(tenants.router, prefix=f"{settings.API_PREFIX}/tenants", tags=["Tenants"])
 
 # Import Socket.IO server and wrap with app
