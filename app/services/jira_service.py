@@ -234,10 +234,19 @@ class JiraService:
             jira_url = credentials["jira_url"]
             email = credentials["email"]
             
-            # For now, we'll use a placeholder since API token retrieval needs to be implemented
-            # TODO: Implement secure retrieval of API token from secrets manager
+            # Get API token from secret manager
+            secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
+            secret_result = get_secret(secret_name)
             
-            auth_str = f"{email}:api_token_placeholder"
+            if not secret_result.get("success"):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to retrieve Jira API token from secure storage"
+                )
+            
+            api_token = secret_result.get("secret_value")
+            
+            auth_str = f"{email}:{api_token}"
             auth_bytes = auth_str.encode('ascii')
             auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
             
@@ -286,7 +295,8 @@ class JiraService:
         issue_type: str = "Task",
         priority: Optional[str] = "Medium",
         assignee_email: Optional[str] = None,
-        labels: Optional[List[str]] = None
+        labels: Optional[List[str]] = None,
+        parent_key: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Create a Jira issue.
@@ -300,6 +310,7 @@ class JiraService:
             priority: Priority level
             assignee_email: Assignee email
             labels: Issue labels
+            parent_key: Parent issue key (for subtasks)
         
         Returns:
             Created issue data
@@ -315,8 +326,19 @@ class JiraService:
             jira_url = credentials["jira_url"]
             email = credentials["email"]
             
-            # TODO: Implement secure retrieval of API token
-            auth_str = f"{email}:api_token_placeholder"
+            # Get API token from secret manager
+            secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
+            secret_result = get_secret(secret_name)
+            
+            if not secret_result.get("success"):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to retrieve Jira API token from secure storage"
+                )
+            
+            api_token = secret_result.get("secret_value")
+            
+            auth_str = f"{email}:{api_token}"
             auth_bytes = auth_str.encode('ascii')
             auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
             
@@ -351,6 +373,15 @@ class JiraService:
             
             if labels:
                 issue_data["fields"]["labels"] = labels
+                
+            if parent_key:
+                issue_data["fields"]["parent"] = {"key": parent_key}
+            
+            # Handle Assignee
+            if assignee_email:
+                account_id = await self._get_account_id(jira_url, email, api_token, assignee_email)
+                if account_id:
+                    issue_data["fields"]["assignee"] = {"id": account_id}
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -379,6 +410,131 @@ class JiraService:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to create issue: {str(e)}"
+            )
+    
+    async def update_issue(
+        self,
+        tenant_name: str,
+        issue_key: str,
+        summary: Optional[str] = None,
+        description: Optional[str] = None,
+        priority: Optional[str] = None,
+        assignee_email: Optional[str] = None,
+        labels: Optional[List[str]] = None
+    ) -> bool:
+        """
+        Update a Jira issue.
+        
+        Args:
+            tenant_name: Tenant domain name
+            issue_key: Jira issue key (e.g., TEAM-123)
+            summary: New summary
+            description: New description
+            priority: New priority
+            assignee_email: New assignee email
+            labels: New labels
+            
+        Returns:
+            True if successful
+        """
+        credentials = await self.get_credentials(tenant_name)
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Jira integration not configured."
+            )
+        
+        try:
+            jira_url = credentials["jira_url"]
+            email = credentials["email"]
+            
+            # Get API token
+            secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
+            secret_result = get_secret(secret_name)
+            
+            if not secret_result.get("success"):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to retrieve Jira API token"
+                )
+            
+            api_token = secret_result.get("secret_value")
+            
+            auth_str = f"{email}:{api_token}"
+            auth_bytes = auth_str.encode('ascii')
+            auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
+            
+            headers = {
+                "Authorization": f"Basic {auth_b64}",
+                "Accept": "application/json",
+                "Content-Type": "application/json"
+            }
+            
+            fields = {}
+            
+            if summary:
+                fields["summary"] = summary
+                
+            if description:
+                fields["description"] = {
+                    "type": "doc",
+                    "version": 1,
+                    "content": [
+                        {
+                            "type": "paragraph",
+                            "content": [{"type": "text", "text": description}]
+                        }
+                    ]
+                }
+            
+            if priority:
+                fields["priority"] = {"name": priority}
+                
+            if labels:
+                fields["labels"] = labels
+            
+            # Handle Assignee
+            if assignee_email is not None:
+                if assignee_email:
+                    account_id = await self._get_account_id(jira_url, email, api_token, assignee_email)
+                    if account_id:
+                        fields["assignee"] = {"id": account_id}
+                else:
+                    # Unassign if empty string passed? Or handle differently.
+                    # For now, if empty string, maybe explicitly unassign or ignore.
+                    # Jira API uses null for unassign usually, or -1.
+                    # Let's assume valid email or None.
+                    pass
+
+            if not fields:
+                return True # Nothing to update
+                
+            async with aiohttp.ClientSession() as session:
+                async with session.put(
+                    f"{jira_url}/rest/api/3/issue/{issue_key}",
+                    headers=headers,
+                    json={"fields": fields},
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 204:
+                        return True
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Failed to update Jira issue {issue_key}: {error_text}")
+                        # Don't raise here, just return False so sync doesn't completely fail?
+                        # Or raise to propagate error.
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Failed to update Jira issue: {error_text}"
+                        )
+                        
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating Jira issue: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to update issue: {str(e)}"
             )
     
     async def _verify_credentials(
@@ -413,9 +569,14 @@ class JiraService:
         self,
         jira_url: str,
         email: str,
-        api_token: str
+        api_token: str,
+        target_email: str = None
     ) -> Optional[str]:
-        """Get Jira account ID for the authenticated user"""
+        """
+        Get Jira account ID.
+        If target_email is None, gets ID for authenticated user.
+        If target_email is provided, searches for that user.
+        """
         try:
             auth_str = f"{email}:{api_token}"
             auth_bytes = auth_str.encode('ascii')
@@ -426,16 +587,30 @@ class JiraService:
                 "Accept": "application/json"
             }
             
-            # Use synchronous request for account ID
-            response = requests.get(
-                f"{jira_url}/rest/api/3/myself",
-                headers=headers,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                user_data = response.json()
-                return user_data.get("accountId")
+            async with aiohttp.ClientSession() as session:
+                if target_email:
+                    # Search for user by email
+                    async with session.get(
+                        f"{jira_url}/rest/api/3/user/search",
+                        headers=headers,
+                        params={"query": target_email},
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as response:
+                        if response.status == 200:
+                            users = await response.json()
+                            if users and len(users) > 0:
+                                # Return first match
+                                return users[0].get("accountId")
+                else:
+                    # Get current user
+                    async with session.get(
+                        f"{jira_url}/rest/api/3/myself",
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as response:
+                        if response.status == 200:
+                            user_data = await response.json()
+                            return user_data.get("accountId")
             
             return None
             

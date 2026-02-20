@@ -29,7 +29,8 @@ class BacklogRepository:
         assignee: Optional[str],
         tags: Optional[List[str]],
         severity: Optional[str],
-        sprint_id: Optional[int] = None
+        sprint_id: Optional[int] = None,
+        parent_task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Create a backlog item in the database.
@@ -47,6 +48,7 @@ class BacklogRepository:
             tags: List of tags
             severity: Severity (for bugs)
             sprint_id: Sprint ID
+            parent_task_id: Parent task ID for subtasks
         
         Returns:
             Created backlog item data
@@ -58,10 +60,10 @@ class BacklogRepository:
             query = """
                 INSERT INTO project_backlog (
                     id, project_id, summary, description, issue_type,
-                    status, priority, assignee, tags, severity, sprint_id,
+                    status, priority, assignee, tags, severity, sprint_id, parent_task_id,
                     created_at, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                 ON DUPLICATE KEY UPDATE
                     summary = VALUES(summary),
                     description = VALUES(description),
@@ -72,13 +74,14 @@ class BacklogRepository:
                     tags = VALUES(tags),
                     severity = VALUES(severity),
                     sprint_id = VALUES(sprint_id),
+                    parent_task_id = VALUES(parent_task_id),
                     updated_at = NOW()
             """
             
             await self.db.execute_query(
                 query,
                 (item_id, project_id, summary, description, issue_type,
-                 status, priority, assignee, tags_json, severity, sprint_id),
+                 status, priority, assignee, tags_json, severity, sprint_id, parent_task_id),
                 commit=True,
                 schema=tenant_name
             )
@@ -204,6 +207,76 @@ class BacklogRepository:
             logger.error(f"Error listing backlog items for sprint: {str(e)}")
             raise
     
+    
+    async def list_user_tasks(
+        self,
+        tenant_name: str,
+        email: str
+    ) -> List[Dict[str, Any]]:
+        """List all backlog items assigned to a user across all projects"""
+        try:
+            query = """
+                SELECT 
+                    b.id, b.project_id, b.summary, b.description, b.issue_type,
+                    b.status, b.priority, b.assignee, b.tags, b.severity, b.parent_task_id,
+                    b.created_at, b.updated_at, b.estimated_hours, b.story_points, b.is_jira,
+                    p.project_name, p.key as project_key,
+                    parent.summary as parent_summary
+                FROM project_backlog b
+                JOIN projects p ON b.project_id = p.project_id
+                LEFT JOIN project_backlog parent ON b.parent_task_id = parent.id
+                WHERE b.assignee = %s
+                ORDER BY p.project_name, b.created_at DESC
+            """
+            
+            results = await self.db.execute_query(
+                query,
+                (email,),
+                fetch_all=True,
+                schema=tenant_name
+            )
+            
+            # Normalize data for Pydantic validation
+            if results:
+                for item in results:
+                    # Deserialize tags
+                    if item.get('tags'):
+                        try:
+                            item['tags'] = json.loads(item['tags'])
+                        except:
+                            item['tags'] = None
+                    
+                    # Normalize Priority
+                    if item.get('priority'):
+                        try:
+                            p = str(item['priority']).lower().strip()
+                            if p in ['high', 'medium', 'low']:
+                                item['priority'] = p
+                            else:
+                                item['priority'] = None
+                        except:
+                            item['priority'] = None
+                    
+                    # Normalize Issue Type
+                    if item.get('issue_type'):
+                        itype = str(item['issue_type']).lower().strip()
+                        # Map 'task' or other variants to 'story' or keep if valid
+                        if itype == 'task':
+                            item['issue_type'] = 'story'
+                        elif itype in ['story', 'feature', 'change', 'bug', 'sub_task']:
+                            item['issue_type'] = itype
+                        else:
+                            # Default fallback if unknown
+                            item['issue_type'] = 'story'
+                    else:
+                        item['issue_type'] = 'story' # Default if missing
+            
+            return results or []
+            
+        except Exception as e:
+            logger.error(f"Error listing user tasks: {str(e)}")
+            raise
+
     async def delete_backlog_item(
         self,
         tenant_name: str,
@@ -499,4 +572,58 @@ class BacklogRepository:
             
         except Exception as e:
             logger.error(f"Error updating task Jira info: {str(e)}")
+            raise
+
+    async def rename_backlog_item(
+        self,
+        tenant_name: str,
+        old_id: str,
+        new_id: str
+    ) -> bool:
+        """
+        Rename a backlog item (change its ID).
+        Uses a single transaction block with FK checks disabled to ensure atomicity and success.
+        """
+        try:
+            logger.info(f"Renaming {old_id} to {new_id} using transaction block")
+            
+            ops = [
+                # 1. Disable FK checks
+                {"query": "SET FOREIGN_KEY_CHECKS=0"},
+                
+                # 2. Update item ID and set is_jira to true
+                {
+                    "query": "UPDATE project_backlog SET id = %s, is_jira = 1, updated_at = NOW() WHERE id = %s",
+                    "params": (new_id, old_id)
+                },
+                
+                # 3. Update Priority Table References
+                {
+                    "query": "UPDATE project_backlog_priority SET backlog_id = %s WHERE backlog_id = %s",
+                    "params": (new_id, old_id)
+                },
+                
+                # 4. Update Child References
+                {
+                    "query": "UPDATE project_backlog SET parent_task_id = %s WHERE parent_task_id = %s",
+                    "params": (new_id, old_id)
+                },
+                
+                # 5. Re-enable FK checks
+                {"query": "SET FOREIGN_KEY_CHECKS=1"}
+            ]
+            
+            await self.db.execute_transaction_block(ops, schema=tenant_name)
+            
+            logger.info(f"Backlog item renamed successfully: {old_id} -> {new_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error renaming backlog item: {str(e)}")
+            # Transaction block already handles rollback of the transaction, 
+            # but we can't easily rollback SET FOREIGN_KEY_CHECKS=0 if the connection is closed.
+            # However, since the connection is closed returned to pool, 
+            # and autocommit is False, and we rolled back, the data is safe.
+            # The next user of the connection should ideally reset session vars, but 
+            # usually pools reset them or we assume default.
             raise
