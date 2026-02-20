@@ -7,6 +7,11 @@ Business logic for Jira Cloud integration.
 import aiohttp
 import base64
 import json
+from dotenv import load_dotenv
+
+# Load environment variables explicitly
+load_dotenv()
+import os
 import requests
 from typing import Optional, Dict, Any, List
 from datetime import date
@@ -749,3 +754,230 @@ class JiraService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to create project: {str(e)}"
             )
+
+    async def get_issue_status(
+        self,
+        tenant_name: str,
+        issue_key: str
+    ) -> Dict[str, Any]:
+        """
+        Get the status of a Jira issue.
+        """
+        # Get Jira credentials
+        credentials = await self.get_credentials(tenant_name)
+        if not credentials:
+            return {
+                "issue_key": issue_key,
+                "error": "Jira integration not configured",
+                "status": {
+                    "name": "N/A",
+                    "category": "Unknown",
+                    "color": "gray"
+                }
+            }
+        
+        jira_url = credentials["jira_url"]
+        email = credentials["email"]
+        
+        # Get API token from secret manager
+        secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
+        logger.info(f"[DEBUG] Attempting to fetch secret: {secret_name}")
+        secret_result = get_secret(secret_name)
+        
+        api_token = None
+        if secret_result.get("success"):
+            api_token = secret_result.get("secret_value")
+        else:
+            # Fallback to environment variable
+            logger.warning(f"Secret not found in AWS. Check environment variables.")
+            env_token = os.getenv("JIRA_API_TOKEN") or os.getenv("API_TOKEN")
+            if env_token:
+                logger.info("[DEBUG] Using JIRA_API_TOKEN from environment variables")
+                api_token = env_token
+
+        if not api_token:
+            return {
+                "issue_key": issue_key,
+                "error": "API token not found",
+                "status": {
+                    "name": "N/A",
+                    "category": "Unknown",
+                    "color": "gray"
+                }
+            }
+            
+        # api_token is now set
+        
+        try:
+            # Create session
+            async with aiohttp.ClientSession() as session:
+                auth = aiohttp.BasicAuth(email, api_token)
+                headers = {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json"
+                }
+                
+                async with session.get(
+                    f"{jira_url}/rest/api/3/issue/{issue_key}",
+                    auth=auth,
+                    headers=headers
+                ) as response:
+                    if response.status == 200:
+                        issue_data = await response.json()
+                        fields = issue_data.get("fields", {})
+                        status_data = fields.get("status", {})
+                        
+                        return {
+                            "issue_key": issue_key,
+                            "summary": fields.get("summary"),
+                            "status": {
+                                "name": status_data.get("name"),
+                                "category": status_data.get("statusCategory", {}).get("name"),
+                                "color": status_data.get("statusCategory", {}).get("colorName")
+                            }
+                        }
+                    elif response.status == 404:
+                            return {
+                            "issue_key": issue_key,
+                            "error": "Issue not found",
+                            "status": {
+                                "name": "Not Found",
+                                "category": "Unknown",
+                                "color": "gray"
+                            }
+                        }
+                    else:
+                        logger.error(f"Jira API error: {response.status} - {await response.text()}")
+                        return {
+                            "issue_key": issue_key,
+                            "error": f"Jira API error: {response.status}",
+                            "status": {
+                                "name": "Error",
+                                "category": "Unknown",
+                                "color": "red"
+                            }
+                        }
+                        
+        except Exception as e:
+            logger.error(f"Error getting issue status: {str(e)}")
+            return {
+                "issue_key": issue_key,
+                "error": str(e),
+                "status": {
+                    "name": "Error",
+                    "category": "Unknown",
+                    "color": "red"
+                }
+            }
+
+    async def transition_issue_to_status(
+        self,
+        tenant_name: str,
+        issue_key: str,
+        target_status: str = "Done"
+    ) -> Dict[str, Any]:
+        """
+        Transition a Jira issue to a target status (e.g., Done).
+        """
+        # Get credentials
+        credentials = await self.get_credentials(tenant_name)
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Jira integration not configured"
+            )
+
+        jira_url = credentials["jira_url"]
+        email = credentials["email"]
+        
+        # Get API token
+        secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
+        secret_result = get_secret(secret_name)
+        
+        api_token = None
+        if secret_result.get("success"):
+            api_token = secret_result.get("secret_value")
+        else:
+            env_token = os.getenv("JIRA_API_TOKEN") or os.getenv("API_TOKEN")
+            if env_token:
+                api_token = env_token
+        
+        if not api_token:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Jira API token not found"
+            )
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                auth = aiohttp.BasicAuth(email, api_token)
+                headers = {"Accept": "application/json", "Content-Type": "application/json"}
+
+                # 1. Get available transitions
+                async with session.get(
+                    f"{jira_url}/rest/api/3/issue/{issue_key}/transitions",
+                    auth=auth,
+                    headers=headers
+                ) as response:
+                    if response.status != 200:
+                        raise HTTPException(status_code=400, detail=f"Failed to fetch transitions: {await response.text()}")
+                    
+                    transitions_data = await response.json()
+                    transitions = transitions_data.get("transitions", [])
+                
+                # 2. Find transition to target status
+                transition_id = None
+                for t in transitions:
+                    # Check exact name match or partial match (case insensitive)
+                    t_name = t.get("name", "").lower()
+                    t_to = t.get("to", {}).get("name", "").lower()
+                    target = target_status.lower()
+                    
+                    if t_name == target or t_to == target:
+                        transition_id = t.get("id")
+                        break
+                
+                if not transition_id:
+                     # Fallback: try to find 'Done' or 'Complete' if generic
+                    if target_status.lower() == 'done':
+                         for t in transitions:
+                            t_name = t.get("name", "").lower()
+                            if 'done' in t_name or 'complete' in t_name or 'resolve' in t_name:
+                                transition_id = t.get("id")
+                                break
+                
+                if not transition_id:
+                     available = [t.get("name") for t in transitions]
+                     raise HTTPException(
+                        status_code=400, 
+                        detail=f"Transition to '{target_status}' not available. Available: {available}"
+                    )
+
+                # 3. Perform transition
+                payload = {
+                    "transition": {
+                        "id": transition_id
+                    }
+                }
+                
+                async with session.post(
+                    f"{jira_url}/rest/api/3/issue/{issue_key}/transitions",
+                    auth=auth,
+                    headers=headers,
+                    json=payload
+                ) as response:
+                    if response.status == 204:
+                        logger.info(f"Successfully transitioned {issue_key} to {target_status}")
+                        return {
+                            "success": True, 
+                            "issue_key": issue_key, 
+                            "new_status": target_status
+                        }
+                    else:
+                         raise HTTPException(status_code=response.status, detail=f"Transition failed: {await response.text()}")
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error transitioning issue: {e}")
+            raise HTTPException(status_code=500, detail=str(e))

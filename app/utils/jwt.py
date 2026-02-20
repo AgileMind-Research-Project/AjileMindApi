@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.logger import logger
 import boto3
 import json
+import os
 from botocore.exceptions import ClientError
 
 
@@ -20,7 +21,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     Create JWT access token.
     
     Args:
-        data: Data to encode in token (user_id, email, tenant_name, roles)
+        data: Data to encode in token (user_id, email, tenant_name, role)
         expires_delta: Optional custom expiration time
     
     Returns:
@@ -132,18 +133,41 @@ def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
         token: JWT access token
     
     Returns:
-        Dictionary with user info including tenant_name and roles or None
+        Dictionary with user info including tenant_name and schema
     """
     payload = verify_token(token, token_type="access")
     
     if payload is None:
         return None
     
+    tenant_name = payload.get("tenant_name")
+    # Generate schema name from tenant name (convert to snake_case)
+    schema = None
+    if tenant_name:
+        # Convert tenant name to schema format (e.g., "Acme Corp" -> "acme_corp")
+        schema = tenant_name.lower().replace(" ", "_")
+    
+    # Parse role - it might be a JSON string like '["SUPER_ADMIN"]' or a plain string
+    role = payload.get("role")
+    if isinstance(role, str):
+        # Try to parse as JSON if it looks like an array
+        if role.startswith("["):
+            try:
+                import json
+                role_list = json.loads(role)
+                # Take the first role if it's a list
+                role = role_list[0] if role_list else None
+            except (json.JSONDecodeError, IndexError):
+                pass
+    
     return {
         "user_id": payload.get("sub"),
+        "id": payload.get("sub"),  # Add id field for compatibility
         "email": payload.get("email"),
-        "tenant_name": payload.get("tenant_name"),
-        "roles": payload.get("roles", []),
+        "tenant_name": tenant_name,
+        "schema": schema,  # Add schema field
+        "tenant_schema": schema,  # Add alias for compatibility
+        "role": role,
         "projects": payload.get("projects", [])
     }
 
@@ -153,7 +177,7 @@ def create_token_pair(user_data: dict) -> Dict[str, str]:
     Create both access and refresh tokens.
     
     Args:
-        user_data: User data to encode (user_id, email, tenant_name, roles)
+        user_data: User data to encode (user_id, email, tenant_name, role)
     
     Returns:
         Dictionary with access_token and refresh_token
@@ -216,8 +240,9 @@ async def get_current_user_from_token(authorization: str = Header(None, alias="A
     
     return user_info
 
+
 def get_secrets():
-    client = boto3.client("secretsmanager")
+    client = boto3.client("secretsmanager", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
 
     secrets_result = {}
 
@@ -247,8 +272,9 @@ def get_secrets():
 
     return secrets_result
 
+
 def create_secret(secret_name, secret_value):
-    client = boto3.client("secretsmanager")
+    client = boto3.client("secretsmanager", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
     
     try:
         response = client.create_secret(
@@ -278,7 +304,7 @@ def get_secret(secret_name):
     Returns:
         Dict with success status and secret_value or error message
     """
-    client = boto3.client("secretsmanager")
+    client = boto3.client("secretsmanager", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
     
     try:
         response = client.get_secret_value(SecretId=secret_name)

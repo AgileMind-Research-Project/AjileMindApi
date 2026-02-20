@@ -58,12 +58,7 @@ async def verify_super_admin(current_user: Dict[str, Any] = Depends(get_current_
     Uses the JWT dependency to extract and validate user.
     """
     # Check if user is Super Admin
-    user_roles = current_user.get("roles", [])
-    # Fallback to single role for backward compatibility
-    if not user_roles and current_user.get("role"):
-        user_roles = [current_user.get("role")]
-    
-    if "SUPER_ADMIN" not in user_roles:
+    if current_user.get("role") != "SUPER_ADMIN":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super Admin access required"
@@ -115,7 +110,7 @@ async def get_roles(
                 created_at
             FROM `{settings.DB_NAME}`.roles
             WHERE is_system_role = TRUE
-            ORDER BY created_at DESC
+            ORDER BY CREATED_AT DESC
         """
         
         roles = await database.execute_query(
@@ -425,9 +420,8 @@ async def delete_role(
                 detail="Role not found"
             )
         
-        # Check if any users have this role (Note: This checks old centralized users table structure)
-        # TODO: Update to check tenant-specific tables with JSON_CONTAINS for roles array
-        users_count_query = "SELECT COUNT(*) as count FROM users WHERE role_id = %s"
+        # Check if any users have this role
+        users_count_query = "SELECT COUNT(*) as count FROM users WHERE ROLE_ID = %s"
         users_count = await database.execute_query(
             users_count_query,
             (role_id,),
@@ -488,7 +482,6 @@ async def get_user_role(
                 email,
                 first_name,
                 last_name,
-                roles,
                 role
             FROM `{tenant_name}`
             WHERE user_id = %s
@@ -506,27 +499,12 @@ async def get_user_role(
                 detail="User not found"
             )
         
-        # Parse roles from database
-        user_roles = []
-        if user.get("roles"):
-            try:
-                import json
-                user_roles = json.loads(user["roles"]) if isinstance(user["roles"], str) else user["roles"]
-            except:
-                # Fallback to legacy single role field
-                if user.get("role"):
-                    user_roles = [user["role"]]
-        elif user.get("role"):
-            # Legacy fallback if no roles field
-            user_roles = [user["role"]]
-        
         return {
             "user_id": user["user_id"],
             "email": user["email"],
             "name": f"{user['first_name']} {user['last_name']}",
-            "current_roles": user_roles,
-            "current_role": {  # Legacy field for backward compatibility
-                "role_name": user_roles[0] if user_roles else None
+            "current_role": {
+                "role_name": user["role"]
             }
         }
         

@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status,
 from typing import Dict, Any
 from app.schemas.backlog_schemas import BulkUploadResponse, BacklogListResponse, BacklogItemUpdate, MergeBacklogItemsRequest, SubtaskCreateRequest
 from app.services.backlog_service import BacklogService
+from app.services.jira_backlog_service import JiraBacklogService
+from app.db.repositories.backlog_repository import BacklogRepository
 from app.db.database import db, Database
 from app.utils.jwt import get_current_user_from_token, get_secret
 from app.core.logger import logger
@@ -185,19 +187,23 @@ async def list_project_backlog(
         )
 
 
-@router.patch(
-    "/{item_id}",
-    summary="Update Backlog Item",
-    description="Update backlog item details (subtask or main task)"
+@router.get(
+    "/sprint/{sprint_id}",
+    response_model=BacklogListResponse,
+    summary="List Sprint Backlog Items",
+    description="Get all backlog items for a specific sprint"
 )
-async def update_backlog_item(
-    item_id: str,
-    updates: BacklogItemUpdate,
+async def list_sprint_backlog(
+    sprint_id: int,
     current_user: Dict[str, Any] = Depends(get_current_user_from_token),
     backlog_service: BacklogService = Depends(get_backlog_service)
-) -> Dict[str, Any]:
+) -> BacklogListResponse:
     """
-    Update a backlog item.
+    List all backlog items for a specific sprint.
+    
+    Returns:
+    - List of backlog items for the sprint
+    - Total count
     """
     try:
         tenant_name = current_user.get("tenant_name")
@@ -218,11 +224,11 @@ async def update_backlog_item(
             
         result = await backlog_service.update_backlog_item(tenant_name, item_id, update_data)
         
-        return {
-            "success": True,
-            "message": "Item updated successfully",
-            "data": result
-        }
+        return BacklogListResponse(
+            success=True,
+            data=items,
+            total=len(items)
+        )
         
     except HTTPException:
         raise
