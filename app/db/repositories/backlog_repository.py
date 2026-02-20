@@ -173,6 +173,76 @@ class BacklogRepository:
             logger.error(f"Error listing backlog items: {str(e)}")
             raise
     
+    
+    async def list_user_tasks(
+        self,
+        tenant_name: str,
+        email: str
+    ) -> List[Dict[str, Any]]:
+        """List all backlog items assigned to a user across all projects"""
+        try:
+            query = """
+                SELECT 
+                    b.id, b.project_id, b.summary, b.description, b.issue_type,
+                    b.status, b.priority, b.assignee, b.tags, b.severity, b.parent_task_id,
+                    b.created_at, b.updated_at, b.estimated_hours, b.story_points, b.is_jira,
+                    p.project_name, p.key as project_key,
+                    parent.summary as parent_summary
+                FROM project_backlog b
+                JOIN projects p ON b.project_id = p.project_id
+                LEFT JOIN project_backlog parent ON b.parent_task_id = parent.id
+                WHERE b.assignee = %s
+                ORDER BY p.project_name, b.created_at DESC
+            """
+            
+            results = await self.db.execute_query(
+                query,
+                (email,),
+                fetch_all=True,
+                schema=tenant_name
+            )
+            
+            # Normalize data for Pydantic validation
+            if results:
+                for item in results:
+                    # Deserialize tags
+                    if item.get('tags'):
+                        try:
+                            item['tags'] = json.loads(item['tags'])
+                        except:
+                            item['tags'] = None
+                    
+                    # Normalize Priority
+                    if item.get('priority'):
+                        try:
+                            p = str(item['priority']).lower().strip()
+                            if p in ['high', 'medium', 'low']:
+                                item['priority'] = p
+                            else:
+                                item['priority'] = None
+                        except:
+                            item['priority'] = None
+                    
+                    # Normalize Issue Type
+                    if item.get('issue_type'):
+                        itype = str(item['issue_type']).lower().strip()
+                        # Map 'task' or other variants to 'story' or keep if valid
+                        if itype == 'task':
+                            item['issue_type'] = 'story'
+                        elif itype in ['story', 'feature', 'change', 'bug', 'sub_task']:
+                            item['issue_type'] = itype
+                        else:
+                            # Default fallback if unknown
+                            item['issue_type'] = 'story'
+                    else:
+                        item['issue_type'] = 'story' # Default if missing
+            
+            return results or []
+            
+        except Exception as e:
+            logger.error(f"Error listing user tasks: {str(e)}")
+            raise
+
     async def delete_backlog_item(
         self,
         tenant_name: str,

@@ -620,3 +620,11 @@ class BacklogService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to sync to Jira: {str(e)}"
             )
+
+    async def list_user_tasks(
+        self,
+        tenant_name: str,
+        email: str
+    ) -> List[Dict[str, Any]]:
+        """List tasks assigned to user"""
+        return await self.backlog_repo.list_user_tasks(tenant_name, email)
