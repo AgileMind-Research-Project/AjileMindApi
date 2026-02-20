@@ -3,7 +3,7 @@ AgileMind Backend - FastAPI Application
 Multi-tenant SaaS Platform for Agile Project Management
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPIriskpara
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
@@ -24,7 +24,7 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, notifications, backlog_priority, riskparameters, documents, transcripts, reports, templates, notifications, release_notes
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, meetings, riskparameters, trust_index,notifications, backlog_priority, meters, documents, transcripts, reports, templates, notifications, release_notes
 from app.meeting_config import routes as meetings_router
 from app.task_updates_config import routes as task_updates_router
 from app.db.database import db
@@ -293,6 +293,8 @@ app.include_router(reports.router, prefix=f"{settings.API_PREFIX}/reports", tags
 app.include_router(templates.router, prefix=f"{settings.API_PREFIX}/report-templates", tags=["Report Templates"])
 app.include_router(notifications.router, prefix=f"{settings.API_PREFIX}/notifications", tags=["Notifications"])
 app.include_router(release_notes.router, prefix=f"{settings.API_PREFIX}/release-notes", tags=["Release Notes"])
+app.include_router(riskparameters.router, prefix=f"{settings.API_PREFIX}/risk-parameters", tags=["Risk Parameters"])
+app.include_router(trust_index.router, prefix=f"{settings.API_PREFIX}/trust-index", tags=["Trust Index"])
 # app.include_router(tenants.router, prefix=f"{settings.API_PREFIX}/tenants", tags=["Tenants"])
 
 if __name__ == "__main__":    
