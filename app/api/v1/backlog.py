@@ -367,3 +367,43 @@ async def create_subtask(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create subtask: {str(e)}"
         )
+
+
+@router.get(
+    "/my-tasks",
+    response_model=BacklogListResponse,
+    summary="List My Tasks",
+    description="Get all backlog items assigned to the current user"
+)
+async def list_my_tasks(
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    backlog_service: BacklogService = Depends(get_backlog_service)
+) -> BacklogListResponse:
+    """
+    List all backlog items assigned to the current user.
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        email = current_user.get("email")
+        if not tenant_name or not email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name or email not found in token"
+            )
+        
+        items = await backlog_service.list_user_tasks(tenant_name, email)
+        
+        return BacklogListResponse(
+            success=True,
+            data=items,
+            total=len(items)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing my tasks: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list my tasks: {str(e)}"
+        )
