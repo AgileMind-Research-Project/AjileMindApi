@@ -25,6 +25,7 @@ from config_test import run_config_test
 
 # Import routers
 from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, notifications, backlog_priority, riskparameters, documents, transcripts, reports, templates, notifications, release_notes
+from app.ai.transcripts import routes as ai_transcripts_router
 from app.meeting_config import routes as meetings_router
 from app.task_updates_config import routes as task_updates_router
 from app.db.database import db
@@ -289,6 +290,7 @@ app.include_router(documents.router, prefix=f"{settings.API_PREFIX}/documents", 
 app.include_router(meetings_router.router, prefix=f"{settings.API_PREFIX}/meetings", tags=["Meetings"])
 app.include_router(task_updates_router.router, prefix=f"{settings.API_PREFIX}/task-updates", tags=["Task Updates"])
 app.include_router(transcripts.router, prefix=f"{settings.API_PREFIX}/transcripts", tags=["Transcripts"])
+app.include_router(ai_transcripts_router.router, prefix=f"{settings.API_PREFIX}/ai/transcripts", tags=["AI Transcripts"])
 app.include_router(reports.router, prefix=f"{settings.API_PREFIX}/reports", tags=["Reports"])
 app.include_router(templates.router, prefix=f"{settings.API_PREFIX}/report-templates", tags=["Report Templates"])
 app.include_router(notifications.router, prefix=f"{settings.API_PREFIX}/notifications", tags=["Notifications"])

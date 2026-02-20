@@ -43,8 +43,8 @@ class TranscriptService:
             
             query = f"""
                 INSERT INTO {tenant_schema}.transcripts 
-                (title, category, transcript_content, transcript_date, tags, file_name, uploaded_by, tenant_schema)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (title, category, transcript_content, transcript_date, tags, file_name, uploaded_by, tenant_schema, project_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             
             result = await self.db.execute_query(
@@ -57,7 +57,8 @@ class TranscriptService:
                     tags_json,
                     transcript_data.file_name,
                     uploaded_by,
-                    tenant_schema
+                    tenant_schema,
+                    transcript_data.project_id
                 ),
                 commit=True,
                 schema=tenant_schema
@@ -96,7 +97,7 @@ class TranscriptService:
         try:
             query = f"""
                 SELECT id, title, category, transcript_content, transcript_date, 
-                       tags, file_name, created_at, updated_at
+                       tags, file_name, project_id, created_at, updated_at
                 FROM {tenant_schema}.transcripts
                 WHERE id = %s
             """
@@ -123,6 +124,7 @@ class TranscriptService:
                 transcript_date=result['transcript_date'],
                 tags=tags,
                 file_name=result.get('file_name'),
+                project_id=result.get('project_id'),
                 created_at=result['created_at'],
                 updated_at=result['updated_at']
             )
@@ -173,7 +175,7 @@ class TranscriptService:
             # Fetch transcripts
             offset = (filters.page - 1) * filters.page_size
             list_query = f"""
-                SELECT id, title, category, transcript_date, tags, file_name, created_at
+                SELECT id, title, category, transcript_content, transcript_date, tags, file_name, project_id, created_at
                 FROM {tenant_schema}.transcripts
                 {where_sql}
                 ORDER BY transcript_date DESC, created_at DESC
@@ -190,9 +192,11 @@ class TranscriptService:
                     id=row['id'],
                     title=row['title'],
                     category=row['category'],
+                    transcript_content=row['transcript_content'],
                     transcript_date=row['transcript_date'],
                     tags=tags,
                     file_name=row.get('file_name'),
+                    project_id=row.get('project_id'),
                     created_at=row['created_at']
                 ))
             
