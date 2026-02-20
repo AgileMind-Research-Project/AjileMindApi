@@ -7,7 +7,7 @@ Service for generating AI reports using LLaMA 3.2 via Ollama.
 from langchain_ollama import OllamaLLM
 from app.core.config import settings
 from app.core.logger import logger
-from app.schemas.report import DailyStandupReport, SprintMeetingReport, RetrospectiveReport
+from app.schemas.report import DailyStandupReport, SprintMeetingReport, RetrospectiveReport, BrainstormingMeetingReport
 from typing import Dict, Any, Union
 import json
 import re
@@ -197,12 +197,75 @@ JSON Response:
             logger.error(f"Error generating retrospective report: {e}")
             raise
     
+    def generate_brainstorming_report(
+        self, 
+        transcript: str,
+        custom_prompt: str = None
+    ) -> BrainstormingMeetingReport:
+        """Generate Brainstorming Meeting Summary Report from transcript"""
+        
+        if not self.available:
+            raise RuntimeError("LLM service is not available")
+        
+        intro_instruction = custom_prompt if custom_prompt else "Analyze this brainstorming session transcript and create a comprehensive summary."
+        
+        prompt = f"""
+You are an expert meeting facilitator specializing in brainstorming sessions. {intro_instruction}
+
+Transcript:
+{transcript}
+
+Generate a JSON response with this exact structure:
+{{
+    "meeting_topic": "The main topic or challenge being brainstormed",
+    "meeting_objective": "The goal or objective of the brainstorming session",
+    "participants": ["participant 1", "participant 2", ...],
+    "ideas_generated": [
+        {{"idea": "idea description", "proposed_by": "person name", "category": "category name", "votes": 0}},
+        ...
+    ],
+    "top_ideas": ["most promising idea 1", "most promising idea 2", ...],
+    "categories": ["category 1", "category 2", ...],
+    "key_themes": ["recurring theme 1", "recurring theme 2", ...],
+    "decisions_made": ["decision 1", "decision 2", ...],
+    "next_steps": [
+        {{"task": "action description", "assignee": "person name", "due_date": "estimate", "priority": "high"}},
+        ...
+    ],
+    "summary": "Brief 2-3 sentence summary of the brainstorming session outcomes"
+}}
+
+Rules:
+- Extract all ideas mentioned in the transcript
+- Group ideas into logical categories
+- Identify the most promising or voted-on ideas as top ideas
+- Capture any decisions or conclusions reached
+- List actionable next steps with assignees
+- Include all participants mentioned
+- Identify recurring themes across ideas
+- Be specific and capture the creative output
+- Return ONLY valid JSON, no additional text
+
+JSON Response:
+"""
+        
+        try:
+            response = self.llm.invoke(prompt)
+            logger.info(f"LLM Response: {response[:200]}...")
+            
+            report_data = self._extract_json_from_response(response)
+            return BrainstormingMeetingReport(**report_data)
+        
+        except Exception as e:
+            logger.error(f"Error generating brainstorming report: {e}")
+            raise
+    
     def generate_report(
         self, 
         transcript: str, 
         report_type: str,
         custom_prompt: str = None
-    ) -> Union[DailyStandupReport, SprintMeetingReport, RetrospectiveReport]:
+    ) -> Union[DailyStandupReport, SprintMeetingReport, RetrospectiveReport, BrainstormingMeetingReport]:
         """Generate report based on type"""
         
         if report_type == "daily_standup":
@@ -211,6 +274,8 @@ JSON Response:
             return self.generate_sprint_meeting_report(transcript, custom_prompt)
         elif report_type == "retrospective":
             return self.generate_retrospective_report(transcript, custom_prompt)
+        elif report_type == "brainstorming":
+            return self.generate_brainstorming_report(transcript, custom_prompt)
         else:
             raise ValueError(f"Unknown report type: {report_type}")
 
