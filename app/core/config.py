@@ -106,7 +106,7 @@ class Settings(BaseSettings):
     # Ollama/Llama Configuration (Local LLM)
     OLLAMA_HOST: str = "http://localhost"
     OLLAMA_PORT: int = 11434
-    OLLAMA_MODEL: str = "llama2"  # Options: llama2, llama3.2, mistral, neural-chat, etc.
+    OLLAMA_MODEL: str = "tinyllama"  # Options: tinyllama (1.1B), llama3.2:1b, llama2, mistral, etc.
     OLLAMA_MAX_TOKENS: int = 2000
     OLLAMA_TEMPERATURE: float = 0.7
     

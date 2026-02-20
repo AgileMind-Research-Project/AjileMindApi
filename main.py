@@ -3,7 +3,7 @@ AgileMind Backend - FastAPI Application
 Multi-tenant SaaS Platform for Agile Project Management
 """
 
-from fastapi import FastAPIriskpara
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
@@ -24,7 +24,7 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, meetings, riskparameters, trust_index,notifications, backlog_priority, meters, documents, transcripts, reports, templates, notifications, release_notes
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, riskparameters, trust_index, notifications, backlog_priority, documents, transcripts, reports, templates, release_notes
 from app.meeting_config import routes as meetings_router
 from app.task_updates_config import routes as task_updates_router
 from app.db.database import db
