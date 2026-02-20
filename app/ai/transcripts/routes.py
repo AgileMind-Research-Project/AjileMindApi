@@ -60,6 +60,7 @@ async def upload_transcript(
     transcript_date: str = Form(...),
     tags: Optional[str] = Form(None),
     pasted_content: Optional[str] = Form(None),
+    project_id: Optional[int] = Form(None),
     current_user: dict = Depends(get_current_user_from_token),
     db: Database = Depends(get_db)
 ):
@@ -114,7 +115,8 @@ async def upload_transcript(
             transcript_content=transcript_content,
             transcript_date=parsed_date,
             tags=tags_list,
-            file_name=file_name
+            file_name=file_name,
+            project_id=project_id
         )
         
         service = TranscriptService(db)
