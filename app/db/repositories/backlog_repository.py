@@ -62,6 +62,7 @@ class BacklogRepository:
                     created_at, updated_at
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                 ON DUPLICATE KEY UPDATE
                     summary = VALUES(summary),
                     description = VALUES(description),
@@ -100,8 +101,7 @@ class BacklogRepository:
         """Get a single backlog item by ID"""
         try:
             query = """
-                SELECT 
-                    id, project_id, summary, description, issue_type,
+                    id, project_id, sprint_id, summary, description, issue_type,
                     status, priority, assignee, tags, severity,
                     created_at, updated_at
                 FROM project_backlog
@@ -132,28 +132,21 @@ class BacklogRepository:
         tenant_name: str,
         project_id: int
     ) -> List[Dict[str, Any]]:
-        """List all backlog items for a project, filtering parents by priority"""
+        """List all backlog items for a project"""
         try:
             query = """
                 SELECT 
-                    id, project_id, summary, description, issue_type,
+                    id, project_id, sprint_id, summary, description, issue_type,
                     status, priority, assignee, tags, severity, parent_task_id,
                     created_at, updated_at
                 FROM project_backlog
                 WHERE project_id = %s
-                AND (
-                    parent_task_id IS NOT NULL
-                    OR id IN (
-                        SELECT backlog_id FROM project_backlog_priority 
-                        WHERE project_id = %s
-                    )
-                )
                 ORDER BY created_at DESC
             """
             
             results = await self.db.execute_query(
                 query,
-                (project_id, project_id),
+                (project_id,),
                 fetch_all=True,
                 schema=tenant_name
             )

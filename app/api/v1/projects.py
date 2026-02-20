@@ -12,13 +12,21 @@ from app.db.database import db, Database
 from app.core.logger import logger
 from app.utils.jwt import get_current_user_from_token
 from app.services.project_service import ProjectService
+from app.services.delay_calculation_service import DelayCalculationService
 from app.schemas.project_schemas import (
     CreateProjectRequest,
     CreateProjectResponse,
     ProjectResponse,
     ProjectListResponse,
     UpdateProjectRequest,
-    StandardResponse
+    StandardResponse,
+    SprintListResponse,
+    SprintListResponse,
+    SprintFilterRequest
+)
+from app.schemas.delay_schemas import (
+    DelayAnalysisResponse,
+    DelayAnalysisErrorResponse
 )
 
 
@@ -39,6 +47,11 @@ async def get_project_service(database: Database = Depends(get_database)) -> Pro
     return ProjectService(database)
 
 
+async def get_delay_service(database: Database = Depends(get_database)) -> DelayCalculationService:
+    """Dependency to get Delay Calculation service instance"""
+    return DelayCalculationService(database)
+
+
 async def verify_project_creation_access(
     current_user: Dict[str, Any] = Depends(get_current_user_from_token)
 ) -> Dict[str, Any]:
@@ -47,12 +60,9 @@ async def verify_project_creation_access(
     Only SUPER_ADMIN, ADMIN, and PROJECT_MANAGER can create projects.
     """
     allowed_roles = ["SUPER_ADMIN", "ADMIN", "PROJECT_MANAGER"]
-    user_roles = current_user.get("roles", [])
-    # Fallback to single role for backward compatibility
-    if not user_roles and current_user.get("role"):
-        user_roles = [current_user.get("role")]
+    user_role = current_user.get("role")
     
-    if not any(role in allowed_roles for role in user_roles):
+    if user_role not in allowed_roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Access denied. Only {', '.join(allowed_roles)} can create projects."
@@ -64,12 +74,7 @@ async def verify_admin_access(
     current_user: Dict[str, Any] = Depends(get_current_user_from_token)
 ) -> Dict[str, Any]:
     """Verify that the user has admin access"""
-    user_roles = current_user.get("roles", [])
-    # Fallback to single role for backward compatibility
-    if not user_roles and current_user.get("role"):
-        user_roles = [current_user.get("role")]
-    
-    if not any(role in ["SUPER_ADMIN", "ADMIN"] for role in user_roles):
+    if current_user.get("role") not in ["SUPER_ADMIN", "ADMIN"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
@@ -234,15 +239,12 @@ async def list_projects(
             limit=limit
         )
         
-        # Get user roles and projects for filtering
-        user_roles = current_user.get("roles", [])
-        # Fallback to old single role for backward compatibility
-        if not user_roles and current_user.get("role"):
-            user_roles = [current_user.get("role")]
+        # Get user role and projects for filtering
+        user_role = current_user.get("role")
         user_projects = current_user.get("projects", [])
         
-        # Filter projects based on user roles
-        if any(role in ["ADMIN", "SUPER_ADMIN"] for role in user_roles):
+        # Filter projects based on user role
+        if user_role in ["ADMIN", "SUPER_ADMIN"]:
             # ADMIN and SUPER_ADMIN see all projects
             filtered_projects = result["projects"]
         else:
@@ -256,7 +258,7 @@ async def list_projects(
         filtered_total = len(filtered_projects)
         
         logger.info(
-            f"User {current_user.get('email')} (roles: {user_roles}) "
+            f"User {current_user.get('email')} (role: {user_role}) "
             f"viewing {filtered_total} of {result['total']} projects"
         )
         
@@ -325,14 +327,11 @@ async def get_project(
             )
         
         # Check if user has access to this project
-        user_roles = current_user.get("roles", [])
-        # Fallback to single role for backward compatibility
-        if not user_roles and current_user.get("role"):
-            user_roles = [current_user.get("role")]
+        user_role = current_user.get("role")
         user_projects = current_user.get("projects", [])
         
         # ADMIN and SUPER_ADMIN can access all projects
-        if not any(role in ["ADMIN", "SUPER_ADMIN"] for role in user_roles):
+        if user_role not in ["ADMIN", "SUPER_ADMIN"]:
             # Other roles can only access assigned projects
             if project_id not in user_projects:
                 raise HTTPException(
@@ -528,20 +527,111 @@ async def list_project_sprints(
 
 
 @router.get(
-    "/{project_id}/users",
-    response_model=StandardResponse,
-    summary="Get Project Users",
-    description="Get of users assigned to this project"
+    "/{project_id}/delay-analysis",
+    response_model=DelayAnalysisResponse,
+    summary="Calculate Project Delay",
+    description="Calculate comprehensive project delay analysis using Agile metrics"
 )
-async def get_project_users(
+async def get_project_delay_analysis(
     project_id: int,
     current_user: Dict[str, Any] = Depends(get_current_user_from_token),
-    database: Database = Depends(get_database)
+    delay_service: DelayCalculationService = Depends(get_delay_service)
 ) -> Dict[str, Any]:
     """
-    Get users assigned to a specific project.
+    Calculate comprehensive project delay analysis.
     
-    **Access:** All authenticated users who have access to the project
+    **Algorithm Steps:**
+    1. Calculate project duration
+    2. Calculate planned number of sprints
+    3. Calculate story point completion rate
+    4. Calculate expected velocity
+    5. Calculate actual velocity
+    6. Calculate remaining story points
+    7. Forecast remaining sprints
+    8. Calculate total forecasted sprints
+    9. Calculate sprint delay
+    10. Convert sprint delay to days
+    11. Calculate developer availability factor (aggregated sprint-wise)
+    12. Adjust delay using availability
+    13. Calculate delay percentage
+    14. Determine delay risk level (LOW/MEDIUM/HIGH/CRITICAL)
+    
+    **Access:** All authenticated users
+    
+    **Returns:**
+    - Planned end date (PED)
+    - Forecasted end date (PED + Adjusted Delay Days)
+    - Delay in days
+    - Delay percentage
+    - Risk level
+    - Velocity metrics (expected vs actual)
+    - Sprint-wise breakdown
+    - Developer availability metrics
+    
+    **Risk Levels:**
+    - **LOW**: < 10% delay
+    - **MEDIUM**: 10-25% delay
+    - **HIGH**: 25-40% delay
+    - **CRITICAL**: ≥ 40% delay
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+        
+        # Calculate delay analysis
+        delay_result = await delay_service.calculate_project_delay(
+            project_id=project_id,
+            tenant_db=tenant_name
+        )
+        
+        logger.info(
+            f"Delay analysis calculated for project {project_id} by {current_user['email']}: "
+            f"{delay_result['delay_days']} days delay, {delay_result['risk_level']} risk"
+        )
+        
+        return delay_result
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Validation error in delay analysis: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error calculating delay analysis for project {project_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to calculate delay analysis: {str(e)}"
+        )
+
+
+@router.get(
+    "/{project_id}/sprints",
+    response_model=SprintListResponse,
+    summary="Get Project Sprints",
+    description="Get list of sprints for a project"
+)
+async def get_project_sprints(
+    project_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    project_service: ProjectService = Depends(get_project_service)
+) -> Dict[str, Any]:
+    """
+    Get list of sprints for a project.
+    
+    **Access:** All authenticated users
+    
+    **Path Parameters:**
+    - `project_id`: Project ID
+    
+    **Returns:**
+    - List of sprints
     """
     try:
         tenant_name = current_user.get("tenant_name")
@@ -551,82 +641,77 @@ async def get_project_users(
                 detail="Tenant name not found in token"
             )
             
-        # Check access (reuse logic from get_project)
-        user_roles = current_user.get("roles", [])
-        if not user_roles and current_user.get("role"):
-            user_roles = [current_user.get("role")]
-        user_projects = current_user.get("projects", [])
-        
-        if not any(role in ["ADMIN", "SUPER_ADMIN"] for role in user_roles):
-            if project_id not in user_projects:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="You do not have access to this project"
-                )
-        
-        # Query users who have this project_id in their projects JSON array
-        # We handle both numeric and string representation in JSON for robustness
-        query = f"""
-            SELECT 
-                user_id,
-                email,
-                first_name,
-                last_name,
-                roles,
-                status,
-                projects
-            FROM `{tenant_name}`
-            WHERE (
-                JSON_CONTAINS(projects, %s) 
-                OR JSON_CONTAINS(projects, %s)
-            )
-            AND status = 'ACTIVE'
-            ORDER BY first_name, last_name
-        """
-        
-        # Pass both integer and string version of ID to be safe
-        import json
-        
-        users = await database.execute_query(
-            query,
-            (str(project_id), f'"{project_id}"'),
-            fetch_all=True
+        sprints = await project_service.get_project_sprints(
+            tenant_name=tenant_name,
+            project_id=project_id
         )
         
-        # Format results
-        result = []
-        for user in users:
-            # Parse roles
-            u_roles = []
-            if user.get("roles"):
-                try:
-                    u_roles = json.loads(user["roles"]) if isinstance(user["roles"], str) else user["roles"]
-                except:
-                    u_roles = []
-            
-            result.append({
-                "user_id": user["user_id"],
-                "email": user["email"],
-                "first_name": user["first_name"],
-                "last_name": user["last_name"],
-                "roles": u_roles,
-                "role": u_roles[0] if u_roles else "" # Backward compatibility
-            })
-            
         return {
             "success": True,
-            "message": f"Found {len(result)} users assigned to project",
+            "message": f"Found {len(sprints)} sprint(s)",
+            "data": sprints,
+            "total": len(sprints)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting project sprints: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get project sprints: {str(e)}"
+        )
+
+@router.post(
+    "/{project_id}/sprints/active",
+    response_model=StandardResponse,
+    summary="Get Active Sprints with Tasks",
+    description="Get sprints active on the given date, including their backlog tasks"
+)
+async def get_active_sprints_with_tasks(
+    project_id: int,
+    request: SprintFilterRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    project_service: ProjectService = Depends(get_project_service)
+) -> Dict[str, Any]:
+    """
+    Get active sprints with tasks.
+    
+    Payload:
+    ```json
+    {
+        "date": "2026-01-06"
+    }
+    ```
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+            
+        result = await project_service.get_active_sprints_with_tasks(
+            tenant_name=tenant_name,
+            project_id=project_id,
+            date_filter=request.date
+        )
+        
+        return {
+            "success": True,
+            "message": f"Found {len(result)} active sprint(s)",
             "data": {
-                "project_id": project_id,
-                "users": result
+                "sprints": result,
+                "total": len(result)
             }
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting project users: {str(e)}")
+        logger.error(f"Error getting active sprints: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get project users: {str(e)}"
+            detail=f"Failed to get active sprints: {str(e)}"
         )

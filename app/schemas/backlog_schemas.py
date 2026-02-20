@@ -4,7 +4,7 @@ Backlog Schemas
 Pydantic models for backlog item validation and serialization.
 """
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -17,6 +17,7 @@ class IssueType(str, Enum):
     CHANGE = "change"
     BUG = "bug"
     SUB_TASK = "sub_task"
+    TASK = "task"
 
 
 class Priority(str, Enum):
@@ -43,17 +44,18 @@ class BacklogItemBase(BaseModel):
     tags: Optional[List[str]] = Field(None, description="Tags/labels")
     severity: Optional[str] = Field(None, max_length=100, description="Severity (required for bugs)")
 
-    @validator('severity')
-    def validate_severity(cls, v, values):
+    @model_validator(mode='after')
+    def validate_severity(self):
         """Severity is required for bugs"""
-        if values.get('issue_type') == IssueType.BUG and not v:
+        if self.issue_type == IssueType.BUG and not self.severity:
             raise ValueError('Severity is required for bug type issues')
-        return v
+        return self
 
 
 class BacklogItemCreate(BacklogItemBase):
     """Create backlog item request"""
     project_id: int = Field(..., description="Project ID this item belongs to")
+    sprint_id: Optional[int] = Field(None, description="Sprint ID to assign (optional)")
 
 
 class BacklogItemFromFile(BaseModel):
@@ -63,8 +65,10 @@ class BacklogItemFromFile(BaseModel):
     issue_type: str  # Will be validated and converted to IssueType
     priority: Optional[str] = None
     assignee: Optional[str] = None
+    assignee: Optional[str] = None
     tags: Optional[str] = None  # Comma-separated string from file
     severity: Optional[str] = None
+    sprint_id: Optional[int] = None
 
     def to_create_request(self, project_id: int) -> BacklogItemCreate:
         """Convert file data to create request"""
@@ -81,7 +85,8 @@ class BacklogItemFromFile(BaseModel):
             priority=Priority(self.priority.lower()) if self.priority else None,
             assignee=self.assignee,
             tags=tags_list,
-            severity=self.severity
+            severity=self.severity,
+            sprint_id=self.sprint_id
         )
 
 
@@ -90,9 +95,34 @@ class BacklogItemResponse(BacklogItemBase):
     id: str = Field(..., description="Jira issue key (e.g., PROJ-123)")
     project_id: int
     parent_task_id: Optional[str] = Field(None, description="Parent task ID if this is a subtask")
+    sprint_id: Optional[int] = None
     status: Status
     created_at: datetime
     updated_at: datetime
+
+    @field_validator('issue_type', mode='before')
+    @classmethod
+    def normalize_issue_type(cls, v):
+        """Normalize issue_type to lowercase for enum matching"""
+        if isinstance(v, str):
+            return v.lower().replace(' ', '_').replace('-', '_')
+        return v
+
+    @field_validator('priority', mode='before')
+    @classmethod
+    def normalize_priority(cls, v):
+        """Normalize priority to lowercase for enum matching"""
+        if isinstance(v, str):
+            return v.lower()
+        return v
+
+    @field_validator('status', mode='before')
+    @classmethod
+    def normalize_status(cls, v):
+        """Normalize status to lowercase for enum matching"""
+        if isinstance(v, str):
+            return v.lower().replace(' ', '_').replace('-', '_')
+        return v
 
     class Config:
         from_attributes = True

@@ -5,7 +5,7 @@ Pydantic models for user-related requests and responses.
 """
 
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 
 
@@ -14,7 +14,7 @@ class UserBase(BaseModel):
     email: EmailStr
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    roles: List[str]
+    role: str
 
 
 class UserCreate(UserBase):
@@ -29,7 +29,7 @@ class UserUpdate(BaseModel):
     """User update model"""
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    roles: Optional[List[str]] = None
+    role: Optional[str] = None
     status: Optional[str] = None
 
 
