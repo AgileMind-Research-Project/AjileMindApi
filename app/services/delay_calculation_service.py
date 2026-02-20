@@ -369,6 +369,7 @@ class DelayCalculationService:
                         'sprint_size_weeks': sprint_size_weeks,
                         'sprint_size_days': sprint_size_days,
                         'planned_total_sprints': planned_total_sprints,
+                        'expected_sprints_by_now': expected_sprints_by_now,
                         'completed_sprints': 0,
                         'forecasted_remaining_sprints': planned_total_sprints + missing_sprints,
                         'forecasted_total_sprints': planned_total_sprints + missing_sprints,
@@ -581,6 +582,7 @@ class DelayCalculationService:
             
             # Core delay metrics
             'planned_total_sprints': round(planned_total_sprints, 2),
+            'expected_sprints_by_now': round(days_elapsed / sprint_size_days, 2) if sprint_size_days > 0 else 0.0,
             'completed_sprints': completed_sprints,
             'forecasted_remaining_sprints': round(forecasted_remaining_sprints, 2),
             'forecasted_total_sprints': round(forecasted_total_sprints, 2),

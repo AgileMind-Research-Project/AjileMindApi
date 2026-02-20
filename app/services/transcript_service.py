@@ -140,7 +140,62 @@ class TranscriptService:
 
     async def get_transcript_by_id(self, tenant_name: str, transcript_id: int) -> Optional[Dict[str, Any]]:
         query = "SELECT * FROM transcripts WHERE id = %s"
-        return await self.db.execute_query(query, (transcript_id,), fetch_one=True, schema=tenant_name)
+        result = await self.db.execute_query(query, (transcript_id,), fetch_one=True, schema=tenant_name)
+        if result and result.get('tags') and isinstance(result['tags'], str):
+            import json
+            try:
+                result['tags'] = json.loads(result['tags'])
+            except:
+                result['tags'] = []
+        return result
+
+    async def update_transcript(
+        self,
+        tenant_name: str,
+        transcript_id: int,
+        title: Optional[str] = None,
+        category: Optional[str] = None,
+        transcript_content: Optional[str] = None,
+        transcript_date: Optional[date] = None,
+        tags: Optional[List[str]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Update an existing transcript."""
+        try:
+            # Build dynamic update query
+            updates = []
+            params = []
+            
+            if title is not None:
+                updates.append("title = %s")
+                params.append(title)
+            if category is not None:
+                updates.append("category = %s")
+                params.append(category)
+            if transcript_content is not None:
+                updates.append("transcript_content = %s")
+                params.append(transcript_content)
+            if transcript_date is not None:
+                updates.append("transcript_date = %s")
+                params.append(transcript_date)
+            if tags is not None:
+                import json
+                updates.append("tags = %s")
+                params.append(json.dumps(tags))
+            
+            if not updates:
+                return await self.get_transcript_by_id(tenant_name, transcript_id)
+            
+            updates.append("updated_at = NOW()")
+            params.append(transcript_id)
+            
+            query = f"UPDATE transcripts SET {', '.join(updates)} WHERE id = %s"
+            await self.db.execute_query(query, tuple(params), commit=True, schema=tenant_name)
+            
+            return await self.get_transcript_by_id(tenant_name, transcript_id)
+            
+        except Exception as e:
+            logger.error(f"Failed to update transcript: {str(e)}")
+            raise e
 
     async def delete_transcript(self, tenant_name: str, transcript_id: int) -> bool:
         query = "DELETE FROM transcripts WHERE id = %s"
