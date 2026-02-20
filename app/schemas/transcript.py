@@ -16,6 +16,7 @@ class TranscriptCategory(str, Enum):
     SPRINT_MEETING = "sprint_meeting"
     SPRINT_PLANNING = "sprint_planning"
     RETROSPECTIVE = "retrospective"
+    BRAINSTORMING = "brainstorming"
 
 
 class TranscriptCreate(BaseModel):

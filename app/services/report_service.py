@@ -59,7 +59,9 @@ class ReportService:
             report_type_map = {
                 "DAILY_STANDUP": "daily_standup",
                 "SPRINT_MEETING": "sprint_meeting",
-                "RETROSPECTIVE": "retrospective"
+                "SPRINT_PLANNING": "sprint_meeting",
+                "RETROSPECTIVE": "retrospective",
+                "BRAINSTORMING": "brainstorming"
             }
             report_type = report_type_map.get(category_str)
             
