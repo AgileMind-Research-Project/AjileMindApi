@@ -106,6 +106,8 @@ class ReportExporter:
                 ReportExporter._add_sprint_meeting_content(story, report_data, styles)
             elif report_type == 'retrospective':
                 ReportExporter._add_retrospective_content(story, report_data, styles)
+            elif report_type == 'brainstorming':
+                ReportExporter._add_brainstorming_content(story, report_data, styles)
             
             # Add footer if provided
             if template_config and template_config.get('footer_content'):
@@ -283,6 +285,8 @@ class ReportExporter:
                 ReportExporter._add_sprint_meeting_content_docx(doc, report_data)
             elif report_type == 'retrospective':
                 ReportExporter._add_retrospective_content_docx(doc, report_data)
+            elif report_type == 'brainstorming':
+                ReportExporter._add_brainstorming_content_docx(doc, report_data)
             
             # Add footer if provided
             if template_config and template_config.get('footer_content'):
@@ -382,6 +386,168 @@ class ReportExporter:
                  doc.add_paragraph(txt, style='List Bullet')
             else:
                  doc.add_paragraph(item, style='List Bullet')
+
+    @staticmethod
+    def _add_brainstorming_content(story, data, styles):
+        """Add brainstorming content to PDF"""
+        # Meeting Topic and Objective
+        if data.get('meeting_topic'):
+            story.append(Paragraph(f"Topic: {data['meeting_topic']}", styles['Heading2']))
+        if data.get('meeting_objective'):
+            story.append(Paragraph(f"Objective: {data['meeting_objective']}", styles['Normal']))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Summary
+        if data.get('summary'):
+            story.append(Paragraph("Summary:", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            story.append(Paragraph(data['summary'], styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+        
+        # Participants
+        if data.get('participants'):
+            story.append(Paragraph("Participants:", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            story.append(Paragraph(", ".join(data['participants']), styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+        
+        # Top Ideas
+        if data.get('top_ideas'):
+            story.append(Paragraph("Top Ideas:", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            for item in data['top_ideas']:
+                story.append(Paragraph(f"★ {item}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+        
+        # All Ideas Generated
+        if data.get('ideas_generated'):
+            story.append(Paragraph("Ideas Generated:", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            for item in data['ideas_generated']:
+                if isinstance(item, dict):
+                    idea = item.get('idea', '')
+                    proposed_by = item.get('proposed_by', '')
+                    category = item.get('category', '')
+                    txt = f"• {idea}"
+                    if proposed_by:
+                        txt += f" (by {proposed_by})"
+                    if category:
+                        txt += f" [{category}]"
+                    story.append(Paragraph(txt, styles['Normal']))
+                else:
+                    story.append(Paragraph(f"• {item}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+        
+        # Key Themes
+        if data.get('key_themes'):
+            story.append(Paragraph("Key Themes:", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            for item in data['key_themes']:
+                story.append(Paragraph(f"• {item}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+        
+        # Decisions Made
+        if data.get('decisions_made'):
+            story.append(Paragraph("Decisions Made:", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            for item in data['decisions_made']:
+                story.append(Paragraph(f"✓ {item}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+        
+        # Next Steps
+        if data.get('next_steps'):
+            story.append(Paragraph("Next Steps:", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            for item in data['next_steps']:
+                if isinstance(item, dict):
+                    task = item.get('task', '')
+                    assignee = item.get('assignee', '')
+                    due_date = item.get('due_date', '')
+                    priority = item.get('priority', '')
+                    txt = f"• {task}"
+                    details = []
+                    if assignee:
+                        details.append(f"Assignee: {assignee}")
+                    if due_date:
+                        details.append(f"Due: {due_date}")
+                    if priority:
+                        details.append(f"Priority: {priority}")
+                    if details:
+                        txt += f" ({', '.join(details)})"
+                    story.append(Paragraph(txt, styles['Normal']))
+                else:
+                    story.append(Paragraph(f"• {item}", styles['Normal']))
+
+    @staticmethod
+    def _add_brainstorming_content_docx(doc, data):
+        """Add brainstorming content to DOCX"""
+        # Meeting Topic and Objective
+        if data.get('meeting_topic'):
+            doc.add_heading(f"Topic: {data['meeting_topic']}", level=2)
+        if data.get('meeting_objective'):
+            doc.add_paragraph(f"Objective: {data['meeting_objective']}")
+        
+        # Summary
+        if data.get('summary'):
+            doc.add_heading("Summary:", level=2)
+            doc.add_paragraph(data['summary'])
+        
+        # Participants
+        if data.get('participants'):
+            doc.add_heading("Participants:", level=2)
+            doc.add_paragraph(", ".join(data['participants']))
+        
+        # Top Ideas
+        if data.get('top_ideas'):
+            doc.add_heading("Top Ideas:", level=2)
+            for item in data['top_ideas']:
+                doc.add_paragraph(f"★ {item}", style='List Bullet')
+        
+        # All Ideas Generated
+        if data.get('ideas_generated'):
+            doc.add_heading("Ideas Generated:", level=2)
+            for item in data['ideas_generated']:
+                if isinstance(item, dict):
+                    idea = item.get('idea', '')
+                    proposed_by = item.get('proposed_by', '')
+                    category = item.get('category', '')
+                    txt = idea
+                    if proposed_by:
+                        txt += f" (by {proposed_by})"
+                    if category:
+                        txt += f" [{category}]"
+                    doc.add_paragraph(txt, style='List Bullet')
+                else:
+                    doc.add_paragraph(item, style='List Bullet')
+        
+        # Key Themes
+        if data.get('key_themes'):
+            doc.add_heading("Key Themes:", level=2)
+            for item in data['key_themes']:
+                doc.add_paragraph(item, style='List Bullet')
+        
+        # Decisions Made
+        if data.get('decisions_made'):
+            doc.add_heading("Decisions Made:", level=2)
+            for item in data['decisions_made']:
+                doc.add_paragraph(item, style='List Bullet')
+        
+        # Next Steps
+        if data.get('next_steps'):
+            doc.add_heading("Next Steps:", level=2)
+            for item in data['next_steps']:
+                if isinstance(item, dict):
+                    task = item.get('task', '')
+                    assignee = item.get('assignee', '')
+                    due_date = item.get('due_date', '')
+                    txt = task
+                    if assignee:
+                        txt += f" (Assignee: {assignee})"
+                    if due_date:
+                        txt += f" [Due: {due_date}]"
+                    doc.add_paragraph(txt, style='List Bullet')
+                else:
+                    doc.add_paragraph(item, style='List Bullet')
 
 
 def export_report(

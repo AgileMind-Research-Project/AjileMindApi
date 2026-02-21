@@ -147,6 +147,19 @@ def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
         # Convert tenant name to schema format (e.g., "Acme Corp" -> "acme_corp")
         schema = tenant_name.lower().replace(" ", "_")
     
+    # Parse role - it might be a JSON string like '["SUPER_ADMIN"]' or a plain string
+    role = payload.get("role")
+    if isinstance(role, str):
+        # Try to parse as JSON if it looks like an array
+        if role.startswith("["):
+            try:
+                import json
+                role_list = json.loads(role)
+                # Take the first role if it's a list
+                role = role_list[0] if role_list else None
+            except (json.JSONDecodeError, IndexError):
+                pass
+    
     return {
         "user_id": payload.get("sub"),
         "id": payload.get("sub"),  # Add id field for compatibility
@@ -154,7 +167,7 @@ def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
         "tenant_name": tenant_name,
         "schema": schema,  # Add schema field
         "tenant_schema": schema,  # Add alias for compatibility
-        "role": payload.get("role"),
+        "role": role,
         "projects": payload.get("projects", [])
     }
 

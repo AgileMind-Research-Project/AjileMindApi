@@ -50,7 +50,7 @@ class ReportService:
             
             # Determine report type from transcript category
             # Handle both enum values and string values
-            category_str = str(transcript.category).upper()
+            category_str = str(transcript.get('category', '')).upper()
             
             # Remove enum class prefix if present (e.g., "TranscriptCategory.DAILY_STANDUP" -> "DAILY_STANDUP")
             if "." in category_str:
@@ -59,18 +59,20 @@ class ReportService:
             report_type_map = {
                 "DAILY_STANDUP": "daily_standup",
                 "SPRINT_MEETING": "sprint_meeting",
-                "RETROSPECTIVE": "retrospective"
+                "SPRINT_PLANNING": "sprint_meeting",
+                "RETROSPECTIVE": "retrospective",
+                "BRAINSTORMING": "brainstorming"
             }
             report_type = report_type_map.get(category_str)
             
             if not report_type:
-                raise ValueError(f"Unknown transcript category: {transcript.category}")
+                raise ValueError(f"Unknown transcript category: {transcript.get('category')}")
             
             # Generate report using LLM
             logger.info(f"Generating {report_type} report for transcript {request.transcript_id}")
             
             report_data = self.llm_service.generate_report(
-                transcript=transcript.transcript_content,
+                transcript=transcript.get('transcript_content', ''),
                 report_type=report_type,
                 custom_prompt=request.custom_prompt if request.use_custom_prompt else None
             )

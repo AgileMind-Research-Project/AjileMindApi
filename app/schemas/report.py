@@ -15,6 +15,7 @@ class ReportType(str, Enum):
     DAILY_STANDUP = "daily_standup"
     SPRINT_MEETING = "sprint_meeting"
     RETROSPECTIVE = "retrospective"
+    BRAINSTORMING = "brainstorming"
 
 
 class ReportStatus(str, Enum):
@@ -52,6 +53,28 @@ class RetrospectiveReport(BaseModel):
     what_didnt_go_well: List[str] = Field(default_factory=list)
     improvements: List[str] = Field(default_factory=list)
     action_points: List[ActionItem] = Field(default_factory=list)
+
+
+class BrainstormingIdea(BaseModel):
+    """Brainstorming idea structure"""
+    idea: str
+    proposed_by: Optional[str] = None
+    category: Optional[str] = None
+    votes: int = 0
+
+
+class BrainstormingMeetingReport(BaseModel):
+    """Brainstorming Meeting Summary Report structure"""
+    meeting_topic: str = ""
+    meeting_objective: str = ""
+    participants: List[str] = Field(default_factory=list)
+    ideas_generated: List[BrainstormingIdea] = Field(default_factory=list)
+    top_ideas: List[str] = Field(default_factory=list)
+    categories: List[str] = Field(default_factory=list)
+    key_themes: List[str] = Field(default_factory=list)
+    decisions_made: List[str] = Field(default_factory=list)
+    next_steps: List[ActionItem] = Field(default_factory=list)
+    summary: str = ""
 
 
 class ReportGenerateRequest(BaseModel):

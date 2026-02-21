@@ -474,7 +474,7 @@ CREATE TABLE IF NOT EXISTS `task_updates` (
 CREATE TABLE IF NOT EXISTS `transcripts` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `title` VARCHAR(255) NOT NULL COMMENT 'Transcript title',
-    `category` ENUM('daily_standup', 'sprint_meeting', 'retrospective') NOT NULL COMMENT 'Meeting type',
+    `category` ENUM('daily_standup', 'sprint_meeting', 'sprint_planning', 'retrospective', 'brainstorming') NOT NULL COMMENT 'Meeting type',
     `transcript_content` LONGTEXT NOT NULL COMMENT 'Full transcript text',
     `transcript_date` DATE NOT NULL COMMENT 'Date of the meeting',
     `tags` JSON DEFAULT NULL COMMENT 'Tags for categorization',
@@ -501,7 +501,7 @@ COMMENT='Meeting transcripts for AI report generation';
 CREATE TABLE IF NOT EXISTS `reports` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `transcript_id` INT NOT NULL COMMENT 'Reference to transcript',
-    `report_type` ENUM('daily_standup', 'sprint_meeting', 'retrospective') NOT NULL COMMENT 'Report type',
+    `report_type` ENUM('daily_standup', 'sprint_meeting', 'retrospective', 'brainstorming') NOT NULL COMMENT 'Report type',
     `report_content` JSON NOT NULL COMMENT 'Structured report content',
     `template_id` INT DEFAULT NULL COMMENT 'Template used for generation',
     `version` INT DEFAULT 1 COMMENT 'Report version number',
