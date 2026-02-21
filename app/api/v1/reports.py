@@ -65,14 +65,14 @@ async def list_reports(
     List reports with optional filters.
     
     - **transcript_id**: Filter by transcript ID
-    - **report_type**: Filter by report type (daily_standup, sprint_meeting, retrospective)
+    - **report_type**: Filter by report type (daily_standup, sprint_meeting, retrospective, brainstorming)
     - **status**: Filter by status (draft, published)
     - **page**: Page number (default: 1)
     - **page_size**: Items per page (default: 20, max: 100)
     """
     try:
         # Validate report_type if provided
-        if report_type and report_type not in ['daily_standup', 'sprint_meeting', 'retrospective']:
+        if report_type and report_type not in ['daily_standup', 'sprint_meeting', 'retrospective', 'brainstorming']:
             raise HTTPException(status_code=400, detail="Invalid report_type")
         
         # Validate status if provided

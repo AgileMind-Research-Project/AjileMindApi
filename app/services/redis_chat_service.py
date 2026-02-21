@@ -34,7 +34,9 @@ class RedisChatService:
         created_by_user_id: str,
         created_by_username: str,
         description: str = "",
-        is_private: bool = False
+        is_private: bool = False,
+        project_id: Optional[int] = None,
+        team_name: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Create a new channel
@@ -46,6 +48,8 @@ class RedisChatService:
             created_by_username: Username of creator
             description: Channel description
             is_private: Whether channel is private
+            project_id: Associated project ID (optional, for project channels)
+            team_name: Project/team name used for sidebar grouping (optional)
         
         Returns:
             Channel data or None if failed
@@ -66,6 +70,12 @@ class RedisChatService:
                 'is_private': is_private,
                 'member_count': 1
             }
+
+            # Add project fields if provided (project channel)
+            if project_id is not None:
+                channel_data['project_id'] = project_id
+            if team_name:
+                channel_data['team_name'] = team_name
             
             # Store channel data
             channel_key = self.redis._channel_key(channel_id)

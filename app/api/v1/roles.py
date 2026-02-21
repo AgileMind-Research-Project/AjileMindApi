@@ -11,6 +11,7 @@ from datetime import datetime
 import json
 
 from app.db.database import db, Database
+from app.core.config import settings
 from app.core.logger import logger
 from app.utils.jwt import get_current_user_from_token
 from pydantic import BaseModel, Field
@@ -101,13 +102,13 @@ async def get_roles(
 ) -> List[Dict[str, Any]]:
     """Get all system roles (shared across all tenants)"""
     try:
-        query = """
+        query = f"""
             SELECT 
-                ROLE_ID as role_id,
-                NAME as role_name,
-                DESCRIPTION as description,
-                CREATED_AT as created_at
-            FROM roles
+                role_id,
+                name as role_name,
+                description,
+                created_at
+            FROM `{settings.DB_NAME}`.roles
             WHERE is_system_role = TRUE
             ORDER BY CREATED_AT DESC
         """
@@ -138,6 +139,73 @@ async def get_roles(
         )
 
 
+@router.get(
+    "/assignable",
+    response_model=List[RoleResponse],
+    summary="Get Assignable Roles",
+    description="Retrieve roles that can be assigned by current user (Admin/Super Admin)"
+)
+async def get_assignable_roles(
+    current_user: Dict = Depends(get_current_user_from_token),
+    database: Database = Depends(get_database)
+) -> List[Dict[str, Any]]:
+    """
+    Get roles that can be assigned by the current user.
+    
+    Rules:
+    - Super Admin can see all roles
+    - Admin can see all roles EXCEPT SUPER_ADMIN
+    - Others cannot access this endpoint
+    """
+    try:
+        from app.utils.permissions import is_super_admin, require_admin
+        
+        # Require at least Admin access
+        require_admin(current_user)
+        
+        query = f"""
+            SELECT 
+                ROLE_ID as role_id,
+                NAME as role_name,
+                DESCRIPTION as description,
+                CREATED_AT as created_at
+            FROM `{settings.DB_NAME}`.roles
+            WHERE is_system_role = TRUE
+            ORDER BY CREATED_AT DESC
+        """
+        
+        roles = await database.execute_query(
+            query,
+            fetch_all=True
+        )
+        
+        # Convert to response format
+        result = []
+        for role in roles:
+            role_data = {
+                "role_id": role["role_id"],
+                "role_name": role["role_name"],
+                "description": role["description"],
+                "created_at": role["created_at"].isoformat() if role["created_at"] else ""
+            }
+            
+            # Filter out SUPER_ADMIN for non-super-admin users
+            if not is_super_admin(current_user) and role["role_name"] == "SUPER_ADMIN":
+                continue
+            
+            result.append(role_data)
+        
+        logger.info(f"Retrieved {len(result)} assignable roles for user {current_user['user_id']}")
+        return result
+        
+    except Exception as e:
+        logger.exception(f"Failed to get assignable roles: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve assignable roles"
+        )
+
+
 @router.post(
     "",
     response_model=RoleResponse,
@@ -157,10 +225,10 @@ async def create_role(
         role_name = role_data.role_name
         
         # Check if role name already exists
-        check_query = """
-            SELECT ROLE_ID as role_id 
-            FROM roles 
-            WHERE NAME = %s
+        check_query = f"""
+            SELECT role_id 
+            FROM `{settings.DB_NAME}`.roles 
+            WHERE name = %s
         """
         existing = await database.execute_query(
             check_query,
@@ -175,9 +243,9 @@ async def create_role(
             )
         
         # Insert new role (system-wide, no tenant_id)
-        insert_query = """
-            INSERT INTO roles (
-                ROLE_ID, NAME, DESCRIPTION, is_system_role
+        insert_query = f"""
+            INSERT INTO `{settings.DB_NAME}`.roles (
+                role_id, name, description, is_system_role
             ) VALUES (%s, %s, %s, %s)
         """
         
@@ -194,13 +262,13 @@ async def create_role(
         
         # Fetch created role
         created_role = await database.execute_query(
-            """SELECT 
-                ROLE_ID as role_id,
-                NAME as role_name,
-                DESCRIPTION as description,
-                CREATED_AT as created_at 
-            FROM roles 
-            WHERE ROLE_ID = %s""",
+            f"""SELECT 
+                role_id,
+                name as role_name,
+                description,
+                created_at 
+            FROM `{settings.DB_NAME}`.roles 
+            WHERE role_id = %s""",
             (role_id,),
             fetch_one=True
         )
@@ -240,10 +308,10 @@ async def update_role(
     """Update an existing custom role"""
     try:
         # Check if role exists
-        check_query = """
-            SELECT ROLE_ID as role_id, NAME as name, is_system_role
-            FROM roles 
-            WHERE ROLE_ID = %s
+        check_query = f"""
+            SELECT role_id, name, is_system_role
+            FROM `{settings.DB_NAME}`.roles 
+            WHERE role_id = %s
         """
         existing_role = await database.execute_query(
             check_query,
@@ -265,10 +333,10 @@ async def update_role(
             )
         
         # Update role (only description, no permission level)
-        update_query = """
-            UPDATE roles 
-            SET DESCRIPTION = %s, UPDATED_AT = %s
-            WHERE ROLE_ID = %s
+        update_query = f"""
+            UPDATE `{settings.DB_NAME}`.roles 
+            SET description = %s, updated_at = %s
+            WHERE role_id = %s
         """
         
         await database.execute_query(
@@ -283,13 +351,13 @@ async def update_role(
         
         # Fetch updated role
         updated_role = await database.execute_query(
-            """SELECT 
-                ROLE_ID as role_id,
-                NAME as role_name,
-                DESCRIPTION as description,
-                CREATED_AT as created_at 
-            FROM roles 
-            WHERE ROLE_ID = %s""",
+            f"""SELECT 
+                role_id,
+                name as role_name,
+                description,
+                created_at 
+            FROM `{settings.DB_NAME}`.roles 
+            WHERE role_id = %s""",
             (role_id,),
             fetch_one=True
         )
@@ -328,10 +396,10 @@ async def delete_role(
     """Delete a custom role"""
     try:
         # Check if role exists
-        check_query = """
-            SELECT ROLE_ID as role_id, is_system_role
-            FROM roles 
-            WHERE ROLE_ID = %s
+        check_query = f"""
+            SELECT role_id, is_system_role
+            FROM `{settings.DB_NAME}`.roles 
+            WHERE role_id = %s
         """
         existing_role = await database.execute_query(
             check_query,
@@ -367,7 +435,7 @@ async def delete_role(
             )
         
         # Delete role
-        delete_query = "DELETE FROM roles WHERE ROLE_ID = %s"
+        delete_query = f"DELETE FROM `{settings.DB_NAME}`.roles WHERE role_id = %s"
         await database.execute_query(delete_query, (role_id,), commit=True)
         
         logger.info(f"Deleted role {role_id} by user {current_user['user_id']}")
@@ -486,9 +554,9 @@ async def update_user_role(
             )
         
         # Check if role exists (role_id is actually the role name in new architecture)
-        role_query = """
+        role_query = f"""
             SELECT role_id, name 
-            FROM roles 
+            FROM `{settings.DB_NAME}`.roles 
             WHERE name = %s
         """
         role = await database.execute_query(

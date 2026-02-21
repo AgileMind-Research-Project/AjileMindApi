@@ -104,8 +104,13 @@ async def upload_transcript(
         
         service = TranscriptService(db)
         result = await service.create_transcript(
-            transcript_data=transcript_data,
-            tenant_schema=current_user.get('tenant_schema'),
+            tenant_name=current_user.get('tenant_schema'),
+            title=title,
+            category=category_enum.value,
+            transcript_content=transcript_content,
+            transcript_date=parsed_date,
+            tags=tags_list,
+            file_name=file_name,
             uploaded_by=current_user.get('user_id')
         )
         
@@ -175,9 +180,14 @@ async def list_transcripts(
         )
         
         service = TranscriptService(db)
-        result = await service.list_transcripts(
-            tenant_schema=current_user.get('tenant_schema'),
-            filters=filters
+        result = await service.get_transcripts(
+            tenant_name=current_user.get('tenant_schema'),
+            category=category_enum.value if category_enum else None,
+            date_from=date_from_parsed,
+            date_to=date_to_parsed,
+            search=search,
+            page=page,
+            page_size=page_size
         )
         
         return result
@@ -198,10 +208,13 @@ async def get_transcript(
     """Get a specific transcript by ID."""
     try:
         service = TranscriptService(db)
-        result = await service.get_transcript(
-            transcript_id=transcript_id,
-            tenant_schema=current_user.get('tenant_schema')
+        result = await service.get_transcript_by_id(
+            tenant_name=current_user.get('tenant_schema'),
+            transcript_id=transcript_id
         )
+        
+        if not result:
+            raise ValueError("Transcript not found")
         
         return result
     
@@ -223,10 +236,17 @@ async def update_transcript(
     try:
         service = TranscriptService(db)
         result = await service.update_transcript(
+            tenant_name=current_user.get('tenant_schema'),
             transcript_id=transcript_id,
-            transcript_data=transcript_data,
-            tenant_schema=current_user.get('tenant_schema')
+            title=transcript_data.title,
+            category=transcript_data.category.value if transcript_data.category else None,
+            transcript_content=transcript_data.transcript_content,
+            transcript_date=transcript_data.transcript_date,
+            tags=transcript_data.tags
         )
+        
+        if not result:
+            raise ValueError("Transcript not found")
         
         return result
     
@@ -247,8 +267,8 @@ async def delete_transcript(
     try:
         service = TranscriptService(db)
         await service.delete_transcript(
-            transcript_id=transcript_id,
-            tenant_schema=current_user.get('tenant_schema')
+            tenant_name=current_user.get('tenant_schema'),
+            transcript_id=transcript_id
         )
         
         return JSONResponse(
