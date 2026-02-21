@@ -41,6 +41,48 @@ class TaskUpdatesService:
             Extraction results dict
         """
         try:
+            # Sync transcript to meeting if needed
+            if meeting_id.startswith('transcript-'):
+                # Check if meeting exists
+                check_meeting = await self.meeting_service.get_meeting_by_meeting_id(tenant_name, meeting_id)
+                if not check_meeting:
+                    try:
+                        transcript_id = int(meeting_id.split('-')[1])
+                        # Fetch transcript
+                        t_query = f"SELECT * FROM {tenant_name}.transcripts WHERE id = %s"
+                        transcript = await self.db.execute_query(t_query, (transcript_id,), fetch_one=True, schema=tenant_name)
+                        
+                        if transcript:
+                            # Find a project (fallback to first active project)
+                            p_query = f"SELECT project_id FROM {tenant_name}.projects ORDER BY created_at DESC LIMIT 1"
+                            project = await self.db.execute_query(p_query, fetch_one=True, schema=tenant_name)
+                            
+                            if not project:
+                                logger.warning(f"No projects found for tenant {tenant_name}, cannot link transcript {transcript_id}")
+                                # We might fail later, but let's try to proceed or error out here
+                                # TaskUpdate requires project_id. 
+                                raise ValueError("No projects found to link this transcript to.")
+
+                            project_id = project['project_id'] 
+                            
+                            # Create meeting record
+                            insert_meeting = f"""
+                                INSERT INTO {tenant_name}.meetings 
+                                (meeting_id, project_id, title, date, start_time, end_time, status, category, meeting_transcript)
+                                VALUES (%s, %s, %s, %s, '09:00', '10:00', 'COMPLETED', 'DAILY_STANDUP', %s)
+                            """
+                            await self.db.execute_query(insert_meeting, (
+                                meeting_id, 
+                                project_id, 
+                                transcript['title'], 
+                                transcript['transcript_date'], 
+                                transcript['transcript_content']
+                            ), commit=True, schema=tenant_name)
+                            logger.info(f"Synced transcript {transcript_id} to meetings table as {meeting_id}")
+                    except Exception as sync_err:
+                        logger.error(f"Failed to sync transcript to meeting: {sync_err}")
+                        # Continue, maybe it exists or will fail downstream
+            
             # Get meeting
             meeting = await self.meeting_service.get_meeting_by_meeting_id(tenant_name, meeting_id)
             if not meeting:

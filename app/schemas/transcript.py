@@ -27,6 +27,7 @@ class TranscriptCreate(BaseModel):
     transcript_date: date
     tags: Optional[List[str]] = Field(default=None)
     file_name: Optional[str] = Field(default=None, max_length=255)
+    project_id: Optional[int] = Field(default=None)
 
 
 class TranscriptUpdate(BaseModel):
@@ -38,6 +39,7 @@ class TranscriptUpdate(BaseModel):
     tags: Optional[List[str]] = None
 
 
+
 class TranscriptResponse(BaseModel):
     """Schema for transcript response"""
     id: int
@@ -47,6 +49,7 @@ class TranscriptResponse(BaseModel):
     transcript_date: date
     tags: Optional[List[str]] = None
     file_name: Optional[str] = None
+    project_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -55,13 +58,15 @@ class TranscriptResponse(BaseModel):
 
 
 class TranscriptListItem(BaseModel):
-    """Schema for transcript list item (without full content)"""
+    """Schema for transcript list item (includes content for preview)"""
     id: int
     title: str
     category: TranscriptCategory
+    transcript_content: Optional[str] = None
     transcript_date: date
     tags: Optional[List[str]] = None
     file_name: Optional[str] = None
+    project_id: Optional[int] = None
     created_at: datetime
 
     class Config:
