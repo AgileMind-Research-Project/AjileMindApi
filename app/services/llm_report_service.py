@@ -24,7 +24,7 @@ class LLMReportService:
                 base_url=ollama_base_url,
                 model=settings.OLLAMA_MODEL,
                 temperature=0.3,  # Lower temperature for structured output
-                num_predict=3000
+                num_predict=6000
             )
             self.available = True
             logger.info(f"LLM Report Service initialized with {settings.OLLAMA_MODEL}")
@@ -33,18 +33,74 @@ class LLMReportService:
             self.available = False
     
     def _extract_json_from_response(self, response: str) -> Dict[str, Any]:
-        """Extract JSON from LLM response"""
-        try:
-            # Try to find JSON in the response
-            json_match = re.search(r'\{[\s\S]*\}', response)
-            if json_match:
-                json_str = json_match.group(0)
+        """Extract JSON from LLM response with robust parsing"""
+        # Clean response - remove control characters except newlines and tabs
+        cleaned = ''.join(char for char in response if char == '\n' or char == '\t' or (ord(char) >= 32 and ord(char) < 127) or ord(char) > 127)
+        
+        # Find the JSON object by tracking braces
+        start_idx = cleaned.find('{')
+        if start_idx == -1:
+            raise ValueError("No JSON object found in response")
+        
+        brace_count = 0
+        end_idx = start_idx
+        in_string = False
+        escape_next = False
+        
+        for i, char in enumerate(cleaned[start_idx:], start=start_idx):
+            if escape_next:
+                escape_next = False
+                continue
+            if char == '\\' and in_string:
+                escape_next = True
+                continue
+            if char == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_idx = i
+                    break
+        
+        if brace_count == 0 and end_idx > start_idx:
+            json_str = cleaned[start_idx:end_idx + 1]
+            try:
                 return json.loads(json_str)
-            else:
-                # If no JSON found, try parsing the whole response
-                return json.loads(response)
+            except json.JSONDecodeError as e:
+                logger.warning(f"JSON parse failed after extraction: {e}")
+        
+        # Fallback: try the old regex approach with the cleaned string
+        try:
+            json_match = re.search(r'\{[\s\S]*\}', cleaned)
+            if json_match:
+                return json.loads(json_match.group(0))
+        except json.JSONDecodeError:
+            pass
+        
+        # Last resort: try to repair truncated JSON
+        logger.warning("Attempting to repair truncated JSON")
+        json_str = cleaned[start_idx:] if start_idx >= 0 else cleaned
+        
+        # Count brackets and braces to fix truncation
+        open_braces = json_str.count('{')
+        close_braces = json_str.count('}')
+        open_brackets = json_str.count('[')
+        close_brackets = json_str.count(']')
+        
+        # Add missing closures
+        json_str = json_str.rstrip()
+        json_str += ']' * (open_brackets - close_brackets)
+        json_str += '}' * (open_braces - close_braces)
+        
+        try:
+            return json.loads(json_str)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON from LLM response: {e}")
+            logger.error(f"Failed to parse JSON even after repair: {e}")
             logger.error(f"Response was: {response}")
             raise ValueError("Failed to parse structured report from LLM response")
     
