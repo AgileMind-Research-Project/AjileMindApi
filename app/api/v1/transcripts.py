@@ -180,14 +180,9 @@ async def list_transcripts(
         )
         
         service = TranscriptService(db)
-        result = await service.get_transcripts(
-            tenant_name=current_user.get('tenant_schema'),
-            category=category_enum.value if category_enum else None,
-            date_from=date_from_parsed,
-            date_to=date_to_parsed,
-            search=search,
-            page=page,
-            page_size=page_size
+        result = await service.list_transcripts(
+            tenant_schema=current_user.get('tenant_schema'),
+            filters=filters
         )
         
         return result
@@ -208,9 +203,9 @@ async def get_transcript(
     """Get a specific transcript by ID."""
     try:
         service = TranscriptService(db)
-        result = await service.get_transcript_by_id(
-            tenant_name=current_user.get('tenant_schema'),
-            transcript_id=transcript_id
+        result = await service.get_transcript(
+            transcript_id=transcript_id,
+            tenant_schema=current_user.get('tenant_schema')
         )
         
         if not result:
