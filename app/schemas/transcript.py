@@ -19,6 +19,12 @@ class TranscriptCategory(str, Enum):
     BRAINSTORMING = "brainstorming"
 
 
+class ReportGeneratedStatus(str, Enum):
+    """Report generation status"""
+    PENDING = "pending"
+    DONE = "done"
+
+
 class TranscriptCreate(BaseModel):
     """Schema for creating a new transcript"""
     title: str = Field(..., min_length=1, max_length=255)
@@ -50,6 +56,7 @@ class TranscriptResponse(BaseModel):
     tags: Optional[List[str]] = None
     file_name: Optional[str] = None
     project_id: Optional[int] = None
+    report_generated: ReportGeneratedStatus = ReportGeneratedStatus.PENDING
     created_at: datetime
     updated_at: datetime
 
@@ -67,6 +74,7 @@ class TranscriptListItem(BaseModel):
     tags: Optional[List[str]] = None
     file_name: Optional[str] = None
     project_id: Optional[int] = None
+    report_generated: ReportGeneratedStatus = ReportGeneratedStatus.PENDING
     created_at: datetime
 
     class Config:

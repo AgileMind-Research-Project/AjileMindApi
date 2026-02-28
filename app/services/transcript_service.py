@@ -43,8 +43,8 @@ class TranscriptService:
             
             query = f"""
                 INSERT INTO {tenant_schema}.transcripts 
-                (title, category, transcript_content, transcript_date, tags, file_name, uploaded_by, tenant_schema)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (title, category, transcript_content, transcript_date, tags, file_name, project_id, report_generated, uploaded_by, tenant_schema)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             
             result = await self.db.execute_query(
@@ -56,6 +56,8 @@ class TranscriptService:
                     transcript_data.transcript_date,
                     tags_json,
                     transcript_data.file_name,
+                    transcript_data.project_id,
+                    'pending',  # Default report_generated status
                     uploaded_by,
                     tenant_schema
                 ),
@@ -96,7 +98,7 @@ class TranscriptService:
         try:
             query = f"""
                 SELECT id, title, category, transcript_content, transcript_date, 
-                       tags, file_name, created_at, updated_at
+                       tags, file_name, project_id, report_generated, created_at, updated_at
                 FROM {tenant_schema}.transcripts
                 WHERE id = %s
             """
@@ -123,6 +125,8 @@ class TranscriptService:
                 transcript_date=result['transcript_date'],
                 tags=tags,
                 file_name=result.get('file_name'),
+                project_id=result.get('project_id'),
+                report_generated=result.get('report_generated', 'pending'),
                 created_at=result['created_at'],
                 updated_at=result['updated_at']
             )
@@ -173,7 +177,7 @@ class TranscriptService:
             # Fetch transcripts
             offset = (filters.page - 1) * filters.page_size
             list_query = f"""
-                SELECT id, title, category, transcript_date, tags, file_name, created_at
+                SELECT id, title, category, transcript_date, tags, file_name, project_id, report_generated, created_at
                 FROM {tenant_schema}.transcripts
                 {where_sql}
                 ORDER BY transcript_date DESC, created_at DESC
@@ -193,6 +197,8 @@ class TranscriptService:
                     transcript_date=row['transcript_date'],
                     tags=tags,
                     file_name=row.get('file_name'),
+                    project_id=row.get('project_id'),
+                    report_generated=row.get('report_generated', 'pending'),
                     created_at=row['created_at']
                 ))
             
@@ -277,4 +283,27 @@ class TranscriptService:
         
         except Exception as e:
             logger.error(f"Error deleting transcript: {e}")
+            raise
+
+    async def update_report_generated_status(
+        self,
+        transcript_id: int,
+        tenant_schema: str,
+        status: str = 'done'
+    ) -> bool:
+        """Update the report_generated status for a transcript"""
+        try:
+            query = f"""
+                UPDATE {tenant_schema}.transcripts
+                SET report_generated = %s
+                WHERE id = %s
+            """
+            
+            await self.db.execute_query(query, (status, transcript_id), commit=True)
+            
+            logger.info(f"Transcript {transcript_id} report_generated status updated to '{status}'")
+            return True
+        
+        except Exception as e:
+            logger.error(f"Error updating report_generated status: {e}")
             raise

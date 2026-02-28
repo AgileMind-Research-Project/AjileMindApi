@@ -6,12 +6,14 @@ Export reports to PDF and DOCX formats with template styling.
 
 from typing import Dict, Any, Optional
 import io
+import base64
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image, Frame, PageTemplate
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.lib import colors
+from reportlab.pdfgen import canvas
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -42,6 +44,28 @@ class ReportExporter:
             return RGBColor(0, 0, 0)  # Default to black
     
     @staticmethod
+    def _decode_base64_image(base64_string: str) -> Optional[io.BytesIO]:
+        """
+        Decode base64 image string to BytesIO.
+        
+        Args:
+            base64_string: Base64 encoded image (may include data URI prefix)
+        
+        Returns:
+            BytesIO object containing image data, or None if invalid
+        """
+        try:
+            # Remove data URI prefix if present (e.g., "data:image/png;base64,")
+            if ',' in base64_string:
+                base64_string = base64_string.split(',', 1)[1]
+            
+            image_data = base64.b64decode(base64_string)
+            return io.BytesIO(image_data)
+        except Exception as e:
+            logger.error(f"Error decoding base64 image: {e}")
+            return None
+    
+    @staticmethod
     def export_to_pdf(
         report_data: Dict[str, Any],
         report_type: str,
@@ -60,7 +84,70 @@ class ReportExporter:
         """
         try:
             buffer = io.BytesIO()
-            doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=1*inch, bottomMargin=1*inch)
+            
+            # Prepare header/footer image data for page template
+            header_img_data = None
+            footer_img_data = None
+            
+            if report_data.get('header_image'):
+                header_img_stream = ReportExporter._decode_base64_image(report_data['header_image'])
+                if header_img_stream:
+                    header_img_data = header_img_stream.getvalue()
+            
+            if report_data.get('footer_image'):
+                footer_img_stream = ReportExporter._decode_base64_image(report_data['footer_image'])
+                if footer_img_stream:
+                    footer_img_data = footer_img_stream.getvalue()
+            
+            # Calculate margins based on header/footer images
+            top_margin = 1.25*inch if header_img_data else 0.75*inch
+            bottom_margin = 1.25*inch if footer_img_data else 0.75*inch
+            
+            doc = SimpleDocTemplate(
+                buffer, 
+                pagesize=letter, 
+                topMargin=top_margin, 
+                bottomMargin=bottom_margin,
+                leftMargin=1*inch,
+                rightMargin=1*inch
+            )
+            
+            # Create a function to draw header/footer on each page
+            def add_header_footer(canvas_obj, doc_obj):
+                canvas_obj.saveState()
+                page_width, page_height = letter
+                
+                # Draw header image on every page (full width)
+                if header_img_data:
+                    try:
+                        from reportlab.lib.utils import ImageReader
+                        header_stream = io.BytesIO(header_img_data)
+                        img_reader = ImageReader(header_stream)
+                        # Position at top of page, full width edge to edge
+                        img_width = page_width  # Full page width
+                        img_height = 1.0*inch  # 1 inch height
+                        x_pos = 0
+                        y_pos = page_height - img_height
+                        canvas_obj.drawImage(img_reader, x_pos, y_pos, width=img_width, height=img_height, preserveAspectRatio=False, mask='auto')
+                    except Exception as e:
+                        logger.error(f"Error drawing header image: {e}")
+                
+                # Draw footer image on every page (full width)
+                if footer_img_data:
+                    try:
+                        from reportlab.lib.utils import ImageReader
+                        footer_stream = io.BytesIO(footer_img_data)
+                        img_reader = ImageReader(footer_stream)
+                        # Position at bottom of page, full width edge to edge
+                        img_width = page_width  # Full page width
+                        img_height = 1.0*inch  # 1 inch height
+                        x_pos = 0
+                        y_pos = 0
+                        canvas_obj.drawImage(img_reader, x_pos, y_pos, width=img_width, height=img_height, preserveAspectRatio=False, mask='auto')
+                    except Exception as e:
+                        logger.error(f"Error drawing footer image: {e}")
+                
+                canvas_obj.restoreState()
             
             # Get styles
             styles = getSampleStyleSheet()
@@ -79,7 +166,7 @@ class ReportExporter:
             
             story = []
             
-            # Add header if provided
+            # Add header text if provided (from template_config)
             if template_config and template_config.get('header_content'):
                 header = template_config['header_content']
                 if header.get('text'):
@@ -109,7 +196,7 @@ class ReportExporter:
             elif report_type == 'brainstorming':
                 ReportExporter._add_brainstorming_content(story, report_data, styles)
             
-            # Add footer if provided
+            # Add footer text if provided (from template_config)
             if template_config and template_config.get('footer_content'):
                 footer = template_config['footer_content']
                 if footer.get('text'):
@@ -124,8 +211,8 @@ class ReportExporter:
                     )
                     story.append(Paragraph(footer['text'], footer_style))
             
-            # Build PDF
-            doc.build(story)
+            # Build PDF with header/footer callback
+            doc.build(story, onFirstPage=add_header_footer, onLaterPages=add_header_footer)
             
             pdf_bytes = buffer.getvalue()
             buffer.close()
@@ -265,7 +352,43 @@ class ReportExporter:
         try:
             doc = Document()
             
-            # Add header if provided
+            # Get the default section
+            section = doc.sections[0]
+            
+            # Set section margins for header/footer to allow full width images
+            from docx.shared import Cm, Emu
+            section.header_distance = Cm(0)
+            section.footer_distance = Cm(0)
+            
+            # Get page dimensions
+            page_width = section.page_width
+            left_margin = section.left_margin
+            right_margin = section.right_margin
+            
+            # Add header image to document header (appears on every page, full width)
+            if report_data.get('header_image'):
+                header_img_stream = ReportExporter._decode_base64_image(report_data['header_image'])
+                if header_img_stream:
+                    try:
+                        doc_header = section.header
+                        doc_header.is_linked_to_previous = False
+                        # Clear existing paragraphs
+                        for para in doc_header.paragraphs:
+                            para.clear()
+                        header_para = doc_header.paragraphs[0] if doc_header.paragraphs else doc_header.add_paragraph()
+                        header_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        # Remove paragraph spacing and set negative indents to extend full width
+                        header_para.paragraph_format.space_before = Pt(0)
+                        header_para.paragraph_format.space_after = Pt(0)
+                        header_para.paragraph_format.left_indent = -left_margin
+                        header_para.paragraph_format.right_indent = -right_margin
+                        run = header_para.add_run()
+                        # Use full page width with compact height
+                        run.add_picture(header_img_stream, width=page_width, height=Inches(1))
+                    except Exception as e:
+                        logger.error(f"Error adding header image to DOCX: {e}")
+            
+            # Add header text if provided (from template_config) - to document body, not header
             if template_config and template_config.get('header_content'):
                 header = template_config['header_content']
                 if header.get('text'):
@@ -288,7 +411,7 @@ class ReportExporter:
             elif report_type == 'brainstorming':
                 ReportExporter._add_brainstorming_content_docx(doc, report_data)
             
-            # Add footer if provided
+            # Add footer text if provided (from template_config) - to document body
             if template_config and template_config.get('footer_content'):
                 footer = template_config['footer_content']
                 if footer.get('text'):
@@ -297,6 +420,29 @@ class ReportExporter:
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER if footer.get('alignment') == 'center' else WD_ALIGN_PARAGRAPH.LEFT
                     p.runs[0].font.size = Pt(int(footer.get('font_size', 10)))
                     p.runs[0].font.color.rgb = ReportExporter._parse_color_docx(footer.get('color', '#666666'))
+            
+            # Add footer image to document footer (appears on every page, full width)
+            if report_data.get('footer_image'):
+                footer_img_stream = ReportExporter._decode_base64_image(report_data['footer_image'])
+                if footer_img_stream:
+                    try:
+                        doc_footer = section.footer
+                        doc_footer.is_linked_to_previous = False
+                        # Clear existing paragraphs
+                        for para in doc_footer.paragraphs:
+                            para.clear()
+                        footer_para = doc_footer.paragraphs[0] if doc_footer.paragraphs else doc_footer.add_paragraph()
+                        footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        # Remove paragraph spacing and set negative indents to extend full width
+                        footer_para.paragraph_format.space_before = Pt(0)
+                        footer_para.paragraph_format.space_after = Pt(0)
+                        footer_para.paragraph_format.left_indent = -left_margin
+                        footer_para.paragraph_format.right_indent = -right_margin
+                        run = footer_para.add_run()
+                        # Use full page width with compact height
+                        run.add_picture(footer_img_stream, width=page_width, height=Inches(1))
+                    except Exception as e:
+                        logger.error(f"Error adding footer image to DOCX: {e}")
             
             # Save to bytes
             buffer = io.BytesIO()
