@@ -28,6 +28,7 @@ async def upload_transcript(
     title: str = Form(...),
     category: str = Form(...),
     transcript_date: str = Form(...),
+    project_id: Optional[int] = Form(None),
     tags: Optional[str] = Form(None),
     pasted_content: Optional[str] = Form(None),
     current_user: dict = Depends(get_current_user_from_token),
@@ -40,6 +41,7 @@ async def upload_transcript(
     - **title**: Transcript title
     - **category**: DAILY_STANDUP, SPRINT_MEETING, or RETROSPECTIVE
     - **transcript_date**: Date of the meeting (YYYY-MM-DD)
+    - **project_id**: Optional project ID (must be a project assigned to the user)
     - **tags**: Optional JSON array of tags
     - **pasted_content**: Optional pasted text content (used if no file)
     """
@@ -99,18 +101,14 @@ async def upload_transcript(
             transcript_content=transcript_content,
             transcript_date=parsed_date,
             tags=tags_list,
-            file_name=file_name
+            file_name=file_name,
+            project_id=project_id
         )
         
         service = TranscriptService(db)
         result = await service.create_transcript(
-            tenant_name=current_user.get('tenant_schema'),
-            title=title,
-            category=category_enum.value,
-            transcript_content=transcript_content,
-            transcript_date=parsed_date,
-            tags=tags_list,
-            file_name=file_name,
+            transcript_data=transcript_data,
+            tenant_schema=current_user.get('tenant_schema'),
             uploaded_by=current_user.get('user_id')
         )
         

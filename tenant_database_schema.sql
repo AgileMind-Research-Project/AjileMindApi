@@ -479,6 +479,8 @@ CREATE TABLE IF NOT EXISTS `transcripts` (
     `transcript_date` DATE NOT NULL COMMENT 'Date of the meeting',
     `tags` JSON DEFAULT NULL COMMENT 'Tags for categorization',
     `file_name` VARCHAR(255) COMMENT 'Original uploaded filename',
+    `project_id` BIGINT DEFAULT NULL COMMENT 'Associated project ID',
+    `report_generated` ENUM('pending', 'done') DEFAULT 'pending' COMMENT 'Report generation status',
     `uploaded_by` VARCHAR(50) COMMENT 'User ID who uploaded',
     `tenant_schema` VARCHAR(100) COMMENT 'Tenant schema identifier',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -487,6 +489,8 @@ CREATE TABLE IF NOT EXISTS `transcripts` (
     INDEX `idx_category` (`category`),
     INDEX `idx_date` (`transcript_date`),
     INDEX `idx_tenant` (`tenant_schema`),
+    INDEX `idx_project_id` (`project_id`),
+    INDEX `idx_report_generated` (`report_generated`),
     FULLTEXT INDEX `idx_content` (`transcript_content`),
     FULLTEXT INDEX `idx_title` (`title`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci

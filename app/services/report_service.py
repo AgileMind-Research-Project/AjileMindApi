@@ -120,6 +120,14 @@ class ReportService:
             
             logger.info(f"Report {report_id} verified, fetching full details")
             
+            # Update transcript's report_generated status to 'done'
+            await transcript_service.update_report_generated_status(
+                transcript_id=request.transcript_id,
+                tenant_schema=tenant_schema,
+                status='done'
+            )
+            logger.info(f"Transcript {request.transcript_id} report_generated status updated to 'done'")
+            
             # Fetch the created report with explicit schema
             return await self.get_report(report_id, tenant_schema)
         
