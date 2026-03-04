@@ -96,5 +96,6 @@ class TranscriptFilterParams(BaseModel):
     date_to: Optional[date] = None
     tags: Optional[List[str]] = None
     search: Optional[str] = None
+    report_generated: Optional[ReportGeneratedStatus] = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)

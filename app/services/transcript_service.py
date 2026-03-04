@@ -163,6 +163,10 @@ class TranscriptService:
                 search_term = f"%{filters.search}%"
                 params.extend([search_term, search_term])
             
+            if filters.report_generated:
+                where_clauses.append("report_generated = %s")
+                params.append(filters.report_generated.value)
+            
             where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
             
             # Count total
