@@ -671,3 +671,74 @@ CREATE TABLE IF NOT EXISTS `release_notes` (
         ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='Project release notes with versioning and structured content';
+
+    -- ============================================
+    -- MIGRATION TABLES
+    -- These tables are created by tenant-level migration scripts
+    -- - new_tasks
+    -- - recurring_bugs
+    -- - jira_issue_sync
+    -- ============================================
+
+    -- NEW_TASKS TABLE
+    CREATE TABLE IF NOT EXISTS `new_tasks` (
+      `id` INT AUTO_INCREMENT PRIMARY KEY,
+      `report_id` INT NOT NULL,
+      `transcript_id` INT NOT NULL,
+      `task_title` VARCHAR(500) NOT NULL,
+      `assignee` VARCHAR(255) DEFAULT NULL,
+      `due_date` VARCHAR(50) DEFAULT NULL,
+      `priority` VARCHAR(50) DEFAULT NULL,
+      `status` ENUM('pending', 'approved', 'removed') DEFAULT 'pending',
+      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+      INDEX `idx_new_tasks_status` (`status`),
+      INDEX `idx_new_tasks_report_id` (`report_id`),
+
+      CONSTRAINT `fk_new_tasks_report` FOREIGN KEY (`report_id`) REFERENCES `reports`(`id`) ON DELETE CASCADE,
+      CONSTRAINT `fk_new_tasks_transcript` FOREIGN KEY (`transcript_id`) REFERENCES `transcripts`(`id`) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    COMMENT='AI/Report-extracted new tasks (from meeting reports)';
+
+
+    -- RECURRING_BUGS TABLE
+    CREATE TABLE IF NOT EXISTS `recurring_bugs` (
+      `id` INT AUTO_INCREMENT PRIMARY KEY,
+      `report_id` INT NOT NULL,
+      `transcript_id` INT NOT NULL,
+      `bug_description` VARCHAR(1000) NOT NULL,
+      `severity` VARCHAR(50) DEFAULT NULL,
+      `mentioned_count` INT DEFAULT 1,
+      `status` ENUM('open', 'resolved', 'dismissed') DEFAULT 'open',
+      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+      INDEX `idx_recurring_bugs_status` (`status`),
+      INDEX `idx_recurring_bugs_report_id` (`report_id`),
+
+      CONSTRAINT `fk_recurring_bugs_report` FOREIGN KEY (`report_id`) REFERENCES `reports`(`id`) ON DELETE CASCADE,
+      CONSTRAINT `fk_recurring_bugs_transcript` FOREIGN KEY (`transcript_id`) REFERENCES `transcripts`(`id`) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    COMMENT='Recurring bugs extracted from retrospective reports';
+
+
+    -- JIRA_ISSUE_SYNC TABLE
+    -- Tracks Jira issues synced for a tenant database (tenant-specific table)
+    CREATE TABLE IF NOT EXISTS `jira_issue_sync` (
+      `id` INT AUTO_INCREMENT PRIMARY KEY,
+      `task_id` VARCHAR(128) DEFAULT NULL COMMENT 'Local task or backlog id if linked',
+      `jira_issue_key` VARCHAR(50) NOT NULL,
+      `jira_issue_id` VARCHAR(50) DEFAULT NULL,
+      `project_key` VARCHAR(50) DEFAULT NULL,
+      `summary` TEXT DEFAULT NULL,
+      `status` VARCHAR(50) DEFAULT NULL,
+      `issue_type` VARCHAR(50) DEFAULT NULL,
+      `last_synced_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+      UNIQUE KEY `unique_jira_issue` (`jira_issue_key`),
+      INDEX `idx_jira_task` (`task_id`),
+      INDEX `idx_jira_project` (`project_key`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    COMMENT='Per-tenant Jira issue synchronization metadata';

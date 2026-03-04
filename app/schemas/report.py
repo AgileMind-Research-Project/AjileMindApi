@@ -63,6 +63,12 @@ class BrainstormingIdea(BaseModel):
     votes: int = 0
 
 
+class Decision(BaseModel):
+    """Decision structure for brainstorming meetings"""
+    decision: str
+    assignee: Optional[str] = None
+
+
 class BrainstormingMeetingReport(BaseModel):
     """Brainstorming Meeting Summary Report structure"""
     meeting_topic: str = ""
@@ -72,7 +78,7 @@ class BrainstormingMeetingReport(BaseModel):
     top_ideas: List[str] = Field(default_factory=list)
     categories: List[str] = Field(default_factory=list)
     key_themes: List[str] = Field(default_factory=list)
-    decisions_made: List[str] = Field(default_factory=list)
+    decisions_made: List[Decision] = Field(default_factory=list)
     next_steps: List[ActionItem] = Field(default_factory=list)
     summary: str = ""
 

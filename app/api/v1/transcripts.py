@@ -10,7 +10,8 @@ from app.db.database import Database, get_db
 from app.utils.jwt import get_current_user_from_token
 from app.schemas.transcript import (
     TranscriptCreate, TranscriptUpdate, TranscriptResponse,
-    TranscriptListResponse, TranscriptFilterParams, TranscriptCategory
+    TranscriptListResponse, TranscriptFilterParams, TranscriptCategory,
+    ReportGeneratedStatus
 )
 from app.services.transcript_service import TranscriptService
 from app.utils.document_parser import parse_document
@@ -127,6 +128,7 @@ async def list_transcripts(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    report_generated: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: dict = Depends(get_current_user_from_token),
@@ -139,6 +141,7 @@ async def list_transcripts(
     - **date_from**: Filter by date from (YYYY-MM-DD)
     - **date_to**: Filter by date to (YYYY-MM-DD)
     - **search**: Search in title and content
+    - **report_generated**: Filter by report status (pending, done)
     - **page**: Page number (default: 1)
     - **page_size**: Items per page (default: 20, max: 100)
     """
@@ -167,12 +170,21 @@ async def list_transcripts(
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid date_to format")
         
+        # Parse report_generated filter
+        report_generated_enum = None
+        if report_generated:
+            try:
+                report_generated_enum = ReportGeneratedStatus(report_generated)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid report_generated status. Use 'pending' or 'done'")
+        
         # Create filter params
         filters = TranscriptFilterParams(
             category=category_enum,
             date_from=date_from_parsed,
             date_to=date_to_parsed,
             search=search,
+            report_generated=report_generated_enum,
             page=page,
             page_size=page_size
         )
