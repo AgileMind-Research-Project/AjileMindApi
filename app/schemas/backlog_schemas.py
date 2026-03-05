@@ -12,8 +12,10 @@ from enum import Enum
 
 class IssueType(str, Enum):
     """Backlog issue types"""
+    EPIC = "epic"
     STORY = "story"
     FEATURE = "feature"
+    TASK = "task"
     CHANGE = "change"
     BUG = "bug"
     SUB_TASK = "sub_task"
@@ -37,7 +39,7 @@ class BacklogItemBase(BaseModel):
     """Base backlog item fields"""
     summary: str = Field(..., max_length=255, description="Backlog item title")
     description: Optional[str] = Field(None, description="Detailed description")
-    issue_type: IssueType = Field(..., description="Type: story, feature, change, or bug")
+    issue_type: IssueType = Field(..., description="Type: epic, story, feature, task, change, bug, or sub_task")
     priority: Optional[Priority] = Field(None, description="Priority level")
     assignee: Optional[str] = Field(None, max_length=255, description="Assigned person")
     tags: Optional[List[str]] = Field(None, description="Tags/labels")

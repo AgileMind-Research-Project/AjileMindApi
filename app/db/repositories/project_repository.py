@@ -25,6 +25,7 @@ class ProjectRepository:
         project_type: str,
         start_date: date,
         end_date: date,
+        board_id: Optional[int] = None,
         sprint_size: Optional[int] = None,
         project_lead: Optional[str] = None,
         project_manager: Optional[List[str]] = None,
@@ -46,6 +47,7 @@ class ProjectRepository:
             project_type: Project type (software, business, service_desk)
             start_date: Project start date
             end_date: Project end date
+            board_id: Jira Agile board ID (auto-created with software projects)
             sprint_size: Sprint duration in weeks
             project_lead: Project lead email
             architecture_type: Architecture pattern
@@ -69,18 +71,20 @@ class ProjectRepository:
             query = """
                 INSERT INTO projects (
                     project_id, project_name, `key`, project_type, 
-                    start_date, end_date,
+                    start_date, end_date, next_sprint_start_date,
+                    board_id,
                     sprint_size, project_lead, project_manager, architecture_type, stack_type,
                     frontend_technologies, backend_technologies, cloud_host, budget,
                     created_at, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             """
             
             await self.db.execute_query(
                 query,
                 (
-                    project_id, project_name, key, project_type, start_date, end_date,
+                    project_id, project_name, key, project_type, start_date, end_date, start_date,
+                    board_id,
                     sprint_size, project_lead, project_manager_json, architecture_type, stack_type,
                     frontend_tech_json, backend_tech_json, cloud_host, budget
                 ),
@@ -88,7 +92,7 @@ class ProjectRepository:
                 schema=tenant_name
             )
             
-            logger.info(f"Project created in {tenant_name}: {key} - {project_name} (ID: {project_id})")
+            logger.info(f"Project created in {tenant_name}: {key} - {project_name} (ID: {project_id}, Board ID: {board_id})")
             
             # Return created project
             return await self.get_project_by_id(tenant_name, project_id)

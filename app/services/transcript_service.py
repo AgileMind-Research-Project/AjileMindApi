@@ -23,30 +23,74 @@ class TranscriptService:
         tags: List[str] = None,
         file_name: Optional[str] = None,
         uploaded_by: Optional[str] = None,
-        project_id: Optional[int] = None
+        project_id: Optional[int] = 0,
+        sprint_id: Optional[int] = None
     ) -> Dict[str, Any]:
+        """
+        Create a new transcript record and update meeting attendance
+        """
         try:
+            import json
+            import re
+            
+            # 1. Automatic categorisation if title contains common meeting keywords
+            if category == 'other' or not category:
+                lower_title = title.lower()
+                if 'standup' in lower_title or 'daily' in lower_title:
+                    category = 'daily_standup'
+                elif 'retrospective' in lower_title or 'retro' in lower_title:
+                    category = 'retrospective'
+                elif 'planning' in lower_title:
+                    category = 'sprint_planning'
+                elif 'sprint' in lower_title:
+                    category = 'sprint_meeting'
+
+            # 2. Extract participants from transcript content
+            speakers = re.findall(r'^([^:\n]+):', transcript_content, re.MULTILINE)
+            participants_list = sorted(list(set(s.strip() for s in speakers)))
+            
+            # 3. Store Transcript
             query = """
                 INSERT INTO transcripts (
                     title, category, transcript_content, transcript_date, 
-                    tags, file_name, uploaded_by, tenant_schema, project_id
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    tags, file_name, uploaded_by, tenant_schema, project_id, sprint_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            import json
             tags_json = json.dumps(tags) if tags else None
             
             await self.db.execute_query(
                 query,
-                (title, category, transcript_content, transcript_date, tags_json, file_name, uploaded_by, tenant_name, project_id),
+                (title, category, transcript_content, transcript_date, tags_json, file_name, uploaded_by, tenant_name, project_id, sprint_id),
                 commit=True,
                 schema=tenant_name
             )
             
+            # 4. Update Meeting Attendance
+            # Try to find a matching meeting in MySQL for this project/sprint/date
+            if participants_list:
+                find_meeting_sql = """
+                    SELECT meeting_id FROM meetings 
+                    WHERE project_id = %s AND (sprint_id = %s OR %s IS NULL) AND meeting_date = %s
+                    LIMIT 1
+                """
+                meeting_res = await self.db.execute_query(
+                    find_meeting_sql, 
+                    (project_id, sprint_id, sprint_id, transcript_date),
+                    schema=tenant_name,
+                    fetch_one=True
+                )
+                
+                if meeting_res:
+                    update_attendees_sql = "UPDATE meetings SET attendees = %s WHERE meeting_id = %s"
+                    await self.db.execute_query(
+                        update_attendees_sql,
+                        (json.dumps(participants_list), meeting_res['meeting_id']),
+                        schema=tenant_name,
+                        commit=True
+                    )
+                    logger.info(f"Updated attendance for meeting {meeting_res['meeting_id']} based on transcript '{title}'")
+
             # Fetch created
-            # Assuming id is auto-increment, we need last insert id or fetch by unique fields.
-            # For simplicity, fetching by title/date/uploader (might not be unique but adequate for now)
-            # Better: use db.last_insert_id() if available in wrapper, or select max id
-            
             fetch_query = "SELECT * FROM transcripts WHERE tenant_schema = %s ORDER BY id DESC LIMIT 1"
             return await self.db.execute_query(fetch_query, (tenant_name,), fetch_one=True, schema=tenant_name)
             
@@ -108,10 +152,12 @@ class TranscriptService:
             
             # Fetch
             query = f"""
-                SELECT id, title, category, transcript_date, tags, file_name, created_at, project_id 
-                FROM transcripts 
+                SELECT t.id, t.title, t.category, t.transcript_date, t.tags, t.file_name, 
+                       t.created_at, t.project_id, t.sprint_id, s.sprint_name
+                FROM transcripts t
+                LEFT JOIN sprint s ON t.sprint_id = s.sprint_id
                 WHERE {where_str} 
-                ORDER BY transcript_date DESC, created_at DESC 
+                ORDER BY t.transcript_date DESC, t.created_at DESC 
                 LIMIT %s OFFSET %s
             """
             params.extend([page_size, offset])
