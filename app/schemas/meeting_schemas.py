@@ -36,6 +36,8 @@ class MeetingCreateRequest(BaseModel):
     channel_id: str = Field(..., description="Channel ID for the meeting")
     title: Optional[str] = Field(None, description="Meeting title (defaults to channel name)")
     description: Optional[str] = Field(None, description="Meeting description")
+    project_id: Optional[int] = Field(0, description="Associated project ID")
+    sprint_id: Optional[int] = Field(None, description="Associated sprint ID")
 
 
 class MeetingResponse(BaseModel):
@@ -53,6 +55,8 @@ class MeetingResponse(BaseModel):
     participant_count: int = Field(default=0, description="Number of active participants")
     participants: List[str] = Field(default_factory=list, description="List of participant user IDs")
     tenant_name: str = Field(..., description="Tenant name")
+    project_id: int = Field(0, description="Project ID")
+    sprint_id: Optional[int] = Field(None, description="Sprint ID")
 
 
 class MeetingStartRequest(BaseModel):

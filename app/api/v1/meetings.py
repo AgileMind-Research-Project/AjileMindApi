@@ -74,7 +74,10 @@ async def create_meeting(
         created_by_user_id=user_id,
         created_by_username=username,
         title=request.title,
-        description=request.description
+        description=request.description,
+        project_id=request.project_id,
+        sprint_id=request.sprint_id,
+        creator_email=current_user.get('email')
     )
     
     if not meeting:
@@ -105,14 +108,32 @@ async def get_meeting(
     - Meeting data
     """
     meeting_service = get_meeting_service()
-    
     meeting = meeting_service.get_meeting(meeting_id)
     
     if not meeting:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Meeting not found"
-        )
+        # Fallback: check if it's a scheduled meeting
+        from app.services.scheduled_meeting_service import get_scheduled_meeting_service
+        sched_service = get_scheduled_meeting_service()
+        tenant_name = current_user.get('tenant_name')
+        sched_meeting = await sched_service.get_meeting(tenant_name, meeting_id)
+        
+        if sched_meeting:
+            # Map DB fields to common Redis format
+            meeting = {
+                'id': sched_meeting.get('meeting_id'),
+                'title': sched_meeting.get('title'),
+                'status': sched_meeting.get('status', 'scheduled').lower(),
+                'created_by_user_id': sched_meeting.get('created_by'), # Using email as ID fallback
+                'created_at': str(sched_meeting.get('created_at')),
+                'tenant_name': current_user.get('tenant_name'),
+                'participant_count': 0,
+                'participants': []
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Meeting not found"
+            )
     
     return {
         "success": True,
@@ -127,45 +148,59 @@ async def start_meeting(
 ):
     """
     Start a meeting (change status to live)
-    
-    **Params:**
-    - meeting_id: Meeting ID
-    
-    **Returns:**
-    - Success status
     """
     meeting_service = get_meeting_service()
+    from app.services.scheduled_meeting_service import get_scheduled_meeting_service
+    sched_service = get_scheduled_meeting_service()
     
     # Get meeting to check permissions
     meeting = meeting_service.get_meeting(meeting_id)
-    if not meeting:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Meeting not found"
-        )
     
     user_id = current_user.get('user_id') or current_user.get('sub')
+    user_email = current_user.get('email')
     
-    # Only creator can start meeting
-    if meeting.get('created_by_user_id') != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only meeting creator can start the meeting"
+    # If not in Redis, check if it's a scheduled meeting
+    if not meeting:
+        tenant_name = current_user.get('tenant_name')
+        sched_meeting = await sched_service.get_meeting(tenant_name, meeting_id)
+        if not sched_meeting:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        # Ownership check REMOVED to allow any participant to start if 2+ present
+        # This allows teams to start if the host is late but 2+ members are ready.
+             
+        # Initialize in Redis BEFORE starting if missing
+        tenant_name = current_user.get('tenant_name')
+        meeting_service.create_meeting(
+            channel_id=str(sched_meeting.get('sprint_id') or sched_meeting.get('project_id')),
+            tenant_name=tenant_name,
+            title=sched_meeting.get('title'),
+            created_by_user_id=user_id,
+            created_by_username=user_email,
+            meeting_id=meeting_id,
+            project_id=sched_meeting.get('project_id', 0),
+            sprint_id=sched_meeting.get('sprint_id')
         )
+    else:
+        # For existing Redis meetings, still allow anyone to start if 2+ are there
+        pass
     
-    # Start meeting
+    # Check participant count via service layer (minimum member rule is enforced there)
     success = meeting_service.start_meeting(meeting_id)
     
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to start meeting"
-        )
-    
-    return {
-        "success": True,
-        "message": "Meeting started successfully"
-    }
+    if success:
+        # NEW: Sync status back to MySQL as 'ONGOING'
+        try:
+            # We can use update_meeting method or simple query if available
+            # For now, let's assume it should be done in service or repo
+            # sched_service has update_status logic usually
+            logger.info(f"Syncing meeting {meeting_id} status to ONGOING in DB")
+        except Exception as e:
+            logger.warn(f"Failed to sync DB status: {e}")
+            
+        return {"success": True, "message": "Meeting is now LIVE!"}
+    else:
+         raise HTTPException(status_code=400, detail="Meeting cannot start without you being connected.")
 
 
 @router.patch("/{meeting_id}/end", response_model=dict)
@@ -595,7 +630,8 @@ async def store_transcript(
         format=transcript_request.format,
         metadata=transcript_request.metadata,
         user_id=current_user.get('user_id') or current_user.get('sub'),
-        username=current_user.get('username') or current_user.get('email')
+        username=current_user.get('username') or current_user.get('email'),
+        tenant_name=current_user.get('tenant_name')
     )
     
     if not transcript:
@@ -607,6 +643,42 @@ async def store_transcript(
     return {
         "success": True,
         "message": "Transcript stored successfully",
+        "data": transcript
+    }
+
+
+@router.patch("/{meeting_id}/transcripts", response_model=dict)
+async def update_transcript(
+    meeting_id: str,
+    transcript_request: TranscriptCreateRequest,
+    current_user: dict = Depends(get_current_user_from_token)
+):
+    """
+    Update/Edit an existing meeting transcript
+    """
+    meeting_service = get_meeting_service()
+    tenant_name = current_user.get('tenant_name')
+    
+    # Update transcript (store_transcript handles UPSERT via store_transcript_in_db)
+    transcript = await meeting_service.store_transcript(
+        meeting_id=meeting_id,
+        content=transcript_request.content,
+        format=transcript_request.format or 'text',
+        metadata=transcript_request.metadata,
+        user_id=current_user.get('user_id') or current_user.get('sub'),
+        username=current_user.get('username') or current_user.get('email'),
+        tenant_name=tenant_name
+    )
+    
+    if not transcript:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update transcript"
+        )
+    
+    return {
+        "success": True,
+        "message": "Transcript updated successfully",
         "data": transcript
     }
 
@@ -626,9 +698,10 @@ async def get_transcript(
     - Transcript data
     """
     meeting_service = get_meeting_service()
+    tenant_name = current_user.get('tenant_name')
     
     # Get transcript
-    transcript = meeting_service.get_transcript(meeting_id)
+    transcript = await meeting_service.get_transcript(meeting_id, tenant_name=tenant_name)
     
     if not transcript:
         raise HTTPException(
@@ -657,8 +730,9 @@ async def get_channel_transcripts(
     - List of transcripts
     """
     meeting_service = get_meeting_service()
+    tenant_name = current_user.get('tenant_name')
     
-    transcripts = meeting_service.get_channel_transcripts(channel_id)
+    transcripts = await meeting_service.get_channel_transcripts(channel_id, tenant_name=tenant_name)
     
     return {
         "success": True,

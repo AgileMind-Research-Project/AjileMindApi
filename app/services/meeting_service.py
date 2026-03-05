@@ -68,24 +68,18 @@ class MeetingService:
         created_by_user_id: str,
         created_by_username: str,
         title: Optional[str] = None,
-        description: Optional[str] = None
+        description: Optional[str] = None,
+        meeting_id: Optional[str] = None,
+        project_id: Optional[int] = 0,
+        sprint_id: Optional[int] = None,
+        creator_email: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Create a new instant meeting
-        
-        Args:
-            channel_id: Channel ID
-            tenant_name: Tenant name
-            created_by_user_id: Creator user ID
-            created_by_username: Creator username
-            title: Meeting title (optional)
-            description: Meeting description (optional)
-        
-        Returns:
-            Meeting data or None on failure
+        Create a new instant meeting or activate a scheduled one
         """
         try:
-            meeting_id = f"meet_{uuid4().hex[:12]}"
+            if not meeting_id:
+                meeting_id = f"meet_{uuid4().hex[:12]}"
             now = datetime.utcnow().isoformat()
             
             meeting_data = {
@@ -100,7 +94,9 @@ class MeetingService:
                 'started_at': None,
                 'ended_at': None,
                 'participant_count': 0,
-                'tenant_name': tenant_name
+                'tenant_name': tenant_name,
+                'project_id': project_id,
+                'sprint_id': sprint_id or '' # Redis hashes don't like None
             }
             
             # Store meeting
@@ -117,7 +113,7 @@ class MeetingService:
             self.redis.add_to_set(tenant_meetings_key, meeting_id)
             
             # Auto-add creator as first participant
-            self.add_participant(meeting_id, created_by_user_id, created_by_username)
+            self.add_participant(meeting_id, created_by_user_id, created_by_username, creator_email)
             
             logger.info(f"Created meeting {meeting_id} in channel {channel_id}")
             return self.get_meeting(meeting_id)
@@ -162,6 +158,15 @@ class MeetingService:
         """
         try:
             meeting_key = self._meeting_key(meeting_id)
+            
+            # Check participant count - at least 2 members required to start
+            participants_key = self._meeting_participants_key(meeting_id)
+            participant_count = self.redis.get_set_size(participants_key)
+            
+            if participant_count < 1:
+                logger.warning(f"Meeting {meeting_id} cannot start: at least 1 participant required (currently {participant_count})")
+                return False
+
             now = datetime.utcnow().isoformat()
             
             self.redis.update_hash(meeting_key, 'status', 'live')
@@ -271,7 +276,8 @@ class MeetingService:
         self,
         meeting_id: str,
         user_id: str,
-        username: str
+        username: str,
+        email: Optional[str] = None
     ) -> bool:
         """
         Add participant to meeting
@@ -291,6 +297,7 @@ class MeetingService:
             participant_data = {
                 'user_id': user_id,
                 'username': username,
+                'email': email or '',
                 'joined_at': datetime.utcnow().isoformat()
             }
             
@@ -525,21 +532,11 @@ class MeetingService:
         format: str = "text",
         metadata: Optional[Dict[str, Any]] = None,
         user_id: Optional[str] = None,
-        username: Optional[str] = None
+        username: Optional[str] = None,
+        tenant_name: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Store meeting transcript in Redis and post to channel
-        
-        Args:
-            meeting_id: Meeting ID
-            content: Transcript content
-            format: Transcript format
-            metadata: Additional metadata
-            user_id: ID of user storing transcript (usually meeting ender)
-            username: Username of user
-        
-        Returns:
-            Transcript data or None
         """
         try:
             # Get meeting to find channel_id
@@ -561,11 +558,9 @@ class MeetingService:
                 'created_by': user_id
             }
             
-            # Store transcript
+            # Store transcript in Redis
             self.redis.set_hash(transcript_key, transcript_data)
             
-            logger.info(f"Stored transcript for meeting {meeting_id} ({transcript_data['size_bytes']} bytes)")
-
             # Post to channel chat
             if user_id and username:
                 try:
@@ -574,39 +569,209 @@ class MeetingService:
                     
                     if channel_id:
                         chat_message = f"📝 **Meeting Summary**\n\n{content}"
-                        
                         chat_service.send_message(
                             channel_id=channel_id,
                             user_id=user_id,
                             username=username,
                             content=chat_message,
-                            message_type="system", # Use system type or text
+                            message_type="system", 
                             metadata={
                                 "type": "meeting_summary",
                                 "meeting_id": meeting_id,
                                 "meeting_title": meeting.get('title')
                             }
                         )
-                        logger.info(f"Posted meeting transcript to channel {channel_id}")
                 except Exception as chat_error:
                     logger.error(f"Failed to post transcript to chat: {chat_error}")
 
+            # Get participants for attendance update
+            participants_list = meeting.get('participants', [])
+            if not participants_list:
+                import re
+                speakers = re.findall(r'^([^:\n]+):', content, re.MULTILINE)
+                participants_list = sorted(list(set(s.strip() for s in speakers)))
+
+            # Fallback IDs from meeting if not in metadata
+            p_id = metadata.get('project_id') if metadata else None
+            if p_id is None: 
+                p_id = meeting.get('project_id')
+            
+            # If still None, try to get from channel
+            if p_id is None or p_id == 0 or p_id == '':
+                channel_id = meeting.get('channel_id')
+                if channel_id:
+                    try:
+                        # 1. Try to get channel metadata
+                        chat_service = get_redis_chat_service()
+                        channel = chat_service.get_channel(channel_id)
+                        if channel and channel.get('project_id'):
+                            p_id = channel.get('project_id')
+                        # 2. If channel_id itself is numeric, it might be the project_id (fallback for some legacy setups)
+                        elif str(channel_id).isdigit():
+                            p_id = channel_id
+                    except Exception as channel_err:
+                        logger.debug(f"Could not get project_id from channel {channel_id}: {channel_err}")
+
+            # Coerce p_id for FK safety
+            try:
+                if p_id and int(p_id) > 0: p_id = int(p_id)
+                else: p_id = None
+            except: p_id = None
+
+            # Fetch full participant info (including emails) from Redis if not provided
+            participants_info = []
+            redis_participants = self.get_participants(meeting_id)
+            if redis_participants:
+                participants_info = [{
+                    'username': p.get('username'),
+                    'email': p.get('email', '')
+                } for p in redis_participants]
+                
+            # Fallback if no participants in Redis (extract from text)
+            if not participants_info:
+                import re
+                speakers = list(set(re.findall(r'^([^:\n]+):', content, re.MULTILINE)))
+                participants_info = [{'username': s.strip(), 'email': ''} for s in speakers if s.strip()]
+
+            s_id = metadata.get('sprint_id') if metadata else None
+            if s_id is None:
+                s_id = meeting.get('sprint_id')
+                if not s_id or s_id == '': s_id = None
+                else: 
+                    try: s_id = int(s_id)
+                    except: s_id = None
+
             # Store in MySQL Tenant DB
-            await self.store_transcript_in_db(
+            db_transcript_id = await self.store_transcript_in_db(
                 meeting_id=meeting_id,
                 content=content,
                 meeting_title=meeting.get('title', 'Untitled Meeting'),
-                tenant_name=meeting.get('tenant_name'),
+                tenant_name=tenant_name or meeting.get('tenant_name'),
                 user_id=user_id,
                 created_at=now,
-                project_id=metadata.get('project_id', 1) if metadata else 1
+                project_id=p_id,
+                sprint_id=s_id,
+                participants=participants_info
             )
+
+            if db_transcript_id:
+                transcript_data['id'] = db_transcript_id
+                # Update Redis with the ID
+                self.redis.set_hash(transcript_key, transcript_data)
+            else:
+                logger.warning(f"Transcript for {meeting_id} saved to Redis but failed for MySQL")
 
             return transcript_data
             
         except Exception as e:
             logger.error(f"Failed to store transcript: {e}")
             return None
+
+    async def get_db_channel_transcripts(self, tenant_name: str, channel_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all transcripts for a channel from MySQL DB with meeting type distinction
+        """
+        try:
+            # Query MySQL transcripts table join with sprint and meetings
+            # Using subquery to deduplicate by meeting_id (keeping latest per meeting)
+            query = """
+                SELECT t.id, t.meeting_id, t.title, t.category, t.transcript_date, t.tags, 
+                       t.file_name, t.created_at, t.project_id, t.sprint_id, 
+                       s.sprint_name, m.attendees,
+                       CASE WHEN m.meeting_id IS NOT NULL THEN 'scheduled' ELSE 'meeting_now' END as meeting_type
+                FROM transcripts t
+                LEFT JOIN sprint s ON t.sprint_id = s.sprint_id
+                LEFT JOIN meetings m ON t.meeting_id = m.meeting_id
+                WHERE (t.project_id = %s OR t.sprint_id = %s)
+                AND (t.meeting_id IS NULL OR t.id IN (
+                    SELECT MAX(id) FROM transcripts GROUP BY meeting_id
+                ))
+                ORDER BY t.created_at DESC
+            """
+            results = await db.execute_query(query, (channel_id, channel_id), schema=tenant_name, fetch_all=True)
+            
+            import json
+            for r in results:
+                # Calculate participant count from attendees
+                participants = []
+                if r.get('attendees'):
+                    try: participants = json.loads(r['attendees'])
+                    except: participants = []
+                r['participant_count'] = len(participants)
+                
+                if r.get('tags') and isinstance(r['tags'], str):
+                    try: r['tags'] = json.loads(r['tags'])
+                    except: r['tags'] = []
+                
+                # Coerce dates for JSON
+                for key in ('transcript_date', 'created_at'):
+                    if r.get(key): 
+                        r[key] = str(r[key])
+                    elif key == 'transcript_date':
+                        # Fallback for missing date
+                        r[key] = str(date.today())
+
+            return results
+        except Exception as e:
+            logger.error(f"Failed to fetch transcripts from DB for channel {channel_id}: {e}")
+            return []
+
+    async def get_channel_transcripts(self, channel_id: str, tenant_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get all transcripts for a channel (Historical DB + Previous Redis records)
+        """
+        db_transcripts = []
+        try:
+            if tenant_name:
+                db_transcripts = await self.get_db_channel_transcripts(tenant_name, channel_id)
+        except Exception as e:
+            logger.error(f"Failed to fetch DB transcripts: {e}")
+        
+        # Also check Redis for any recent ones or historical Redis-only transcripts
+        redis_transcripts = []
+        try:
+            meetings = self.get_channel_meetings(channel_id, include_ended=True)
+            for m in meetings:
+                try:
+                    m_id = m.get('id')
+                    t_redis = self.get_transcript(m_id)
+                    if t_redis:
+                        # Extract date or use current as fallback to prevent 'Invalid Date'
+                        stored_at = t_redis.get('stored_at') or ''
+                        transcript_date = stored_at.split('T')[0] if 'T' in stored_at else ''
+                        
+                        formatted = {
+                            'id': f"redis_{m_id}", 
+                            'meeting_id': m_id,
+                            'title': t_redis.get('title') or m.get('title', 'Untitled Meeting'),
+                            'category': 'other', 
+                            'transcript_date': transcript_date or datetime.utcnow().strftime('%Y-%m-%d'),
+                            'created_at': stored_at,
+                            'meeting_type': 'meeting_now',
+                            'source': 'redis',
+                            'participant_count': m.get('participant_count', 0)
+                        }
+                        redis_transcripts.append(formatted)
+                except:
+                    continue
+        except Exception as e:
+            logger.debug(f"Redis transcript fetch skipped (connection issue?): {e}")
+
+        # Combine transcripts
+        # Use a map to prevent duplicates, preferring DB records
+        combined = {t.get('meeting_id'): t for t in db_transcripts if t.get('meeting_id')}
+        
+        for t in redis_transcripts:
+            m_id = t.get('meeting_id')
+            if m_id not in combined:
+                combined[m_id] = t
+        
+        results = list(combined.values())
+        results.extend([t for t in db_transcripts if not t.get('meeting_id')])
+        
+        # Sort by creation time (newest first)
+        results.sort(key=lambda x: str(x.get('created_at', '') or ''), reverse=True)
+        return results
 
     async def store_transcript_in_db(
         self,
@@ -616,153 +781,274 @@ class MeetingService:
         tenant_name: str,
         user_id: Optional[str],
         created_at: str,
-        project_id: int = 1  # Default to 1 as per implementation strategy
-    ) -> bool:
+        project_id: int = 0,
+        sprint_id: Optional[int] = None,
+        participants: Optional[List[str]] = None
+    ) -> Optional[int]:
         """
-        Store transcript in tenant's MySQL database
+        Store transcript in tenant's MySQL database and update meeting attendance
         """
         if not tenant_name:
             logger.warning("No tenant_name provided, skipping MySQL transcript storage")
-            return False
+            return None
 
         try:
-            # 1. Create table if not exists (Idempotent)
+            # 1. Create table if not exists (Updated to include meeting_id)
             create_table_sql = f"""
             CREATE TABLE IF NOT EXISTS `transcripts` (
-              `id` int NOT NULL AUTO_INCREMENT,
-              `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Transcript title',
-              `category` enum('daily_standup','sprint_meeting','retrospective') COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Meeting type',
-              `transcript_content` longtext COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Full transcript text',
-              `transcript_date` date NOT NULL COMMENT 'Date of the meeting',
-              `tags` json DEFAULT NULL COMMENT 'Tags for categorization',
-              `file_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Original uploaded filename',
-              `uploaded_by` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'User ID who uploaded',
-              `tenant_schema` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Tenant schema identifier',
-              `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-              `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-              `project_id` int NOT NULL DEFAULT 1,
-              PRIMARY KEY (`id`),
-              KEY `idx_category` (`category`),
-              KEY `idx_date` (`transcript_date`),
-              KEY `idx_tenant` (`tenant_schema`),
-              FULLTEXT KEY `idx_content` (`transcript_content`),
-              FULLTEXT KEY `idx_title` (`title`)
+                `id` int NOT NULL AUTO_INCREMENT,
+                `meeting_id` varchar(50) DEFAULT NULL,
+                `title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Transcript title',
+                `category` enum('daily_standup','sprint_meeting','retrospective','sprint_planning','other') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Meeting type',
+                `transcript_content` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Full transcript text',
+                `transcript_date` date NOT NULL COMMENT 'Date of the meeting',
+                `tags` json DEFAULT NULL COMMENT 'Tags for categorization',
+                `file_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Original uploaded filename',
+                `uploaded_by` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'User ID who uploaded',
+                `tenant_schema` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Tenant schema identifier',
+                `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                `project_id` BIGINT DEFAULT 0 COMMENT 'Reference to projects.project_id',
+                `sprint_id` BIGINT DEFAULT NULL COMMENT 'Reference to sprint.sprint_id',
+                PRIMARY KEY (`id`),
+                KEY `idx_category` (`category`),
+                KEY `idx_date` (`transcript_date`),
+                KEY `idx_tenant` (`tenant_schema`),
+                KEY `idx_project_id` (`project_id`),
+                KEY `idx_sprint_id` (`sprint_id`),
+                FULLTEXT KEY `idx_content` (`transcript_content`),
+                FULLTEXT KEY `idx_title` (`title`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Meeting transcripts for AI report generation';
             """
             
             # Execute create table in tenant schema
             await db.execute_query(create_table_sql, schema=tenant_name)
-
-            # 2. Insert Transcript Record
-            insert_sql = f"""
-            INSERT INTO `transcripts` (
-                title, 
-                category, 
-                transcript_content, 
-                transcript_date, 
-                uploaded_by, 
-                tenant_schema, 
-                project_id,
-                created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """
             
-            # Determine category based on title (simple logic for now)
+            # 1.5 Ensure columns exist (for older tables)
+            # We fetch existing columns first to avoid Duplicate Column errors in logs
+            try:
+                check_cols_sql = "SHOW COLUMNS FROM `transcripts`"
+                existing_cols_raw = await db.execute_query(check_cols_sql, schema=tenant_name, fetch_all=True)
+                existing_cols = [c['Field'].lower() for c in existing_cols_raw] if existing_cols_raw else []
+                
+                migration_sqls = []
+                if 'meeting_id' not in existing_cols:
+                    migration_sqls.append("ALTER TABLE `transcripts` ADD COLUMN `meeting_id` varchar(50) DEFAULT NULL AFTER `id`")
+                
+                # Ensure meeting_id has a UNIQUE index to prevent double-insertions from race conditions
+                try:
+                    check_index_sql = "SHOW INDEX FROM `transcripts` WHERE Key_name = 'uk_meeting_id'"
+                    index_exists = await db.execute_query(check_index_sql, schema=tenant_name, fetch_one=True)
+                    if not index_exists:
+                        migration_sqls.append("ALTER TABLE `transcripts` ADD UNIQUE KEY `uk_meeting_id` (`meeting_id`)")
+                except: pass
+
+                if 'project_id' not in existing_cols:
+                    migration_sqls.append("ALTER TABLE `transcripts` ADD COLUMN `project_id` BIGINT DEFAULT NULL AFTER `tenant_schema`")
+                if 'sprint_id' not in existing_cols:
+                    migration_sqls.append("ALTER TABLE `transcripts` ADD COLUMN `sprint_id` BIGINT DEFAULT NULL AFTER `project_id`")
+                
+                for sql in migration_sqls:
+                    try: await db.execute_query(sql, schema=tenant_name, commit=True)
+                    except Exception as inner_e:
+                        logger.debug(f"Migration step skipped: {inner_e}")
+            except Exception as e:
+                logger.warning(f"Could not verify/migrate transcript table structure: {e}")
+
+            # 2. Determine category based on title
             category = 'sprint_meeting'
-            if 'standup' in meeting_title.lower():
+            lower_title = meeting_title.lower()
+            if 'standup' in lower_title or 'daily' in lower_title:
                 category = 'daily_standup'
-            elif 'retrospective' in meeting_title.lower():
+            elif 'retrospective' in lower_title or 'retro' in lower_title:
                 category = 'retrospective'
+            elif 'planning' in lower_title:
+                category = 'sprint_planning'
+            elif 'sprint' in lower_title:
+                category = 'sprint_meeting'
+            else:
+                category = 'other'
             
             transcript_date = created_at.split('T')[0]
             
-            # Execute insert in tenant schema
+            # 3. Check for existing transcript with this meeting_id to prevent duplicates
+            if meeting_id:
+                check_existing_sql = "SELECT id FROM `transcripts` WHERE meeting_id = %s LIMIT 1"
+                existing = await db.execute_query(check_existing_sql, (meeting_id,), schema=tenant_name, fetch_one=True)
+                
+                if existing:
+                    # Update existing record
+                    update_sql = """
+                    UPDATE `transcripts` 
+                    SET transcript_content = %s, title = %s, category = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    """
+                    await db.execute_query(
+                        update_sql, 
+                        (content, meeting_title, category, existing['id']),
+                        schema=tenant_name,
+                        commit=True
+                    )
+                    logger.info(f"Updated existing transcript for meeting {meeting_id}")
+                    # Update attendees too
+                    if meeting_id and participants:
+                        try:
+                            import json
+                            attendees_json = json.dumps(participants)
+                            await db.execute_query("UPDATE `meetings` SET attendees = %s WHERE meeting_id = %s", (attendees_json, meeting_id), schema=tenant_name, commit=True)
+                        except: pass
+                    return existing['id']
+
+            # 4. Insert new Transcript Record if not exists
+            insert_sql = """
+            INSERT INTO `transcripts` (
+                meeting_id, title, category, transcript_content, transcript_date, 
+                uploaded_by, tenant_schema, project_id, sprint_id, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            
             await db.execute_query(
                 insert_sql, 
                 (
-                    meeting_title,
-                    category,
-                    content,
-                    transcript_date,
-                    user_id,
-                    tenant_name,
-                    project_id,
-                    created_at
+                    meeting_id, meeting_title, category, content, transcript_date,
+                    user_id, tenant_name, project_id, sprint_id, created_at
                 ),
                 schema=tenant_name,
                 commit=True
             )
             
-            logger.info(f"✅ Stored transcript in MySQL for tenant {tenant_name}")
-            return True
+            # Fetch last insert ID
+            last_id_res = await db.execute_query("SELECT LAST_INSERT_ID() as id", schema=tenant_name, fetch_one=True)
+            transcript_id = last_id_res['id'] if last_id_res else None
+            
+            # 4. Update Meeting Attendance (attendees field)
+            if meeting_id and participants:
+                import json
+                # Ensure each participant is consistently formatted (string or dict)
+                # But we prefer dicts with emails if available
+                attendees_json = json.dumps(participants)
+                update_meeting_sql = "UPDATE `meetings` SET attendees = %s WHERE meeting_id = %s"
+                try:
+                    await db.execute_query(
+                        update_meeting_sql,
+                        (attendees_json, meeting_id),
+                        schema=tenant_name,
+                        commit=True
+                    )
+                except Exception as am_err:
+                    logger.warning(f"Could not update meeting attendance for {meeting_id}: {am_err}")
+
+            logger.info(f"Stored transcript in MySQL for tenant {tenant_name} with ID {transcript_id}")
+            return transcript_id
 
         except Exception as e:
             logger.error(f"Failed to store transcript in MySQL: {e}")
-            return False
+            return None
     
-    def get_transcript(self, meeting_id: str) -> Optional[Dict[str, Any]]:
+    async def get_transcript(self, meeting_id: str, tenant_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
-        Get meeting transcript
-        
-        Args:
-            meeting_id: Meeting ID
-        
-        Returns:
-            Transcript data or None
+        Get meeting transcript (Redis or MySQL)
         """
         try:
-            transcript_key = self._meeting_transcript_key(meeting_id)
+            # 1. Try Redis first
+            real_m_id = meeting_id
+            if real_m_id.startswith("redis_"):
+                real_m_id = real_m_id.replace("redis_", "")
+
+            transcript_key = self._meeting_transcript_key(real_m_id)
             transcript = self.redis.get_hash(transcript_key)
             
-            if not transcript:
-                return None
-            
-            return transcript
-            
+            if transcript:
+                logger.info(f"Found transcript for {real_m_id} in Redis")
+                
+                # Enrich with ID from MySQL if missing
+                if not transcript.get('id') and tenant_name:
+                    try:
+                        id_query = "SELECT id FROM `transcripts` WHERE meeting_id = %s LIMIT 1"
+                        id_res = await db.execute_query(id_query, (real_m_id,), schema=tenant_name, fetch_one=True)
+                        if id_res:
+                            transcript['id'] = id_res['id']
+                            # Update Redis cache with the ID
+                            self.redis.set_hash(transcript_key, transcript)
+                            logger.info(f"Enriched Redis transcript with MySQL ID {transcript['id']}")
+                    except Exception as e:
+                        logger.debug(f"Could not enrich Redis transcript with ID: {e}")
+
+                # Format dates for frontend
+                if transcript.get('stored_at'):
+                    transcript['stored_at'] = str(transcript['stored_at'])
+                return transcript
+
+            # 2. Try MySQL if tenant is known
+            if tenant_name:
+                logger.info(f"Searching transcript for {real_m_id} in MySQL (Tenant: {tenant_name})")
+                
+                # Try by meeting_id first
+                query = """
+                    SELECT t.id, t.meeting_id, t.transcript_content as content, t.title, t.category, 
+                           t.created_at as stored_at, t.uploaded_by as created_by,
+                           m.attendees, t.project_id, t.sprint_id
+                    FROM transcripts t
+                    LEFT JOIN meetings m ON t.meeting_id = m.meeting_id
+                    WHERE t.meeting_id = %s
+                    LIMIT 1
+                """
+                db_res = await db.execute_query(query, (real_m_id,), schema=tenant_name, fetch_one=True)
+                
+                if not db_res:
+                    # FALLBACK: Try lookup by project_id and sprint_id if meeting exists but no link yet
+                    # This helps with historical data or legacy records
+                    logger.debug(f"No direct meeting_id match for {real_m_id}, trying fallback...")
+                    
+                    # Get meeting details to find project/sprint if possible
+                    meeting_query = "SELECT project_id, sprint_id, title FROM meetings WHERE meeting_id = %s"
+                    m_details = await db.execute_query(meeting_query, (real_m_id,), schema=tenant_name, fetch_one=True)
+                    
+                    if m_details:
+                        fallback_query = """
+                            SELECT DISTINCT t.meeting_id, t.id, t.transcript_content as content, t.title, t.category, 
+                                   t.created_at as stored_at, t.uploaded_by as created_by,
+                                   t.project_id, t.sprint_id
+                            FROM transcripts t
+                            WHERE t.project_id = %s AND t.sprint_id = %s AND t.title = %s
+                        """
+                        db_res = await db.execute_query(
+                            fallback_query, 
+                            (m_details['project_id'], m_details['sprint_id'], m_details['title']), 
+                            schema=tenant_name, 
+                            fetch_one=True
+                        )
+                
+                if db_res:
+                    logger.info(f"Found transcript for {real_m_id} in MySQL")
+                    # Format dates
+                    if db_res.get('stored_at'):
+                        db_res['stored_at'] = str(db_res['stored_at'])
+                    
+                    db_res['format'] = 'text'
+                    
+                    # Map attendees to participants for frontend
+                    import json
+                    participants = []
+                    if db_res.get('attendees'):
+                        try:
+                            participants = json.loads(db_res['attendees'])
+                        except:
+                            participants = []
+                    
+                    db_res['participants'] = participants
+                    db_res['metadata'] = {
+                        'category': db_res.get('category'),
+                        'participant_count': len(participants)
+                    }
+                    return db_res
+
+            return None
         except Exception as e:
-            logger.error(f"Failed to get transcript: {e}")
+            logger.error(f"Failed to get transcript for {meeting_id}: {e}")
             return None
 
-    def get_channel_transcripts(self, channel_id: str) -> List[Dict[str, Any]]:
-        """
-        Get all transcripts for a channel
-        
-        Args:
-            channel_id: Channel ID
-        
-        Returns:
-            List of transcript data (metadata only)
-        """
-        try:
-            meetings = self.get_channel_meetings(channel_id, include_ended=True)
-            
-            transcripts = []
-            seen_ids = set()
-            
-            for meeting in meetings:
-                meeting_id = meeting.get('id')
-                
-                # Skip if already processed
-                if meeting_id in seen_ids:
-                    continue
-                seen_ids.add(meeting_id)
 
-                # Check if transcript exists
-                transcript = self.get_transcript(meeting_id)
-                if transcript:
-                    # Enrich with meeting title/date if not present in transcript metadata
-                    if not transcript.get('title'):
-                        transcript['title'] = meeting.get('title')
-                    
-                    transcripts.append(transcript)
-            
-            # Sort by stored_at (newest first)
-            transcripts.sort(key=lambda x: x.get('stored_at', ''), reverse=True)
-            return transcripts
-            
-        except Exception as e:
-            logger.error(f"Failed to get channel transcripts: {e}")
-            return []
 
 
 # ==================== Singleton Instance ====================
@@ -776,6 +1062,6 @@ def get_meeting_service() -> MeetingService:
     
     if _meeting_service is None:
         _meeting_service = MeetingService()
-        logger.info("✅ Meeting Service initialized")
+        logger.info("Meeting Service initialized")
     
     return _meeting_service

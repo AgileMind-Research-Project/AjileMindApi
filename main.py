@@ -18,7 +18,7 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, notifications, backlog_priority, meetings
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, notifications, backlog_priority, meetings, scheduled_meetings
 from app.db.database import db
 from app.middleware.audit_middleware import AuditLoggingMiddleware
 from app.core.redis_chat_client import init_redis_chat
@@ -46,12 +46,25 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️  Redis Chat initialization warning: {e}\n")
         # Don't raise - chat is optional
+
+    # Start Meeting Link Scheduler
+    from app.services.meeting_scheduler_service import get_meeting_scheduler_service
+    scheduler = get_meeting_scheduler_service()
+    await scheduler.start()
     
     yield
     
     # Cleanup
     print("\n" + "="*70)
     print("👋 Shutting down AgileMind Backend Server...")
+
+    # Stop Scheduler
+    try:
+        scheduler = get_meeting_scheduler_service()
+        await scheduler.stop()
+    except:
+        pass
+
     print("🔌 Closing database connections...")
     await db.disconnect()
     print("="*70 + "\n")
@@ -265,6 +278,7 @@ app.include_router(backlog_priority.router, prefix=f"{settings.API_PREFIX}/backl
 app.include_router(notifications.router, prefix=f"{settings.API_PREFIX}/notifications", tags=["Notifications"])
 app.include_router(redis_chat.router, prefix=f"{settings.API_PREFIX}/chat", tags=["Redis Chat"])
 app.include_router(meetings.router, prefix=f"{settings.API_PREFIX}/meetings", tags=["Meetings"])
+app.include_router(scheduled_meetings.router, prefix=f"{settings.API_PREFIX}/scheduled-meetings", tags=["Scheduled Meetings"])
 # app.include_router(tenants.router, prefix=f"{settings.API_PREFIX}/tenants", tags=["Tenants"])
 
 # Import Socket.IO server and wrap with app

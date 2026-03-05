@@ -27,39 +27,31 @@ cors_origins = settings.CORS_ORIGINS
 if isinstance(cors_origins, str):
     cors_origins = [origin.strip() for origin in cors_origins.split(',')]
 
-# Redis manager for multi-server Socket.IO
-redis_host = os.getenv('REDIS_HOST', 'localhost')
-redis_port = os.getenv('REDIS_PORT', '6379')
-redis_password = os.getenv('REDIS_PASSWORD', '')
-redis_db = os.getenv('REDIS_DB', '0')
-if redis_password:
-    redis_url = f'redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}'
-else:
-    redis_url = f'redis://{redis_host}:{redis_port}/{redis_db}'
-logger.info(f'?? Socket.IO Redis: {redis_host}:{redis_port}')
-mgr = socketio.AsyncRedisManager(redis_url)
-
-# Redis manager for multi-server Socket.IO
-redis_host = os.getenv('REDIS_HOST', 'localhost')
-redis_port = os.getenv('REDIS_PORT', '6379')
-redis_password = os.getenv('REDIS_PASSWORD', '')
-redis_db = os.getenv('REDIS_DB', '0')
-if redis_password:
-    redis_url = f'redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}'
-else:
-    redis_url = f'redis://{redis_host}:{redis_port}/{redis_db}'
-logger.info(f'?? Socket.IO Redis: {redis_host}:{redis_port}')
-mgr = socketio.AsyncRedisManager(redis_url)
+# Redis manager for multi-server Socket.IO (optional)
+mgr = None
+try:
+    redis_host = os.getenv('REDIS_HOST', 'localhost')
+    redis_port = os.getenv('REDIS_PORT', '6379')
+    redis_password = os.getenv('REDIS_PASSWORD', '')
+    redis_db = os.getenv('REDIS_DB', '0')
+    
+    if redis_password:
+        redis_url = f'redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}'
+    else:
+        redis_url = f'redis://{redis_host}:{redis_port}/{redis_db}'
+    
+    mgr = socketio.AsyncRedisManager(redis_url)
+    logger.info(f'Socket.IO using Redis manager: {redis_host}:{redis_port}')
+except Exception as e:
+    logger.warning(f'Redis not available for Socket.IO, using in-memory mode: {e}')
+    mgr = None
 
 # Create Socket.IO server
 # IMPORTANT: Disable Socket.IO's CORS - let FastAPI's CORSMiddleware handle ALL CORS
-# This prevents duplicate Access-Control-Allow-Origin headers which browsers reject
 sio = socketio.AsyncServer(
-    # CORS is handled by FastAPI's CORSMiddleware wrapping the app
-    # Setting this to empty list prevents Socket.IO from adding a DUPLICATE header
-    # which causes the "multiple values" CORS error in browsers
     cors_allowed_origins=[], 
     async_mode='asgi',
+    client_manager=mgr,  # None = in-memory mode for single server
     logger=True,
     engineio_logger=True,
     ping_timeout=60,
@@ -241,34 +233,36 @@ async def save_meeting_transcript(meeting_id: str):
             'format_version': 'teams-style-v1'
         }
         
-        # Store in Redis
+        # Store in Redis + MySQL
+        tenant_name = meeting.get('tenant_name')
         result = await meeting_service.store_transcript(
             meeting_id=meeting_id,
             content=transcript_content,
             format='teams-conversation',
-            metadata=metadata
+            metadata=metadata,
+            tenant_name=tenant_name
         )
         
         if result:
-            logger.info(f"✅ Saved Teams-style transcript for meeting {meeting_id}")
-            logger.info(f"   📊 {len(messages)} messages from {len(participants_map)} participants")
-            logger.info(f"   📝 Grouped into {len(grouped_messages)} conversation segments")
+            logger.info(f"Saved Teams-style transcript for meeting {meeting_id}")
+            logger.info(f"   Messages: {len(messages)} from {len(participants_map)} participants")
+            logger.info(f"   Grouped into {len(grouped_messages)} conversation segments")
             
             # Clean up in-memory transcript
             if meeting_id in meeting_transcripts:
                 del meeting_transcripts[meeting_id]
                 
             logger.info("="*50)
-            logger.info(f"💾 TRANSCRIPT SAVED SUCCESSFULLY")
-            logger.info(f"🆔 Meeting ID: {meeting_id}")
-            logger.info(f"📊 Messages: {len(messages)} (grouped: {len(grouped_messages)})")
-            logger.info(f"👥 Participants: {len(participants_map)}")
-            logger.info(f"⏱️  Duration: {duration_str}")
-            logger.info(f"🏢 Tenant: {meeting.get('tenant_name')}")
-            logger.info(f"📂 Project ID: {metadata.get('project_id', 1)}")
+            logger.info(f"TRANSCRIPT SAVED SUCCESSFULLY")
+            logger.info(f"Meeting ID: {meeting_id}")
+            logger.info(f"Messages: {len(messages)} (grouped: {len(grouped_messages)})")
+            logger.info(f"   Participants: {len(participants_map)}")
+            logger.info(f"Duration: {duration_str}")
+            logger.info(f"Tenant: {meeting.get('tenant_name')}")
+            logger.info(f"Project ID: {metadata.get('project_id', 1)}")
             logger.info("="*50)
         else:
-            logger.error(f"❌ Failed to save transcript for meeting {meeting_id}")
+            logger.error(f"Failed to save transcript for meeting {meeting_id}")
             
     except Exception as e:
         logger.error(f"Error saving transcript: {e}", exc_info=True)
@@ -277,13 +271,13 @@ async def save_meeting_transcript(meeting_id: str):
 @sio.event
 async def connect(sid, environ, auth=None):
     """Client connected"""
-    logger.info(f"🔌 Client connected: {sid}")
+    logger.info(f"Client connected: {sid}")
 
 
 @sio.event
 async def disconnect(sid):
     """Client disconnected"""
-    logger.info(f"🔌 Client disconnected: {sid}")
+    logger.info(f"Client disconnected: {sid}")
     
     # Clean up session
     if sid in session_data:
@@ -296,6 +290,14 @@ async def disconnect(sid):
         if meeting_id and meeting_id in active_meetings:
             active_meetings[meeting_id].discard(sid)
             
+            # Remove session_id from Redis so other nodes stop trying to connect to it
+            try:
+                meeting_service = get_meeting_service()
+                participant_key = f"meeting:{meeting_id}:participant:{user_id}"
+                meeting_service.redis.delete_hash_field(participant_key, 'session_id')
+            except Exception as e:
+                logger.error(f"Failed to clear SID from Redis: {e}")
+            
             # Notify others
             await sio.emit(
                 'user-left',
@@ -307,16 +309,16 @@ async def disconnect(sid):
                 skip_sid=sid
             )
             
-            logger.info(f"👤 User left meeting: {username} from {meeting_id}")
+            logger.info(f"User left meeting: {username} from {meeting_id}")
             
             # Check if meeting is now empty - save transcript if last participant
             if len(active_meetings[meeting_id]) == 0:
-                logger.info(f"📝 Last participant left, saving meeting transcript for {meeting_id}")
+                logger.info(f"[NOTE] Last participant left, saving meeting transcript for {meeting_id}")
                 await save_meeting_transcript(meeting_id)
-                # Clean up empty meeting
-                del active_meetings[meeting_id]
+                # Clean up empty meeting - use pop for safety
+                active_meetings.pop(meeting_id, None)
         
-        del session_data[sid]
+        session_data.pop(sid, None)
 
 
 @sio.event
@@ -330,7 +332,7 @@ async def join_meeting(sid, data):
     username = data.get('username')
     
     if not all([meeting_id, user_id, username]):
-        logger.error(f"❌ Invalid join data: {data}")
+        logger.error(f"Invalid join data: {data}")
         return
     
     # Get meeting data to retrieve channel_id
@@ -342,63 +344,76 @@ async def join_meeting(sid, data):
         'meeting_id': meeting_id,
         'user_id': user_id,
         'username': username,
-        'role': data.get('role', 'Participant'),   # Get role from data
-        'email': data.get('email', ''),            # Get email from data
+        'role': data.get('role', 'Participant'),
+        'email': data.get('email', ''),
         'channel_id': channel_id,
-        'mic_enabled': True,
-        'camera_enabled': True
+        'mic_enabled': data.get('mic_enabled', True),
+        'camera_enabled': data.get('camera_enabled', True)
     }
     
+    # NEW: Sync session_id and email to shared Redis so OTHER NODES can see this participant
+    meeting_service = get_meeting_service()
+    participant_key = f"meeting:{meeting_id}:participant:{user_id}"
+    meeting_service.redis.update_hash(participant_key, 'session_id', sid)
+    meeting_service.redis.update_hash(participant_key, 'email', data.get('email', ''))
+    meeting_service.redis.update_hash(participant_key, 'mic_enabled', data.get('mic_enabled', True))
+    meeting_service.redis.update_hash(participant_key, 'camera_enabled', data.get('camera_enabled', True))
+
     # Add to meeting room
     await sio.enter_room(sid, meeting_id)
     
-    
-    # Track in active meetings
+    # Track in active meetings (local tracking for this node's cleanup)
     if meeting_id not in active_meetings:
         active_meetings[meeting_id] = set()
     active_meetings[meeting_id].add(sid)
     
-    # Get list of existing participants (excluding the new user) WITH their media status
+    # NEW: Get list of existing participants from GLOBAL REDIS (Includes other nodes)
+    participants = meeting_service.get_participants(meeting_id)
     existing_participants = []
-    for existing_sid in active_meetings[meeting_id]:
-        if existing_sid != sid and existing_sid in session_data:
-            existing_data = session_data[existing_sid]
+    
+    for p in participants:
+        p_sid = p.get('session_id')
+        # Only include if they have a session ID and are NOT the current joiner
+        if p_sid and p_sid != sid:
             existing_participants.append({
-                'user_id': existing_data['user_id'],
-                'username': existing_data['username'],
-                'session_id': existing_sid,
-                'mic_enabled': existing_data.get('mic_enabled', True),
-                'camera_enabled': existing_data.get('camera_enabled', True)
+                'user_id': p['user_id'],
+                'username': p['username'],
+                'session_id': p_sid,
+                'mic_enabled': p.get('mic_enabled', True),
+                'camera_enabled': p.get('camera_enabled', True)
             })
     
-    # Send existing participants to the new user (with their current media status)
+    # Send existing participants to the new user
     if existing_participants:
         await sio.emit(
             'existing-participants',
             {'participants': existing_participants},
             room=sid
         )
-        logger.info(f"📋 Sent {len(existing_participants)} existing participants to {username} (with media status)")
+        logger.info(f"Sent {len(existing_participants)} global participants to {username}")
     
-    # Notify others in the room about the new user (with their initial media status)
-    logger.info(f"📤 EMITTING user-joined to room {meeting_id} (skip {sid})")
+    # Notify others in the room about the new user
     await sio.emit(
         'user-joined',
         {
             'user_id': user_id,
             'username': username,
             'session_id': sid,
-            'mic_enabled': True,    # New user starts with mic on
-            'camera_enabled': True  # New user starts with camera on
+            'mic_enabled': data.get('mic_enabled', True),
+            'camera_enabled': data.get('camera_enabled', True)
         },
         room=meeting_id,
         skip_sid=sid
     )
     
-    logger.info(f"✅ User joined meeting: {username} ({user_id}) in {meeting_id}")
+    logger.info(f"User joined meeting globally: {username} ({user_id}) in {meeting_id}")
     if channel_id:
         logger.info(f"📍 Associated with channel: {channel_id}")
-    logger.info(f"📊 Meeting {meeting_id} now has {len(active_meetings[meeting_id])} participants")
+    
+    # Total count from Redis Set (accurate across all nodes)
+    participants_key = meeting_service._meeting_participants_key(meeting_id)
+    total_count = meeting_service.redis.get_set_size(participants_key)
+    logger.info(f"Global participant count for {meeting_id}: {total_count}")
 
 
 @sio.event
@@ -484,7 +499,7 @@ async def ice_candidate(sid, data):
             },
             room=to_sid
         )
-        logger.debug(f"🧊 Relayed ICE: {sid} -> {to_sid}")
+        logger.debug(f"Relayed ICE: {sid} -> {to_sid}")
 
 
 @sio.event
@@ -518,7 +533,7 @@ async def chat_message(sid, data):
         meeting_transcripts[meeting_id] = []
     meeting_transcripts[meeting_id].append(message_data)
     
-    logger.info(f"📝 Stored CHAT message in transcript for meeting {meeting_id}")
+    logger.info(f"Stored CHAT message in transcript for meeting {meeting_id}")
     logger.info(f"   User: {sender['username']} ({sender.get('role', 'Participant')})")
     logger.info(f"   Total messages in transcript: {len(meeting_transcripts[meeting_id])}")
     logger.info(f"   Message type: 'chat' (not 'speech')")
@@ -541,7 +556,7 @@ async def chat_message(sid, data):
                     'source': 'meeting'
                 }
             )
-            logger.info(f"💬 Saved meeting message to channel {channel_id}")
+            logger.info(f"Saved meeting message to channel {channel_id}")
         except Exception as e:
             logger.error(f"Failed to save message to channel chat: {e}")
     
@@ -572,7 +587,7 @@ async def mic_toggle(sid, data):
         room=meeting_id,
         skip_sid=sid
     )
-    logger.info(f"🎤 {sender['username']} mic: {enabled}")
+    logger.info(f"mic: {sender['username']} enabled: {enabled}")
 
 
 @sio.event
@@ -597,7 +612,7 @@ async def camera_toggle(sid, data):
         room=meeting_id,
         skip_sid=sid
     )
-    logger.info(f"📹 {sender['username']} camera: {enabled}")
+    logger.info(f"camera: {sender['username']} enabled: {enabled}")
 
 
 @sio.event
@@ -622,7 +637,7 @@ async def speaking(sid, data):
     )
     # Only log when someone starts speaking (not stops) to reduce log noise
     if is_speaking:
-        logger.debug(f"🗣️ {sender['username']} is speaking")
+        logger.debug(f"is speaking: {sender['username']}")
 
 
 @sio.event
@@ -643,7 +658,7 @@ async def screen_share_toggle(sid, data):
         room=meeting_id,
         skip_sid=sid
     )
-    logger.info(f"🖥️ {sender['username']} screen share: {data.get('enabled')}")
+    logger.info(f"screen share: {sender['username']} enabled: {data.get('enabled')}")
 
 
 # ==================== Meeting Data & Transcript Events ====================
@@ -674,7 +689,7 @@ async def get_meeting_info(sid, data):
             meeting['active_participant_count'] = participant_count
             
             await sio.emit('meeting-info', meeting, room=sid)
-            logger.info(f"📊 Sent meeting info for {meeting_id} to {sid}")
+            logger.info(f"Sent meeting info for {meeting_id} to {sid}")
         else:
             await sio.emit('meeting-info-error', {'error': 'Meeting not found'}, room=sid)
             
@@ -715,12 +730,24 @@ async def transcript_segment(sid, data):
         'type': 'speech'
     }
     
-    # Store in transcript list
+    # Store in transcript list (in-memory)
     if meeting_id not in meeting_transcripts:
         meeting_transcripts[meeting_id] = []
     meeting_transcripts[meeting_id].append(segment_data)
+
+    # Persist in Redis (shared between workers/scheduler)
+    try:
+        meeting_service = get_meeting_service()
+        redis_key = f"meeting:{meeting_id}:speech_segments"
+        import json
+        meeting_service.redis.push_to_list(redis_key, json.dumps(segment_data), left=False)
+        # Keep only last 1000 segments
+        if meeting_service.redis.get_list_length(redis_key) > 1000:
+            meeting_service.redis.trim_list(redis_key, -1000, -1)
+    except Exception as e:
+        logger.error(f"Failed to persist transcript segment to Redis: {e}")
     
-    logger.info(f"📝 Stored SPEECH segment in transcript for meeting {meeting_id}")
+    logger.info(f"Stored SPEECH segment in transcript for meeting {meeting_id}")
     logger.info(f"   User: {sender['username']} ({sender.get('role', 'Participant')})")
     logger.info(f"   Speech: {data.get('text')[:100]}...")
     logger.info(f"   Total messages in transcript: {len(meeting_transcripts[meeting_id])}")
@@ -757,7 +784,7 @@ async def save_transcript(sid, data):
             'saved_at': datetime.utcnow().isoformat()
         }, room=sid)
         
-        logger.info(f"📝 Manually saved transcript for meeting {meeting_id}")
+        logger.info(f"Manually saved transcript for meeting {meeting_id}")
         
     except Exception as e:
         logger.error(f"Error saving transcript: {e}")

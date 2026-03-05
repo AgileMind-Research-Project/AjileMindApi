@@ -144,6 +144,9 @@ async def create_project(
                 detail="Tenant name not found in token"
             )
         
+        user_id = current_user.get("user_id") or current_user.get("sub")
+        username = current_user.get("username") or current_user.get("email")
+
         # Create project (Jira first, then database)
         result = await project_service.create_project(
             tenant_name=tenant_name,
@@ -152,6 +155,8 @@ async def create_project(
             project_type=request.project_type.value,
             start_date=request.start_date,
             end_date=request.end_date,
+            created_by_user_id=user_id,
+            created_by_username=username,
             description=request.description,
             template=request.template.value,
             sprint_size=request.sprint_size,
@@ -504,10 +509,10 @@ async def list_project_sprints(
         if not tenant_name:
              raise HTTPException(status_code=400, detail="Tenant not found in token")
 
-        # Check if 'sprints' table exists effectively (simplified query)
+        # Check if 'sprint' table exists effectively (simplified query)
         query = """
-            SELECT sprint_id, sprint_name, status, start_date, end_date 
-            FROM sprints 
+            SELECT sprint_id, sprint_name, sprint_status, start_date, end_date 
+            FROM sprint 
             WHERE project_id = %s 
             ORDER BY start_date DESC
         """
