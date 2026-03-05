@@ -504,7 +504,7 @@ COMMENT='Meeting transcripts for AI report generation';
 
 CREATE TABLE IF NOT EXISTS `reports` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `transcript_id` INT NOT NULL COMMENT 'Reference to transcript',
+    `transcript_id` INT NULL COMMENT 'Reference to transcript (null for direct uploads)',
     `report_type` ENUM('daily_standup', 'sprint_meeting', 'retrospective', 'brainstorming') NOT NULL COMMENT 'Report type',
     `report_content` JSON NOT NULL COMMENT 'Structured report content',
     `template_id` INT DEFAULT NULL COMMENT 'Template used for generation',
@@ -516,13 +516,13 @@ CREATE TABLE IF NOT EXISTS `reports` (
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
-    FOREIGN KEY (`transcript_id`) REFERENCES `transcripts`(`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_reports_transcript` FOREIGN KEY (`transcript_id`) REFERENCES `transcripts`(`id`) ON DELETE SET NULL,
     INDEX `idx_transcript` (`transcript_id`),
     INDEX `idx_type` (`report_type`),
     INDEX `idx_tenant` (`tenant_schema`),
     INDEX `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='AI-generated reports from transcripts';
+COMMENT='AI-generated reports from transcripts and direct uploads';
 
 -- ============================================
 -- REPORT_TEMPLATES TABLE

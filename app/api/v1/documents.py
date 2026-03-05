@@ -35,16 +35,18 @@ router = APIRouter(
     "/",
     response_model=List[DocumentResponse],
     summary="Get all documents",
-    description="Fetch all documents for the current user's tenant"
+    description="Fetch all documents for the current user's tenant, optionally filtered by date"
 )
 async def get_all_documents(
     limit: int = Query(1000, ge=1, le=10000),
+    date: Optional[str] = Query(None, description="Filter by date (YYYY-MM-DD format)"),
     current_user: dict = Depends(get_current_user_from_token)
 ):
     """
     Get all documents
     
     - **limit**: Maximum number of results (default: 1000)
+    - **date**: Optional date filter (YYYY-MM-DD format)
     
     Returns list of all documents for the user's tenant
     """
@@ -57,9 +59,15 @@ async def get_all_documents(
                 detail="User schema not found"
             )
         
-        documents = await document_service.get_all_documents(schema, limit)
+        if date:
+            # Filter by specific date
+            documents = await document_service.get_documents_by_date_str(schema, date, limit)
+            logger.info(f"Fetched {len(documents)} documents for date {date} for user {current_user.get('id')}")
+        else:
+            documents = await document_service.get_all_documents(schema, limit)
+            logger.info(f"Fetched {len(documents)} documents for user {current_user.get('id')}")
         
-        logger.info(f"Fetched {len(documents)} documents for user {current_user.get('id')}")
+        return documents
         
         return documents
         
@@ -328,8 +336,12 @@ async def chat_with_document(
         
         # If search_all is True or document_id is not provided, search all documents
         if query.search_all or query.document_id is None:
-            # Use multi-document search
-            documents = await document_service.get_all_documents_content(schema, limit=100)
+            # Use multi-document search, optionally filtered by date
+            documents = await document_service.get_all_documents_content(
+                schema, 
+                limit=100, 
+                filter_date=query.filter_date
+            )
             
             if not documents:
                 from datetime import datetime as dt
@@ -774,21 +786,21 @@ async def extract_text_from_docx(content: bytes) -> str:
 @router.delete(
     "/{document_id}",
     summary="Delete document",
-    description="Delete a document by ID"
+    description="Delete a report by ID"
 )
 async def delete_document(
     document_id: int,
     current_user: dict = Depends(get_current_user_from_token),
     db: Database = Depends(get_db)
 ):
-    """Delete a document"""
+    """Delete a report"""
     try:
         # Get tenant schema from user
-        tenant_schema = current_user.get("tenant_schema", "gmail")
+        tenant_schema = current_user.get("tenant_schema") or current_user.get("schema", "gmail")
         
-        # Check if document exists and belongs to user's tenant
+        # Check if report exists
         query = f"""
-            SELECT id FROM {tenant_schema}.documents 
+            SELECT id FROM {tenant_schema}.reports 
             WHERE id = %s
         """
         result = await db.execute_query(query, (document_id,), fetch_one=True)
@@ -796,20 +808,21 @@ async def delete_document(
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Document with ID {document_id} not found"
+                detail=f"Report with ID {document_id} not found"
             )
         
-        # Delete the document
+        # Soft delete by changing status to draft
         delete_query = f"""
-            DELETE FROM {tenant_schema}.documents 
+            UPDATE {tenant_schema}.reports 
+            SET status = 'draft'
             WHERE id = %s
         """
         await db.execute_query(delete_query, (document_id,), commit=True)
         
-        logger.info(f"Document {document_id} deleted successfully")
+        logger.info(f"Report {document_id} deleted successfully")
         
         return {
-            "message": "Document deleted successfully",
+            "message": "Report deleted successfully",
             "document_id": document_id
         }
         

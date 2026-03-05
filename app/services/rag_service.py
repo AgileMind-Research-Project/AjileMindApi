@@ -4,10 +4,13 @@ RAG (Retrieval Augmented Generation) Service
 Service layer for RAG-based chatbot with LLM integration.
 Features:
 - OpenAI GPT-4 integration
-- Document chunking and context retrieval
+- Report content chunking and context retrieval
 - Semantic search capabilities
-- Multi-document search support
+- Multi-report search support
 - Fallback to simple RAG without LLM
+
+Note: This service works with reports table data (daily_standup, sprint_meeting,
+      retrospective, brainstorming) extracted via DocumentContentResponse schema.
 """
 
 from typing import Optional, List, Dict, Tuple
@@ -22,10 +25,11 @@ from abc import ABC, abstractmethod
 class RAGServiceBase(ABC):
     """Base class for RAG services"""
     
-    SYSTEM_PROMPT = """You are a helpful assistant with access to document context. 
-Use the following document content to answer the user's question accurately and concisely.
-If the answer is not in the document, politely say that you don't know based on the selected document. 
-Do not use outside knowledge - only rely on the provided document content."""
+    SYSTEM_PROMPT = """You are a helpful assistant with access to meeting report content. 
+Use the following report content to answer the user's question accurately and concisely.
+The reports may include daily standups, sprint meetings, retrospectives, and brainstorming sessions.
+If the answer is not in the report, politely say that you don't know based on the selected report. 
+Do not use outside knowledge - only rely on the provided report content."""
     
     @staticmethod
     def chunk_document(content: str, chunk_size: int = 1000, overlap: int = 100) -> List[str]:
@@ -179,21 +183,21 @@ Do not use outside knowledge - only rely on the provided document content."""
         user_query: str
     ) -> MultiDocChatResponse:
         """
-        Generate response by searching across multiple documents
+        Generate response by searching across multiple reports
         
         Args:
-            documents: List of documents to search
+            documents: List of reports to search
             user_query: User's question
             
         Returns:
-            MultiDocChatResponse with answer from most relevant document
+            MultiDocChatResponse with answer from most relevant report
         """
         if not documents:
             return MultiDocChatResponse(
                 document_id=0,
-                document_title="No Documents",
+                document_title="No Reports",
                 user_query=user_query,
-                chatbot_response="No documents available to search. Please upload documents first.",
+                chatbot_response="No reports available to search. Reports are generated from meeting transcripts.",
                 timestamp=datetime.utcnow(),
                 relevance_score=0.0,
                 searched_documents=0
@@ -225,7 +229,7 @@ Do not use outside knowledge - only rely on the provided document content."""
 class SimpleRAGService(RAGServiceBase):
     """
     Simplified RAG Service for development/testing without external LLM
-    Uses chunking and keyword matching with template-based responses
+    Uses chunking and keyword matching with improved response generation
     """
     
     async def generate_response(
@@ -234,14 +238,14 @@ class SimpleRAGService(RAGServiceBase):
         user_query: str
     ) -> ChatQueryResponse:
         """
-        Generate simple response based on keyword matching and chunking
+        Generate improved response based on keyword matching and chunking
         
         Args:
-            document: Document with content to use as context
+            document: Report with content to use as context
             user_query: User's question
             
         Returns:
-            ChatQueryResponse with template-based response
+            ChatQueryResponse with context-aware response
         """
         try:
             # Safely get document content
@@ -252,8 +256,8 @@ class SimpleRAGService(RAGServiceBase):
             logger.debug(f"SimpleRAG processing document {doc_id}, content length: {len(doc_content)}")
             
             if not doc_content or len(doc_content.strip()) < 50:
-                response_text = f"The document '{doc_title}' appears to be empty or too short to analyze. Please ensure the document has content."
-                logger.warning(f"No content found for document {doc_id}")
+                response_text = f"The report '{doc_title}' appears to be empty or too short to analyze. Please ensure the report has content."
+                logger.warning(f"No content found for report {doc_id}")
             else:
                 # Split document into chunks
                 chunks = self.chunk_document(
@@ -263,8 +267,8 @@ class SimpleRAGService(RAGServiceBase):
                 )
                 
                 if not chunks:
-                    response_text = f"The document '{doc_title}' appears to be empty or too short to analyze."
-                    logger.warning(f"No chunks found for document {doc_id}")
+                    response_text = f"The report '{doc_title}' appears to be empty or too short to analyze."
+                    logger.warning(f"No chunks found for report {doc_id}")
                 else:
                     # Find relevant chunks
                     relevant_chunks = self.find_relevant_chunks(
@@ -274,17 +278,46 @@ class SimpleRAGService(RAGServiceBase):
                     )
                     
                     if relevant_chunks:
-                        context_preview = " ".join(relevant_chunks)[:500]
-                        response_text = f"Based on the document '{doc_title}', I found relevant information:\n\n" \
-                                       f"**Context found:**\n{context_preview}...\n\n" \
-                                       f"**Your question:** {user_query}\n\n" \
-                                       f"Note: This is a keyword-based response. For AI-powered analysis, ensure Ollama is running."
+                        # Format the relevant content nicely
+                        relevant_content = "\n\n".join(relevant_chunks)
+                        
+                        # Generate a more helpful response
+                        response_text = (
+                            f"Based on the report **'{doc_title}'**, here is the relevant information:\n\n"
+                            f"{relevant_content}\n\n"
+                            f"---\n"
+                            f"*Note: This response is generated using keyword matching. "
+                            f"For more intelligent AI-powered answers, ensure Ollama is running with the llama3.2 model.*"
+                        )
                     else:
-                        # No matching chunks, provide general summary
-                        summary = doc_content[:500] if len(doc_content) > 500 else doc_content
-                        response_text = f"I couldn't find specific information about '{user_query}' in the document '{doc_title}'.\n\n" \
-                                       f"**Document preview:**\n{summary}...\n\n" \
-                                       f"Try rephrasing your question or using different keywords."
+                        # No matching chunks, search for any related content
+                        # Try to provide the most relevant section of the content
+                        query_lower = user_query.lower()
+                        content_lines = doc_content.split('\n')
+                        related_lines = []
+                        
+                        for line in content_lines:
+                            if any(word in line.lower() for word in query_lower.split() if len(word) > 2):
+                                related_lines.append(line.strip())
+                        
+                        if related_lines:
+                            related_content = '\n'.join(related_lines[:10])
+                            response_text = (
+                                f"I found some potentially related information in **'{doc_title}'**:\n\n"
+                                f"{related_content}\n\n"
+                                f"---\n"
+                                f"*Note: Exact match not found. Showing lines with partial keyword matches.*"
+                            )
+                        else:
+                            # Show summary of document content
+                            summary = doc_content[:800] if len(doc_content) > 800 else doc_content
+                            response_text = (
+                                f"I couldn't find specific information about your query in **'{doc_title}'**.\n\n"
+                                f"Here's a summary of the report content:\n\n"
+                                f"{summary}\n\n"
+                                f"---\n"
+                                f"*Try rephrasing your question using keywords that appear in the report.*"
+                            )
             
             chat_response = ChatQueryResponse(
                 document_id=doc_id,
@@ -294,7 +327,7 @@ class SimpleRAGService(RAGServiceBase):
                 timestamp=datetime.utcnow()
             )
             
-            logger.info(f"Simple RAG response generated for document {doc_id}")
+            logger.info(f"Simple RAG response generated for report {doc_id}")
             return chat_response
             
         except Exception as e:
@@ -304,7 +337,7 @@ class SimpleRAGService(RAGServiceBase):
                 document_id=document.id if document else 0,
                 document_title=document.doc_title if document else "Unknown",
                 user_query=user_query,
-                chatbot_response=f"I encountered an error processing your request. Please try again or select a different document. Error: {str(e)}",
+                chatbot_response=f"I encountered an error processing your request. Please try again or select a different report. Error: {str(e)}",
                 timestamp=datetime.utcnow()
             )
 
@@ -358,7 +391,7 @@ class RAGServiceWithOpenAI(RAGServiceBase):
         Falls back to SimpleRAGService if OpenAI not available
         
         Args:
-            document: Document with content to use as context
+            document: Report with content to use as context
             user_query: User's question
             
         Returns:
@@ -379,8 +412,8 @@ class RAGServiceWithOpenAI(RAGServiceBase):
             
             if not chunks:
                 # No content to work with
-                response_text = f"The document '{document.doc_title}' appears to be empty or too short to analyze."
-                logger.warning(f"No chunks found for document {document.id}")
+                response_text = f"The report '{document.doc_title}' appears to be empty or too short to analyze."
+                logger.warning(f"No chunks found for report {document.id}")
             else:
                 # Find most relevant chunks for context
                 relevant_chunks = self.find_relevant_chunks(
@@ -394,16 +427,16 @@ class RAGServiceWithOpenAI(RAGServiceBase):
                 # Prepare prompt with context
                 prompt_text = f"""{self.SYSTEM_PROMPT}
 
-Document Title: {document.doc_title}
+Report Title: {document.doc_title}
 
-Document Content (Context):
+Report Content (Context):
 ---
 {context}
 ---
 
 User Question: {user_query}
 
-Please provide a helpful and accurate answer based ONLY on the document content above:"""
+Please provide a helpful and accurate answer based ONLY on the report content above:"""
                 
                 # Generate response using OpenAI
                 response = self.llm.invoke(prompt_text)
@@ -417,7 +450,7 @@ Please provide a helpful and accurate answer based ONLY on the document content 
                 timestamp=datetime.utcnow()
             )
             
-            logger.info(f"OpenAI RAG Response generated for document {document.id}")
+            logger.info(f"OpenAI RAG Response generated for report {document.id}")
             return chat_response
             
         except Exception as e:
@@ -443,11 +476,18 @@ class RAGServiceWithOllama(RAGServiceBase):
     def _initialize_llm(self):
         """Initialize Ollama LLM"""
         try:
-            from langchain_community.llms import Ollama
+            # Use the new langchain-ollama package
+            try:
+                from langchain_ollama import OllamaLLM
+                OllamaClass = OllamaLLM
+            except ImportError:
+                # Fallback to legacy import
+                from langchain_community.llms import Ollama
+                OllamaClass = Ollama
             
             ollama_base_url = f"{settings.OLLAMA_HOST}:{settings.OLLAMA_PORT}"
             
-            self.llm = Ollama(
+            self.llm = OllamaClass(
                 base_url=ollama_base_url,
                 model=settings.OLLAMA_MODEL or "llama3.2",
                 temperature=settings.OLLAMA_TEMPERATURE or 0.7,
@@ -489,7 +529,7 @@ class RAGServiceWithOllama(RAGServiceBase):
         Falls back to SimpleRAGService if Ollama not available
         
         Args:
-            document: Document with content to use as context
+            document: Report with content to use as context
             user_query: User's question
             
         Returns:
@@ -510,8 +550,8 @@ class RAGServiceWithOllama(RAGServiceBase):
             
             if not chunks:
                 # No content to work with
-                response_text = f"The document '{document.doc_title}' appears to be empty or too short to analyze."
-                logger.warning(f"No chunks found for document {document.id}")
+                response_text = f"The report '{document.doc_title}' appears to be empty or too short to analyze."
+                logger.warning(f"No chunks found for report {document.id}")
             else:
                 # Find most relevant chunks for context
                 relevant_chunks = self.find_relevant_chunks(
@@ -525,16 +565,16 @@ class RAGServiceWithOllama(RAGServiceBase):
                 # Prepare prompt with context
                 prompt_text = f"""{self.SYSTEM_PROMPT}
 
-Document Title: {document.doc_title}
+Report Title: {document.doc_title}
 
-Document Content (Context):
+Report Content (Context):
 ---
 {context}
 ---
 
 User Question: {user_query}
 
-Please provide a helpful and accurate answer based ONLY on the document content above:"""
+Please provide a helpful and accurate answer based ONLY on the report content above:"""
                 
                 # Generate response using Ollama/Llama
                 response_text = self.llm.invoke(prompt_text)
@@ -547,7 +587,7 @@ Please provide a helpful and accurate answer based ONLY on the document content 
                 timestamp=datetime.utcnow()
             )
             
-            logger.info(f"Ollama RAG Response generated for document {document.id}")
+            logger.info(f"Ollama RAG Response generated for report {document.id}")
             return chat_response
             
         except Exception as e:
