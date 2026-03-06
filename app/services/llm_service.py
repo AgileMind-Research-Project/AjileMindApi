@@ -548,6 +548,81 @@ Generate 3-5 specific, actionable recommendations to mitigate this risk."""
         
         return cleaned
 
+    async def generate_delay_suggestions(self, delay_data: Dict[str, Any]) -> List[str]:
+        """
+        Generate AI-powered recovery suggestions based on delay analysis data.
+
+        Args:
+            delay_data: Full delay analysis result from calculate_project_delay()
+
+        Returns:
+            List of 4-5 actionable recovery suggestions
+        """
+        if not self.llm:
+            print("⚠️ LLM not available, cannot generate delay suggestions")
+            return []
+
+        try:
+            # Build early warnings summary
+            warnings = delay_data.get('early_warnings', [])
+            warnings_summary = "; ".join(
+                [f"{w.get('type', '')} ({w.get('severity', '')}): {w.get('message', '')}" for w in warnings]
+            ) if warnings else "None"
+
+            # Build sprint breakdown summary
+            sprints = delay_data.get('sprint_breakdown', [])
+            sprint_lines = []
+            for s in sprints:
+                sprint_lines.append(
+                    f"  {s.get('sprint_name')}: {s.get('completed_story_points', 0)}/{s.get('planned_story_points', 0)} SP "
+                    f"({s.get('completion_rate', 0):.0f}% completed, status: {s.get('status')})"
+                )
+            sprint_summary = "\n".join(sprint_lines) if sprint_lines else "No sprint data"
+
+            delay_attribution = delay_data.get('delay_attribution', {})
+            primary_cause = delay_attribution.get('primary_cause', 'UNKNOWN')
+
+            prompt = f"""You are an expert Agile project management consultant. \
+Analyze the following project delay situation and provide specific, actionable recovery strategies.
+
+PROJECT DELAY ANALYSIS:
+- Project: {delay_data.get('project_name')} ({delay_data.get('project_key')})
+- Risk Level: {delay_data.get('risk_level')} ({delay_data.get('delay_percentage', 0):.1f}% delay)
+- Planned End Date: {delay_data.get('planned_end_date')}
+- Forecasted End Date: {delay_data.get('forecasted_end_date')} ({delay_data.get('delay_days', 0):.0f} days overdue)
+- Sprint Progress: {delay_data.get('completed_sprints', 0)}/{delay_data.get('total_sprints', 0)} sprints closed
+- Story Points: {delay_data.get('completed_story_points', 0)}/{delay_data.get('total_story_points', 0)} completed ({delay_data.get('story_point_completion_rate', 0):.1f}%)
+- Actual Velocity: {delay_data.get('actual_velocity', 0):.1f} SP/sprint (expected: {delay_data.get('expected_velocity', 0):.1f})
+- Team Availability: {delay_data.get('availability_ratio', 1) * 100:.0f}% (leave hours: {delay_data.get('total_leave_hours', 0):.0f}h of {delay_data.get('total_planned_hours', 0):.0f}h planned)
+- Primary Delay Cause: {primary_cause} \
+(velocity impact: {delay_attribution.get('velocity_impact_percentage', 0):.0f}%, \
+availability: {delay_attribution.get('availability_impact_percentage', 0):.0f}%, \
+scope: {delay_attribution.get('scope_impact_percentage', 0):.0f}%)
+- Active Warnings: {warnings_summary}
+
+SPRINT BREAKDOWN:
+{sprint_summary}
+
+IMPORTANT RULES:
+1. Generate EXACTLY 4-5 recovery recommendations
+2. Reference actual numbers from the data (velocity, dates, story points, sprint counts)
+3. Be specific and immediately actionable — no generic advice
+4. Number each recommendation (1., 2., 3., etc.)
+5. Keep each to 2-3 sentences maximum
+6. Focus on the PRIMARY cause: {primary_cause}
+
+Generate the recovery recommendations now:"""
+
+            print(f"🤖 Generating AI delay suggestions for {delay_data.get('project_name')}...")
+            response = await self._call_llm(prompt)
+            suggestions = self._parse_recommendations(response)
+            print(f"✅ Generated {len(suggestions)} delay suggestions")
+            return suggestions[:5]
+
+        except Exception as e:
+            print(f"❌ Delay suggestion generation failed: {e}")
+            return []
+
 
 # Singleton instance
 llm_service = LLMRecommendationService()
