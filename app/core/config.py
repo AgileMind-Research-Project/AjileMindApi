@@ -110,6 +110,11 @@ class Settings(BaseSettings):
     OLLAMA_MAX_TOKENS: int = 2000
     OLLAMA_TEMPERATURE: float = 0.7
     
+    @property
+    def OLLAMA_BASE_URL(self) -> str:
+        """Construct Ollama base URL from host and port"""
+        return f"{self.OLLAMA_HOST.rstrip('/')}:{self.OLLAMA_PORT}"
+    
     # LLM Provider Selection
     LLM_PROVIDER: str = "ollama"  # Options: openai, ollama, gemini, claude, anthropic
     USE_RAG_WITH_LLM: bool = True

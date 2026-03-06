@@ -58,7 +58,7 @@ class TranscriptResponse(BaseModel):
     project_id: Optional[int] = None
     report_generated: ReportGeneratedStatus = ReportGeneratedStatus.PENDING
     created_at: datetime
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

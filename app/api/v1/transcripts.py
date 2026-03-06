@@ -95,22 +95,17 @@ async def upload_transcript(
                 detail=f"Invalid category. Must be one of: {', '.join([c.value for c in TranscriptCategory])}"
             )
         
-        # Create transcript
-        transcript_data = TranscriptCreate(
+        service = TranscriptService(db)
+        result = await service.create_transcript(
+            tenant_name=current_user.get('tenant_schema'),
             title=title,
-            category=category_enum,
+            category=category_enum.value,
             transcript_content=transcript_content,
             transcript_date=parsed_date,
             tags=tags_list,
             file_name=file_name,
+            uploaded_by=current_user.get('user_id'),
             project_id=project_id
-        )
-        
-        service = TranscriptService(db)
-        result = await service.create_transcript(
-            transcript_data=transcript_data,
-            tenant_schema=current_user.get('tenant_schema'),
-            uploaded_by=current_user.get('user_id')
         )
         
         return result
@@ -284,3 +279,37 @@ async def delete_transcript(
     except Exception as e:
         logger.error(f"Error deleting transcript: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete transcript")
+
+
+@router.post("/{transcript_id}/analyze")
+async def analyze_transcript(
+    transcript_id: int,
+    current_user: dict = Depends(get_current_user_from_token),
+    db: Database = Depends(get_db)
+):
+    """
+    Use AI to extract tasks and leave info from a transcript.
+    """
+    try:
+        service = TranscriptService(db)
+        tenant_schema = current_user.get('tenant_schema')
+        
+        # Fetch the transcript content
+        query = f"SELECT transcript_content FROM {tenant_schema}.transcripts WHERE id = %s"
+        result = await db.execute_query(query, (transcript_id,), fetch_one=True, schema=tenant_schema)
+        
+        if not result or not result.get('transcript_content'):
+            raise HTTPException(status_code=404, detail="Transcript not found")
+        
+        content = result['transcript_content']
+        
+        from app.services.ai_service import get_ai_service
+        ai_service = get_ai_service()
+        analysis = await ai_service.analyze_transcript(content)
+        return analysis
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error analyzing transcript: {e}")
+        raise HTTPException(status_code=500, detail="Failed to analyze transcript")
