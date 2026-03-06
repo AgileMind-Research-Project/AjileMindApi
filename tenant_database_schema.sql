@@ -90,6 +90,9 @@ CREATE TABLE IF NOT EXISTS `projects` (
     -- Infrastructure
     `cloud_host` VARCHAR(100) NULL COMMENT 'Cloud hosting provider',
     `budget` DECIMAL(12,2) NULL COMMENT 'Project budget',
+    `trust_index_threshold` INT DEFAULT 80 COMMENT 'Trust index threshold',
+    `prioritize_task_count` INT DEFAULT 15 COMMENT 'Number of tasks to prioritize',
+    `working_hours_for_day` INT DEFAULT 8 COMMENT 'Number of working hours for a day',
 
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

@@ -152,3 +152,78 @@ class SprintRepository:
         except Exception as e:
             logger.error(f"Error listing sprints for project {project_id}: {e}")
             return []
+
+    async def start_sprint(
+        self,
+        tenant_name: str,
+        sprint_id: int,
+        sprint_size_weeks: int,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Activate a sprint: set status='Active', start_date=today,
+        end_date=today + sprint_size_weeks weeks.
+
+        Args:
+            tenant_name:       Tenant database schema name
+            sprint_id:         PK sprint_id / Jira sprint ID
+            sprint_size_weeks: Sprint duration in weeks (from project.sprint_size)
+
+        Returns:
+            Updated sprint row as dict, or None if not found.
+        """
+        from datetime import date, timedelta
+        try:
+            today = date.today()
+            end_date = today + timedelta(weeks=sprint_size_weeks)
+            update_query = """
+                UPDATE sprint
+                SET sprint_status = 'Active',
+                    start_date    = %s,
+                    end_date      = %s,
+                    updated_at    = NOW()
+                WHERE sprint_id = %s
+            """
+            await self.db.execute_query(
+                update_query,
+                (today, end_date, sprint_id),
+                commit=True,
+                schema=tenant_name
+            )
+            return await self.get_sprint_by_id(tenant_name, sprint_id)
+        except Exception as e:
+            logger.error(f"Error starting sprint {sprint_id}: {e}")
+            raise
+
+    async def update_sprint_status(
+        self,
+        tenant_name: str,
+        sprint_id: int,
+        new_status: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Update the sprint_status of a sprint row.
+
+        Args:
+            tenant_name: Tenant database schema name
+            sprint_id:   PK sprint_id / Jira sprint ID
+            new_status:  New status value, e.g. 'Active'
+
+        Returns:
+            Updated sprint row as dict, or None if not found.
+        """
+        try:
+            update_query = """
+                UPDATE sprint
+                SET sprint_status = %s, updated_at = NOW()
+                WHERE sprint_id = %s
+            """
+            await self.db.execute_query(
+                update_query,
+                (new_status, sprint_id),
+                commit=True,
+                schema=tenant_name
+            )
+            return await self.get_sprint_by_id(tenant_name, sprint_id)
+        except Exception as e:
+            logger.error(f"Error updating sprint status for sprint {sprint_id}: {e}")
+            raise

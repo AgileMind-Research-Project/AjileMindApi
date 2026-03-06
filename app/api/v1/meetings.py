@@ -9,7 +9,8 @@ Provides REST API for:
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List
+from typing import List, Optional
+from datetime import date, datetime
 import logging
 
 from app.utils.jwt import get_current_user_from_token
@@ -28,8 +29,16 @@ from app.schemas.meeting_schemas import (
     ParticipantResponse,
     ParticipantListResponse,
     TranscriptCreateRequest,
-    TranscriptResponse
+    TranscriptResponse,
+    AIAnalysisResponse,
+    TaskSyncRequest,
+    LeaveSyncRequest
 )
+from app.services.ai_service import get_ai_service
+from app.services.jira_service import JiraService
+from app.services.backlog_service import BacklogService
+from app.services.leave_service import LeaveService
+from app.db.database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -741,3 +750,247 @@ async def get_channel_transcripts(
             "total": len(transcripts)
         }
     }
+
+# ==================== AI Analysis Endpoints ====================
+
+@router.post("/{meeting_id}/analyze-tasks", response_model=AIAnalysisResponse)
+async def analyze_meeting_tasks(
+    meeting_id: str,
+    current_user: dict = Depends(get_current_user_from_token)
+):
+    """
+    Use AI to extract tasks and leave info from meeting transcript.
+    Prefers the MySQL-stored (uploaded/structured) transcript over the
+    Redis live-chat transcript when both exist, because the structured
+    version contains explicit TAM-IDs and effort estimates.
+    """
+    meeting_service = get_meeting_service()
+    ai_service      = get_ai_service()
+    tenant_name     = current_user.get('tenant_name')
+
+    # ── Step 1: Try MySQL transcript first (uploaded / structured) ─────────
+    content: str = ""
+    real_id = meeting_id.replace("redis_", "") if meeting_id.startswith("redis_") else meeting_id
+
+    if tenant_name:
+        try:
+            from app.db.database import db as _db
+            db_query = """
+                SELECT t.transcript_content AS content
+                FROM   transcripts t
+                WHERE  t.meeting_id = %s
+                LIMIT  1
+            """
+            db_row = await _db.execute_query(db_query, (real_id,), schema=tenant_name, fetch_one=True)
+            if db_row and db_row.get("content"):
+                content = db_row["content"]
+                logger.info(
+                    f"[Analyze] Using MySQL transcript for {real_id} "
+                    f"(len={len(content)}, has_TAM={'TAM-' in content.upper()})"
+                )
+        except Exception as _e:
+            logger.warning(f"[Analyze] MySQL transcript lookup failed: {_e}")
+
+    # ── Step 2: Fall back to Redis / standard get_transcript ───────────────
+    if not content:
+        transcript = await meeting_service.get_transcript(meeting_id, tenant_name=tenant_name)
+        if not transcript or not transcript.get("content"):
+            logger.warning(f"No transcript content found for meeting {meeting_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Transcript not found for this meeting"
+            )
+        content = transcript["content"]
+        logger.info(
+            f"[Analyze] Using Redis/fallback transcript for {real_id} "
+            f"(len={len(content)}, has_TAM={'TAM-' in content.upper()})"
+        )
+
+    if not content:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transcript not found for this meeting")
+
+    logger.info(f"[Analyze] Starting AI analysis | meeting={meeting_id} | len={len(content)}")
+    analysis = await ai_service.analyze_transcript(content)
+    return analysis
+
+
+@router.post("/{meeting_id}/sync-tasks", response_model=dict)
+async def sync_extracted_tasks(
+    meeting_id: str,
+    request: TaskSyncRequest,
+    current_user: dict = Depends(get_current_user_from_token),
+    db = Depends(get_db)
+):
+    """
+    Sync AI-extracted tasks to Jira and Database
+    """
+    tenant_name = current_user.get('tenant_name')
+    jira_service = JiraService(db)
+    backlog_service = BacklogService(db)
+    
+    # Get project key
+    from app.db.repositories.project_repository import ProjectRepository
+    project_repo = ProjectRepository(db)
+    project = await project_repo.get_project_by_id(tenant_name, request.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    project_key = project.get('key')
+    results = []
+    
+    for task in request.tasks:
+        try:
+            # Skip tasks with no summary — DB column is NOT NULL
+            if not task.summary or not task.summary.strip():
+                logger.warning(f"Skipping task with no summary (task_id={task.task_id})")
+                results.append({"task": task.task_id or "unknown", "status": "skipped", "reason": "No summary"})
+                continue
+
+            # 1. Update Jira
+            jira_key = task.task_id
+            if jira_key:
+                # Update existing issue
+                await jira_service.update_issue(
+                    tenant_name=tenant_name,
+                    issue_key=jira_key,
+                    summary=task.summary,
+                    description=task.description,
+                    priority="Medium", # Default
+                    assignee_email=task.assignee,
+                    labels=task.tags
+                )
+            else:
+                # Create new issue
+                created_jira = await jira_service.create_issue(
+                    tenant_name=tenant_name,
+                    project_key=project_key,
+                    summary=task.summary,
+                    description=task.description,
+                    issue_type="Task",
+                    priority="Medium",
+                    assignee_email=task.assignee,
+                    labels=task.tags
+                )
+                jira_key = created_jira.get('issue_key')
+
+            # 2. Update/Create in Database
+            await backlog_service.backlog_repo.create_backlog_item(
+                tenant_name=tenant_name,
+                item_id=jira_key,
+                project_id=request.project_id,
+                summary=task.summary,
+                description=task.description,
+                issue_type="story", # Default to story/task mapping
+                status="todo",
+                priority="medium",
+                assignee=task.assignee,
+                tags=task.tags,
+                severity=None,
+                parent_task_id=None # We could potentially link subtasks here
+            )
+            
+            # If sprint_id is provided, assign to sprint
+            if request.sprint_id:
+                update_sql = "UPDATE project_backlog SET sprint_id = %s WHERE id = %s"
+                await db.execute_query(update_sql, (request.sprint_id, jira_key), schema=tenant_name, commit=True)
+
+            results.append({"task": task.summary, "status": "synced", "jira_key": jira_key})
+        except Exception as e:
+            logger.error(f"Failed to sync task {task.summary}: {e}")
+            results.append({"task": task.summary, "status": "failed", "error": str(e)})
+
+    return {"success": True, "results": results}
+
+
+@router.post("/{meeting_id}/sync-leaves", response_model=dict)
+async def sync_extracted_leaves(
+    meeting_id: str,
+    request: LeaveSyncRequest,
+    current_user: dict = Depends(get_current_user_from_token),
+    db = Depends(get_db)
+):
+    """
+    Sync AI-extracted leave info to Database
+    """
+    tenant_name = current_user.get('tenant_name')
+    leave_service = LeaveService(db)
+    
+    results = []
+    for leave in request.leaves:
+        try:
+            # Parse date safely
+            leave_date_obj = None
+            if leave.leave_date:
+                from datetime import datetime
+                try:
+                    leave_date_obj = datetime.strptime(leave.leave_date, "%Y-%m-%d").date()
+                except:
+                    leave_date_obj = date.today()
+            else:
+                leave_date_obj = date.today()
+
+            await leave_service.add_sprint_leave(
+                tenant_name=tenant_name,
+                sprint_id=request.sprint_id,
+                project_id=request.project_id,
+                developer_name=leave.developer_name,
+                leave_date=leave_date_obj,
+                leave_hours=int(leave.leave_hours or 8),
+                leave_type=leave.leave_type or "Full Day",
+                reason=leave.reason
+            )
+            results.append({"developer": leave.developer_name, "status": "synced"})
+        except Exception as e:
+            logger.error(f"Failed to sync leave for {leave.developer_name}: {e}")
+            results.append({"developer": leave.developer_name, "status": "failed", "error": str(e)})
+
+    return {"success": True, "results": results}
+
+
+# ==================== Emotion / Sentiment Analysis Endpoint ====================
+
+@router.post("/{meeting_id}/analyze-emotion", response_model=dict)
+async def analyze_meeting_emotion(
+    meeting_id: str,
+    current_user: dict = Depends(get_current_user_from_token)
+):
+    """
+    Analyse the emotional tone and team sentiment from a meeting transcript.
+    Uses the same transcript resolution strategy as analyze-tasks (MySQL first, Redis fallback).
+    """
+    meeting_service = get_meeting_service()
+    ai_service      = get_ai_service()
+    tenant_name     = current_user.get('tenant_name')
+
+    # ── Step 1: Try MySQL transcript ─────────────────────────────────────────
+    content: str = ""
+    real_id = meeting_id.replace("redis_", "") if meeting_id.startswith("redis_") else meeting_id
+
+    if tenant_name:
+        try:
+            from app.db.database import db as _db
+            db_row = await _db.execute_query(
+                "SELECT t.transcript_content AS content FROM transcripts t WHERE t.meeting_id = %s LIMIT 1",
+                (real_id,), schema=tenant_name, fetch_one=True
+            )
+            if db_row and db_row.get("content"):
+                content = db_row["content"]
+                logger.info(f"[EmotionAnalyze] Using MySQL transcript for {real_id} (len={len(content)})")
+        except Exception as _e:
+            logger.warning(f"[EmotionAnalyze] MySQL transcript lookup failed: {_e}")
+
+    # ── Step 2: Fall back to Redis / standard get_transcript ─────────────────
+    if not content:
+        transcript = await meeting_service.get_transcript(meeting_id, tenant_name=tenant_name)
+        if not transcript or not transcript.get("content"):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transcript not found for this meeting")
+        content = transcript["content"]
+        logger.info(f"[EmotionAnalyze] Using Redis/fallback transcript for {real_id} (len={len(content)})")
+
+    if not content:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transcript not found for this meeting")
+
+    logger.info(f"[EmotionAnalyze] Starting emotion analysis | meeting={meeting_id} | len={len(content)}")
+    emotion_result = await ai_service.analyze_emotion(content)
+
+    return {"success": True, "data": emotion_result}

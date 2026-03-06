@@ -46,7 +46,10 @@ class ProjectService:
         frontend_technologies: Optional[List[str]] = None,
         backend_technologies: Optional[List[str]] = None,
         cloud_host: Optional[str] = None,
-        budget: Optional[float] = None
+        budget: Optional[float] = None,
+        trust_index_threshold: Optional[int] = None,
+        prioritize_task_count: Optional[int] = None,
+        working_hours_for_day: Optional[int] = 8
     ) -> Dict[str, Any]:
         """
         Create a project in Jira first, then save to database.
@@ -147,7 +150,10 @@ class ProjectService:
                 frontend_technologies=frontend_technologies,
                 backend_technologies=backend_technologies,
                 cloud_host=cloud_host,
-                budget=budget
+                budget=budget,
+                trust_index_threshold=trust_index_threshold,
+                prioritize_task_count=prioritize_task_count,
+                working_hours_for_day=working_hours_for_day
             )
             
             logger.info(f"Project saved to database successfully: {db_project}")
@@ -418,7 +424,10 @@ class ProjectService:
         frontend_technologies: Optional[List[str]] = None,
         backend_technologies: Optional[List[str]] = None,
         cloud_host: Optional[str] = None,
-        budget: Optional[float] = None
+        budget: Optional[float] = None,
+        trust_index_threshold: Optional[int] = None,
+        prioritize_task_count: Optional[int] = None,
+        working_hours_for_day: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Update project details.
@@ -457,7 +466,10 @@ class ProjectService:
             frontend_technologies=frontend_technologies,
             backend_technologies=backend_technologies,
             cloud_host=cloud_host,
-            budget=budget
+            budget=budget,
+            trust_index_threshold=trust_index_threshold,
+            prioritize_task_count=prioritize_task_count,
+            working_hours_for_day=working_hours_for_day
         )
         
         # Return updated project

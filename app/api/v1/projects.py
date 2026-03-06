@@ -167,7 +167,10 @@ async def create_project(
             frontend_technologies=request.frontend_technologies,
             backend_technologies=request.backend_technologies,
             cloud_host=request.cloud_host,
-            budget=request.budget
+            budget=request.budget,
+            trust_index_threshold=request.trust_index_threshold,
+            prioritize_task_count=request.prioritize_task_count,
+            working_hours_for_day=request.working_hours_for_day
         )
         
         logger.info(
@@ -411,12 +414,13 @@ async def update_project(
             frontend_technologies=request.frontend_technologies,
             backend_technologies=request.backend_technologies,
             cloud_host=request.cloud_host,
-            budget=request.budget
+            budget=request.budget,
+            trust_index_threshold=request.trust_index_threshold,
+            prioritize_task_count=request.prioritize_task_count,
+            working_hours_for_day=request.working_hours_for_day
         )
         
-        logger.info(
-            f"Project updated by {current_user['email']}: {project_id}"
-        )
+        logger.info(f"Project updated by {current_user['email']}: {project_id}")
         
         return {
             "success": True,
@@ -526,9 +530,143 @@ async def list_project_sprints(
         }
     except Exception as e:
         logger.error(f"Error fetching sprints for project {project_id}: {str(e)}")
-        # If table doesn't exist, return empty list gracefully or error?
-        # For now, return error structure but code 200 so UI doesn't crash?
-        # Or better 500.
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/{project_id}/sprints/{sprint_id}/status", response_model=Dict[str, Any])
+async def update_sprint_status(
+    project_id: int,
+    sprint_id: int,
+    body: Dict[str, Any],
+    db: Database = Depends(get_database),
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token)
+):
+    """
+    Update the status of a sprint (e.g. set to 'Active' when a Sprint Planning meeting tasks are synced).
+    Body: { "sprint_status": "Active" }
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(status_code=400, detail="Tenant not found in token")
+
+        new_status = body.get("sprint_status")
+        if not new_status:
+            raise HTTPException(status_code=422, detail="sprint_status is required")
+
+        from app.db.repositories.sprint_repository import SprintRepository
+        repo = SprintRepository(db)
+        updated = await repo.update_sprint_status(tenant_name, sprint_id, new_status)
+        if not updated:
+            raise HTTPException(status_code=404, detail=f"Sprint {sprint_id} not found")
+
+        return {"success": True, "data": updated}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating sprint status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{project_id}/sprints/{sprint_id}/start", response_model=Dict[str, Any])
+async def start_sprint(
+    project_id: int,
+    sprint_id: int,
+    body: Dict[str, Any],
+    db: Database = Depends(get_database),
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token)
+):
+    """
+    Start a sprint end-to-end:
+      1. Reads project.sprint_size (weeks) → computes start_date=today, end_date=today+N weeks.
+      2. Adds task_ids (Jira issue keys) to the Jira sprint via Agile API.
+      3. Activates the sprint in Jira (PUT /rest/agile/1.0/sprint/{id}).
+      4. Updates the DB sprint row: status='Active', start_date, end_date.
+
+    Body: { "task_ids": ["TAM-1", "TAM-2", ...] }  (task_ids optional)
+    Returns: { "success": true, "data": <updated_sprint_row>, "jira_started": bool }
+    """
+    import datetime as dt
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(status_code=400, detail="Tenant not found in token")
+
+        from app.db.repositories.project_repository import ProjectRepository
+        from app.db.repositories.sprint_repository import SprintRepository
+        from app.services.jira_service import JiraService
+
+        # ── 1. Load project (sprint_size, board_id, sprint_name) ──────────────
+        project_repo = ProjectRepository(db)
+        project = await project_repo.get_project_by_id(tenant_name, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+        sprint_size_weeks = project.get("sprint_size")
+        if not sprint_size_weeks or int(sprint_size_weeks) <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Project sprint_size is not set or invalid. Set it before starting a sprint."
+            )
+        sprint_size_weeks = int(sprint_size_weeks)
+        board_id = project.get("board_id")
+
+        # ── 2. Compute dates ────────────────────────────────────────────────────
+        today = dt.date.today()
+        end_date_obj = today + dt.timedelta(weeks=sprint_size_weeks)
+        # Jira Agile API expects ISO-8601 with time component
+        jira_start = f"{today.isoformat()}T09:00:00.000+0000"
+        jira_end   = f"{end_date_obj.isoformat()}T18:00:00.000+0000"
+
+        # ── 3. Load the sprint row to get sprint_name ───────────────────────────
+        sprint_repo = SprintRepository(db)
+        sprint_row = await sprint_repo.get_sprint_by_id(tenant_name, sprint_id)
+        if not sprint_row:
+            raise HTTPException(status_code=404, detail=f"Sprint {sprint_id} not found")
+        sprint_name = sprint_row.get("sprint_name", f"Sprint {sprint_id}")
+
+        # ── 4. Add issues to the Jira sprint ───────────────────────────────────
+        task_ids: list = body.get("task_ids", []) or []
+        jira_svc = JiraService(db)
+        issues_added = False
+        jira_started = False
+        try:
+            if task_ids:
+                issues_added = await jira_svc.add_issues_to_sprint(
+                    tenant_name, sprint_id, task_ids
+                )
+
+            # ── 5. Activate the sprint in Jira ─────────────────────────────────
+            if board_id:
+                jira_started = await jira_svc.start_jira_sprint(
+                    tenant_name=tenant_name,
+                    sprint_id=sprint_id,
+                    sprint_name=sprint_name,
+                    board_id=board_id,
+                    start_date=jira_start,
+                    end_date=jira_end,
+                )
+            else:
+                logger.warning(
+                    f"Project {project_id} has no board_id — skipping Jira sprint activation."
+                )
+        except Exception as jira_err:
+            # Jira errors are non-fatal; still update the DB
+            logger.warning(f"Jira sprint start non-fatal error: {jira_err}")
+
+        # ── 6. Update DB sprint row ─────────────────────────────────────────────
+        updated = await sprint_repo.start_sprint(tenant_name, sprint_id, sprint_size_weeks)
+
+        logger.info(
+            f"Sprint {sprint_id} started: project={project_id}, "
+            f"sprint_size={sprint_size_weeks}w, start={today}, end={end_date_obj}, "
+            f"jira_started={jira_started}, issues_added={issues_added}"
+        )
+        return {"success": True, "data": updated, "jira_started": jira_started}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting sprint {sprint_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
