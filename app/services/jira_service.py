@@ -710,14 +710,28 @@ class JiraService:
             
             if response.status_code in [200, 201]:
                 project_data = response.json()
-                logger.info(f"Project created in Jira: {project_data.get('key')} - {project_data.get('name')}")
-                
+                project_key = project_data.get("key")
+                logger.info(f"Project created in Jira: {project_key} - {project_data.get('name')}")
+
+                # Fetch the board ID created automatically for this project
+                board_id = await self.get_board_id(
+                    jira_url=jira_url,
+                    email=email,
+                    api_token=api_token,
+                    project_key=project_key
+                )
+                if board_id:
+                    logger.info(f"Fetched board ID {board_id} for project {project_key}")
+                else:
+                    logger.warning(f"Could not fetch board ID for project {project_key}. It will be stored as NULL.")
+
                 return {
                     "project_id": int(project_data.get("id")),
-                    "key": project_data.get("key"),
+                    "key": project_key,
                     "name": project_data.get("name"),
                     "self": project_data.get("self"),
-                    "jira_url": f"{jira_url}/projects/{project_data.get('key')}"
+                    "board_id": board_id,
+                    "jira_url": f"{jira_url}/projects/{project_key}"
                 }
             else:
                 error_data = response.json()
@@ -755,229 +769,347 @@ class JiraService:
                 detail=f"Failed to create project: {str(e)}"
             )
 
-    async def get_issue_status(
+    async def get_board_id(
         self,
-        tenant_name: str,
-        issue_key: str
-    ) -> Dict[str, Any]:
+        jira_url: str,
+        email: str,
+        api_token: str,
+        project_key: str,
+        max_retries: int = 4,
+        retry_wait_seconds: float = 3.0
+    ) -> Optional[int]:
         """
-        Get the status of a Jira issue.
-        """
-        # Get Jira credentials
-        credentials = await self.get_credentials(tenant_name)
-        if not credentials:
-            return {
-                "issue_key": issue_key,
-                "error": "Jira integration not configured",
-                "status": {
-                    "name": "N/A",
-                    "category": "Unknown",
-                    "color": "gray"
-                }
-            }
-        
-        jira_url = credentials["jira_url"]
-        email = credentials["email"]
-        
-        # Get API token from secret manager
-        secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
-        logger.info(f"[DEBUG] Attempting to fetch secret: {secret_name}")
-        secret_result = get_secret(secret_name)
-        
-        api_token = None
-        if secret_result.get("success"):
-            api_token = secret_result.get("secret_value")
-        else:
-            # Fallback to environment variable
-            logger.warning(f"Secret not found in AWS. Check environment variables.")
-            env_token = os.getenv("JIRA_API_TOKEN") or os.getenv("API_TOKEN")
-            if env_token:
-                logger.info("[DEBUG] Using JIRA_API_TOKEN from environment variables")
-                api_token = env_token
+        Fetch the Jira Agile board ID for a given project key.
 
-        if not api_token:
-            return {
-                "issue_key": issue_key,
-                "error": "API token not found",
-                "status": {
-                    "name": "N/A",
-                    "category": "Unknown",
-                    "color": "gray"
-                }
-            }
-            
-        # api_token is now set
-        
+        Jira provisions the board asynchronously after project creation, so this
+        method retries up to `max_retries` times with `retry_wait_seconds` delay
+        between attempts to give Jira time to finish board setup.
+
+        Calls:
+            GET /rest/agile/1.0/board?projectKeyOrId={key}
+
+        Args:
+            jira_url:            Base Jira Cloud URL
+            email:               Jira account email
+            api_token:           Jira API token
+            project_key:         Project key (e.g. "MYPROJ")
+            max_retries:         How many times to try before giving up (default 4)
+            retry_wait_seconds:  Seconds to wait between retries (default 3)
+
+        Returns:
+            The integer board ID, or None if not found after all retries.
+        """
+        import asyncio
+
+        auth_str = f"{email}:{api_token}"
+        auth_b64 = base64.b64encode(auth_str.encode("ascii")).decode("ascii")
+        headers = {
+            "Authorization": f"Basic {auth_b64}",
+            "Accept": "application/json"
+        }
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{jira_url}/rest/agile/1.0/board",
+                        headers=headers,
+                        params={"projectKeyOrId": project_key},
+                        timeout=aiohttp.ClientTimeout(total=15)
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            values = data.get("values", [])
+                            if values:
+                                board_id = values[0].get("id")
+                                logger.info(
+                                    f"Board found for project {project_key} "
+                                    f"on attempt {attempt}: board_id={board_id}"
+                                )
+                                return int(board_id) if board_id is not None else None
+                            else:
+                                # Board not provisioned yet — Jira is still setting up
+                                logger.warning(
+                                    f"Board not ready yet for project {project_key} "
+                                    f"(attempt {attempt}/{max_retries}). "
+                                    f"Waiting {retry_wait_seconds}s before retry..."
+                                )
+                        else:
+                            body = await resp.text()
+                            logger.warning(
+                                f"Board lookup HTTP {resp.status} for project {project_key} "
+                                f"(attempt {attempt}/{max_retries}): {body}"
+                            )
+            except Exception as exc:
+                logger.error(
+                    f"Error fetching board for project {project_key} "
+                    f"(attempt {attempt}/{max_retries}): {exc}"
+                )
+
+            # Wait before next attempt (skip wait on last attempt)
+            if attempt < max_retries:
+                await asyncio.sleep(retry_wait_seconds)
+
+        logger.error(
+            f"Board for project {project_key} not found after {max_retries} attempts."
+        )
+        return None
+
+    async def get_jira_sprints_by_board(
+        self,
+        jira_url: str,
+        email: str,
+        api_token: str,
+        board_id: int,
+        state: str = "future,active,closed",
+        start_at: int = 0,
+        max_results: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch all sprints for a given Jira board (reusable).
+
+        Equivalent to the JIRA library call:
+            sprints = jira.sprints(board_id, state="future,active,closed", startAt=0, maxResults=50)
+            for sprint in sprints:
+                print(f"ID: {sprint.id} | Name: {sprint.name} | State: {sprint.state}")
+
+        Calls:
+            GET /rest/agile/1.0/board/{boardId}/sprint
+                ?state=future,active,closed&startAt=0&maxResults=50
+
+        Args:
+            jira_url:    Base Jira Cloud URL (e.g. https://yourcompany.atlassian.net)
+            email:       Authenticated Jira account email
+            api_token:   Jira API token
+            board_id:    The Jira board ID to fetch sprints for
+            state:       Comma-separated sprint states to include
+                         (future | active | closed)
+            start_at:    Pagination offset (default 0)
+            max_results: Max sprints to return per page (default 50)
+
+        Returns:
+            List of sprint dicts, each containing:
+                id    – Jira sprint ID  (int)
+                name  – Sprint name     (str)
+                state – Sprint state    (str: "active" | "future" | "closed")
+                startDate, endDate, completeDate (str | None)
+            Returns [] on error or if board has no sprints.
+        """
         try:
-            # Create session
-            async with aiohttp.ClientSession() as session:
-                auth = aiohttp.BasicAuth(email, api_token)
-                headers = {
-                    "Accept": "application/json",
-                    "Content-Type": "application/json"
-                }
-                
-                async with session.get(
-                    f"{jira_url}/rest/api/3/issue/{issue_key}",
-                    auth=auth,
-                    headers=headers
-                ) as response:
-                    if response.status == 200:
-                        issue_data = await response.json()
-                        fields = issue_data.get("fields", {})
-                        status_data = fields.get("status", {})
-                        
-                        return {
-                            "issue_key": issue_key,
-                            "summary": fields.get("summary"),
-                            "status": {
-                                "name": status_data.get("name"),
-                                "category": status_data.get("statusCategory", {}).get("name"),
-                                "color": status_data.get("statusCategory", {}).get("colorName")
-                            }
-                        }
-                    elif response.status == 404:
-                            return {
-                            "issue_key": issue_key,
-                            "error": "Issue not found",
-                            "status": {
-                                "name": "Not Found",
-                                "category": "Unknown",
-                                "color": "gray"
-                            }
-                        }
-                    else:
-                        logger.error(f"Jira API error: {response.status} - {await response.text()}")
-                        return {
-                            "issue_key": issue_key,
-                            "error": f"Jira API error: {response.status}",
-                            "status": {
-                                "name": "Error",
-                                "category": "Unknown",
-                                "color": "red"
-                            }
-                        }
-                        
-        except Exception as e:
-            logger.error(f"Error getting issue status: {str(e)}")
-            return {
-                "issue_key": issue_key,
-                "error": str(e),
-                "status": {
-                    "name": "Error",
-                    "category": "Unknown",
-                    "color": "red"
-                }
+            auth_str = f"{email}:{api_token}"
+            auth_b64 = base64.b64encode(auth_str.encode("ascii")).decode("ascii")
+
+            headers = {
+                "Authorization": f"Basic {auth_b64}",
+                "Accept": "application/json"
             }
 
-    async def transition_issue_to_status(
+            params = {
+                "state": state,
+                "startAt": start_at,
+                "maxResults": max_results
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{jira_url}/rest/agile/1.0/board/{board_id}/sprint",
+                    headers=headers,
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        raw_sprints = data.get("values", [])
+                        sprints = [
+                            {
+                                "id":           s.get("id"),
+                                "name":         s.get("name"),
+                                "state":        s.get("state"),
+                                "startDate":    s.get("startDate"),
+                                "endDate":      s.get("endDate"),
+                                "completeDate": s.get("completeDate")
+                            }
+                            for s in raw_sprints
+                        ]
+                        logger.info(
+                            f"Fetched {len(sprints)} sprint(s) for board {board_id} "
+                            f"(state={state})"
+                        )
+                        return sprints
+                    else:
+                        body = await resp.text()
+                        logger.warning(
+                            f"Agile sprint lookup returned HTTP {resp.status} "
+                            f"for board {board_id}: {body}"
+                        )
+                        return []
+
+        except Exception as exc:
+            logger.error(f"Error fetching sprints for board {board_id}: {exc}")
+            return []
+
+    async def add_issues_to_sprint(
         self,
         tenant_name: str,
-        issue_key: str,
-        target_status: str = "Done"
-    ) -> Dict[str, Any]:
+        sprint_id: int,
+        issue_keys: List[str]
+    ) -> bool:
         """
-        Transition a Jira issue to a target status (e.g., Done).
+        Add Jira issue keys to a sprint.
+
+        Calls:
+            POST /rest/agile/1.0/sprint/{sprint_id}/issue
+            Body: { "issues": ["TAM-1", "TAM-2", ...] }
+
+        Args:
+            tenant_name: Tenant schema name (to look up credentials)
+            sprint_id:   Jira sprint ID
+            issue_keys:  List of Jira issue keys (e.g. ["TAM-195", "TAM-196"])
+
+        Returns:
+            True if all issues were added (HTTP 204), False otherwise.
         """
-        # Get credentials
+        if not issue_keys:
+            return True  # nothing to add
+
         credentials = await self.get_credentials(tenant_name)
         if not credentials:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Jira integration not configured"
+                detail="Jira integration not configured."
             )
 
         jira_url = credentials["jira_url"]
         email = credentials["email"]
-        
-        # Get API token
-        secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
+        secret_name = (
+            f"tenant_{tenant_name}_jira_api_token_"
+            f"{jira_url.replace('https://','').replace('/','_')}"
+        )
         secret_result = get_secret(secret_name)
-        
-        api_token = None
-        if secret_result.get("success"):
-            api_token = secret_result.get("secret_value")
-        else:
-            env_token = os.getenv("JIRA_API_TOKEN") or os.getenv("API_TOKEN")
-            if env_token:
-                api_token = env_token
-        
-        if not api_token:
+        if not secret_result.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Jira API token not found"
+                detail="Failed to retrieve Jira API token from secure storage"
             )
+        api_token = secret_result.get("secret_value")
+
+        auth_b64 = base64.b64encode(f"{email}:{api_token}".encode("ascii")).decode("ascii")
+        headers = {
+            "Authorization": f"Basic {auth_b64}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
 
         try:
             async with aiohttp.ClientSession() as session:
-                auth = aiohttp.BasicAuth(email, api_token)
-                headers = {"Accept": "application/json", "Content-Type": "application/json"}
-
-                # 1. Get available transitions
-                async with session.get(
-                    f"{jira_url}/rest/api/3/issue/{issue_key}/transitions",
-                    auth=auth,
-                    headers=headers
-                ) as response:
-                    if response.status != 200:
-                        raise HTTPException(status_code=400, detail=f"Failed to fetch transitions: {await response.text()}")
-                    
-                    transitions_data = await response.json()
-                    transitions = transitions_data.get("transitions", [])
-                
-                # 2. Find transition to target status
-                transition_id = None
-                for t in transitions:
-                    # Check exact name match or partial match (case insensitive)
-                    t_name = t.get("name", "").lower()
-                    t_to = t.get("to", {}).get("name", "").lower()
-                    target = target_status.lower()
-                    
-                    if t_name == target or t_to == target:
-                        transition_id = t.get("id")
-                        break
-                
-                if not transition_id:
-                     # Fallback: try to find 'Done' or 'Complete' if generic
-                    if target_status.lower() == 'done':
-                         for t in transitions:
-                            t_name = t.get("name", "").lower()
-                            if 'done' in t_name or 'complete' in t_name or 'resolve' in t_name:
-                                transition_id = t.get("id")
-                                break
-                
-                if not transition_id:
-                     available = [t.get("name") for t in transitions]
-                     raise HTTPException(
-                        status_code=400, 
-                        detail=f"Transition to '{target_status}' not available. Available: {available}"
-                    )
-
-                # 3. Perform transition
-                payload = {
-                    "transition": {
-                        "id": transition_id
-                    }
-                }
-                
                 async with session.post(
-                    f"{jira_url}/rest/api/3/issue/{issue_key}/transitions",
-                    auth=auth,
+                    f"{jira_url}/rest/agile/1.0/sprint/{sprint_id}/issue",
                     headers=headers,
-                    json=payload
-                ) as response:
-                    if response.status == 204:
-                        logger.info(f"Successfully transitioned {issue_key} to {target_status}")
-                        return {
-                            "success": True, 
-                            "issue_key": issue_key, 
-                            "new_status": target_status
-                        }
+                    json={"issues": issue_keys},
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status == 204:
+                        logger.info(
+                            f"Added {len(issue_keys)} issue(s) to Jira sprint {sprint_id}: "
+                            f"{issue_keys}"
+                        )
+                        return True
                     else:
-                         raise HTTPException(status_code=response.status, detail=f"Transition failed: {await response.text()}")
+                        body = await resp.text()
+                        logger.error(
+                            f"Failed to add issues to sprint {sprint_id} "
+                            f"(HTTP {resp.status}): {body}"
+                        )
+                        return False
+        except Exception as exc:
+            logger.error(f"Error adding issues to sprint {sprint_id}: {exc}")
+            return False
 
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Error transitioning issue: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+    async def start_jira_sprint(
+        self,
+        tenant_name: str,
+        sprint_id: int,
+        sprint_name: str,
+        board_id: int,
+        start_date: str,
+        end_date: str
+    ) -> bool:
+        """
+        Activate (start) a Jira sprint via the Agile REST API.
+
+        Calls:
+            PUT /rest/agile/1.0/sprint/{sprint_id}
+            Body: { id, name, state: "active", startDate, endDate, originBoardId }
+
+        Args:
+            tenant_name: Tenant schema name (to look up credentials)
+            sprint_id:   Jira sprint ID
+            sprint_name: Sprint display name (e.g. "Sprint 1")
+            board_id:    Jira board ID (originBoardId)
+            start_date:  ISO string  e.g. "2026-03-06T09:00:00.000+0000"
+            end_date:    ISO string  e.g. "2026-03-20T18:00:00.000+0000"
+
+        Returns:
+            True if sprint was started (HTTP 200), False otherwise.
+        """
+        credentials = await self.get_credentials(tenant_name)
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Jira integration not configured."
+            )
+
+        jira_url = credentials["jira_url"]
+        email = credentials["email"]
+        secret_name = (
+            f"tenant_{tenant_name}_jira_api_token_"
+            f"{jira_url.replace('https://','').replace('/','_')}"
+        )
+        secret_result = get_secret(secret_name)
+        if not secret_result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve Jira API token from secure storage"
+            )
+        api_token = secret_result.get("secret_value")
+
+        auth_b64 = base64.b64encode(f"{email}:{api_token}".encode("ascii")).decode("ascii")
+        headers = {
+            "Authorization": f"Basic {auth_b64}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+        payload = {
+            "id": sprint_id,
+            "name": sprint_name,
+            "state": "active",
+            "startDate": start_date,
+            "endDate": end_date,
+            "originBoardId": board_id,
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.put(
+                    f"{jira_url}/rest/agile/1.0/sprint/{sprint_id}",
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status == 200:
+                        logger.info(
+                            f"Jira sprint {sprint_id} started: "
+                            f"{start_date} → {end_date} (board {board_id})"
+                        )
+                        return True
+                    else:
+                        body = await resp.text()
+                        logger.error(
+                            f"Failed to start Jira sprint {sprint_id} "
+                            f"(HTTP {resp.status}): {body}"
+                        )
+                        return False
+        except Exception as exc:
+            logger.error(f"Error starting Jira sprint {sprint_id}: {exc}")
+            return False

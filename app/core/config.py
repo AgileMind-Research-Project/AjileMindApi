@@ -5,7 +5,7 @@ Loads configuration from environment variables.
 """
 
 import os
-from typing import List, Union
+from typing import List, Union, Optional
 from pydantic_settings import BaseSettings
 from pydantic import EmailStr, field_validator
 

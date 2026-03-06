@@ -25,6 +25,7 @@ class ProjectRepository:
         project_type: str,
         start_date: date,
         end_date: date,
+        board_id: Optional[int] = None,
         sprint_size: Optional[int] = None,
         project_lead: Optional[str] = None,
         project_manager: Optional[List[str]] = None,
@@ -33,7 +34,10 @@ class ProjectRepository:
         frontend_technologies: Optional[List[str]] = None,
         backend_technologies: Optional[List[str]] = None,
         cloud_host: Optional[str] = None,
-        budget: Optional[float] = None
+        budget: Optional[float] = None,
+        trust_index_threshold: Optional[int] = None,
+        prioritize_task_count: Optional[int] = None,
+        working_hours_for_day: Optional[int] = 8
     ) -> Dict[str, Any]:
         """
         Create a new project in tenant database.
@@ -46,6 +50,7 @@ class ProjectRepository:
             project_type: Project type (software, business, service_desk)
             start_date: Project start date
             end_date: Project end date
+            board_id: Jira Agile board ID (auto-created with software projects)
             sprint_size: Sprint duration in weeks
             project_lead: Project lead email
             architecture_type: Architecture pattern
@@ -69,26 +74,30 @@ class ProjectRepository:
             query = """
                 INSERT INTO projects (
                     project_id, project_name, `key`, project_type, 
-                    start_date, end_date,
+                    start_date, end_date, next_sprint_start_date,
+                    board_id,
                     sprint_size, project_lead, project_manager, architecture_type, stack_type,
                     frontend_technologies, backend_technologies, cloud_host, budget,
+                    trust_index_threshold, prioritize_task_count, working_hours_for_day,
                     created_at, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             """
             
             await self.db.execute_query(
                 query,
                 (
-                    project_id, project_name, key, project_type, start_date, end_date,
+                    project_id, project_name, key, project_type, start_date, end_date, start_date,
+                    board_id,
                     sprint_size, project_lead, project_manager_json, architecture_type, stack_type,
-                    frontend_tech_json, backend_tech_json, cloud_host, budget
+                    frontend_tech_json, backend_tech_json, cloud_host, budget,
+                    trust_index_threshold, prioritize_task_count, working_hours_for_day
                 ),
                 commit=True,
                 schema=tenant_name
             )
             
-            logger.info(f"Project created in {tenant_name}: {key} - {project_name} (ID: {project_id})")
+            logger.info(f"Project created in {tenant_name}: {key} - {project_name} (ID: {project_id}, Board ID: {board_id})")
             
             # Return created project
             return await self.get_project_by_id(tenant_name, project_id)
@@ -119,6 +128,7 @@ class ProjectRepository:
                     start_date, end_date,
                     sprint_size, project_lead, project_manager, architecture_type, stack_type,
                     frontend_technologies, backend_technologies, cloud_host, budget,
+                    trust_index_threshold, prioritize_task_count, working_hours_for_day,
                     created_at, updated_at
                 FROM projects
                 WHERE project_id = %s
@@ -177,7 +187,9 @@ class ProjectRepository:
             query = """
                 SELECT 
                     project_id, project_name, `key`, project_type,
-                    start_date, end_date, created_at, updated_at
+                    start_date, end_date, 
+                    trust_index_threshold, prioritize_task_count, working_hours_for_day,
+                    created_at, updated_at
                 FROM projects
                 WHERE `key` = %s
             """
@@ -214,7 +226,9 @@ class ProjectRepository:
             query = """
                 SELECT 
                     project_id, project_name, `key`, project_type,
-                    start_date, end_date, created_at, updated_at
+                    start_date, end_date, 
+                    trust_index_threshold, prioritize_task_count, working_hours_for_day,
+                    created_at, updated_at
                 FROM projects
                 WHERE project_name = %s
             """
@@ -259,6 +273,7 @@ class ProjectRepository:
                     start_date, end_date,
                     sprint_size, project_lead, project_manager, architecture_type, stack_type,
                     frontend_technologies, backend_technologies, cloud_host, budget,
+                    trust_index_threshold, prioritize_task_count, working_hours_for_day,
                     created_at, updated_at
                 FROM projects
                 ORDER BY created_at DESC
@@ -325,7 +340,10 @@ class ProjectRepository:
         frontend_technologies: Optional[List[str]] = None,
         backend_technologies: Optional[List[str]] = None,
         cloud_host: Optional[str] = None,
-        budget: Optional[float] = None
+        budget: Optional[float] = None,
+        trust_index_threshold: Optional[int] = None,
+        prioritize_task_count: Optional[int] = None,
+        working_hours_for_day: Optional[int] = None
     ) -> bool:
         """
         Update project details.
@@ -402,6 +420,18 @@ class ProjectRepository:
             if budget is not None:
                 update_fields.append("budget = %s")
                 params.append(budget)
+            
+            if trust_index_threshold is not None:
+                update_fields.append("trust_index_threshold = %s")
+                params.append(trust_index_threshold)
+            
+            if prioritize_task_count is not None:
+                update_fields.append("prioritize_task_count = %s")
+                params.append(prioritize_task_count)
+
+            if working_hours_for_day is not None:
+                update_fields.append("working_hours_for_day = %s")
+                params.append(working_hours_for_day)
             
             if not update_fields:
                 return True  # Nothing to update
