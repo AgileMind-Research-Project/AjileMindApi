@@ -53,13 +53,13 @@ class RedisChatClient:
             
             # Test connection
             self.client.ping()
-            logger.info(f"✅ Redis connected successfully to {host}:{port}")
+            logger.info(f"Redis connected successfully to {host}:{port}")
             
         except redis.ConnectionError as e:
-            logger.error(f"❌ Redis connection failed: {e}")
+            logger.error(f"Redis connection failed: {e}")
             raise
         except Exception as e:
-            logger.error(f"❌ Redis initialization error: {e}")
+            logger.error(f"Redis initialization error: {e}")
             raise
     
     # ==================== Health & Utility ====================
@@ -380,7 +380,7 @@ def init_redis_chat() -> RedisChatClient:
     
     if _redis_chat_client is None:
         _redis_chat_client = RedisChatClient()
-        logger.info("✅ Redis Chat Client initialized")
+        logger.info("Redis Chat Client initialized")
     
     return _redis_chat_client
 

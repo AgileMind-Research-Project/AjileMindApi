@@ -16,6 +16,17 @@ if sys.platform == 'win32':
     os.environ['PYTHONIOENCODING'] = 'utf-8'
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
+import logging
+from pathlib import Path
+
+# ── Logging setup — must be before any module imports that use loggers ────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Add app directory to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -24,7 +35,7 @@ from app.core.config import settings
 from config_test import run_config_test
 
 # Import routers
-from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, notifications, backlog_priority,  trust_index, riskparameters, documents, transcripts, reports, templates, notifications, release_notes, new_tasks, recurring_bugs
+from app.api.v1 import auth, roles, audit, platform, users, jira, otp, projects, redis_chat, backlog, notifications, backlog_priority,  trust_index, riskparameters, documents, transcripts, reports, templates, notifications, release_notes, new_tasks, recurring_bugs,meetings, scheduled_meetings
 from app.ai.transcripts import routes as ai_transcripts_router
 from app.meeting_config import routes as meetings_router
 from app.task_updates_config import routes as task_updates_router
@@ -65,6 +76,10 @@ async def lifespan(app: FastAPI):
         print("✅ Scheduler started successfully\n")
     except Exception as e:
         print(f"❌ Failed to start scheduler: {e}\n")
+    # Start Meeting Link Scheduler
+    from app.services.meeting_scheduler_service import get_meeting_scheduler_service
+    scheduler = get_meeting_scheduler_service()
+    await scheduler.start()
     
     yield
     
@@ -73,6 +88,14 @@ async def lifespan(app: FastAPI):
     # Cleanup
     print("\n" + "="*70)
     print("👋 Shutting down AgileMind Backend Server...")
+
+    # Stop Scheduler
+    try:
+        scheduler = get_meeting_scheduler_service()
+        await scheduler.stop()
+    except:
+        pass
+
     print("🔌 Closing database connections...")
     await db.disconnect()
     print("="*70 + "\n")
@@ -299,6 +322,8 @@ app.include_router(riskparameters.router, prefix=f"{settings.API_PREFIX}/risk-pa
 app.include_router(trust_index.router, prefix=f"{settings.API_PREFIX}/trust-index", tags=["Trust Index"])
 app.include_router(new_tasks.router, prefix=f"{settings.API_PREFIX}/new-tasks", tags=["New Tasks"])
 app.include_router(recurring_bugs.router, prefix=f"{settings.API_PREFIX}/recurring-bugs", tags=["Recurring Bugs"])
+app.include_router(meetings.router, prefix=f"{settings.API_PREFIX}/meetings", tags=["Meetings"])
+app.include_router(scheduled_meetings.router, prefix=f"{settings.API_PREFIX}/scheduled-meetings", tags=["Scheduled Meetings"])
 # app.include_router(tenants.router, prefix=f"{settings.API_PREFIX}/tenants", tags=["Tenants"])
 
 if __name__ == "__main__":    
