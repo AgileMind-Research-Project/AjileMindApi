@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS `projects` (
 
     `project_name` VARCHAR(255) NOT NULL COMMENT 'Name of the project',
     `key` VARCHAR(255) NOT NULL COMMENT 'Project key provided by system',
+    `board_id` BIGINT  DEFAULT NULL COMMENT 'Board ID provided by jira or system',
     `project_type` VARCHAR(100) NOT NULL COMMENT 'Type/category of the project',
     `start_date` DATE NOT NULL COMMENT 'Project start date',
     `end_date` DATE NOT NULL COMMENT 'Project end date',
@@ -119,6 +120,9 @@ CREATE TABLE IF NOT EXISTS `projects` (
     -- Infrastructure
     `cloud_host` VARCHAR(100) NULL COMMENT 'Cloud hosting provider',
     `budget` DECIMAL(12,2) NULL COMMENT 'Project budget',
+    `trust_index_threshold` INT DEFAULT 80 COMMENT 'Trust index threshold',
+    `prioritize_task_count` INT DEFAULT 15 COMMENT 'Number of tasks to prioritize',
+    `working_hours_for_day` INT DEFAULT 8 COMMENT 'Number of working hours for a day',
 
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -218,6 +222,9 @@ CREATE TABLE IF NOT EXISTS `project_backlog` (
   `story_points` INT DEFAULT 0
     COMMENT 'Story point estimation',
 
+  `story_point_estimate` INT DEFAULT 0
+    COMMENT 'Story point estimation',
+
   `sprint_id` INT DEFAULT NULL
     COMMENT 'Sprint ID if assigned to a sprint',
 
@@ -261,64 +268,26 @@ COMMENT='Backlog items before project start and future changes/features';
 
 
 -- ============================================ sprint TABLE
--- Stores sprint information for projects
+-- Stores sprint information for projects.
+-- NOTE: sprint_id IS the Jira sprint ID (bigint, no AUTO_INCREMENT).
+--       The Jira sprint ID must be fetched via /rest/agile/1.0/board/{boardId}/sprint
+--       BEFORE inserting, and is supplied as sprint_id at INSERT time.
 CREATE TABLE IF NOT EXISTS `sprint` (
-    `sprint_id` INT NOT NULL AUTO_INCREMENT
-        COMMENT 'Unique sprint identifier',
-
-    `project_id` BIGINT NOT NULL
-        COMMENT 'Project this sprint belongs to',
-
-    `sprint_name` VARCHAR(255) NOT NULL
-        COMMENT 'Sprint name/identifier',
-
-    `start_date` DATE NOT NULL
-        COMMENT 'Sprint start date',
-
-    `end_date` DATE NOT NULL
-        COMMENT 'Sprint end date',
-
-    `status` ENUM('PLANNED', 'ACTIVE', 'COMPLETED') DEFAULT 'PLANNED'
-        COMMENT 'Sprint status',
-
-    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        COMMENT 'Record creation time',
-
-    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        ON UPDATE CURRENT_TIMESTAMP
-        COMMENT 'Last update time',
-
-    -- Primary Key
-    PRIMARY KEY (`sprint_id`),
-
-    -- Indexes
-    INDEX `idx_project_id` (`project_id`),
-    INDEX `idx_status` (`status`),
-    INDEX `idx_start_date` (`start_date`),
-    INDEX `idx_end_date` (`end_date`),
-
-    -- Primary Key
-    PRIMARY KEY (`sprint_id`, `project_id`),
-    INDEX `idx_sprint_id` (`sprint_id`),
-
-    -- Foreign Keys
-    CONSTRAINT `fk_sprint_project`
-        FOREIGN KEY (`project_id`)
-        REFERENCES `projects` (`project_id`)
-        ON DELETE CASCADE
-        ON UPDATE CASCADE
-        ON DELETE CASCADE,
-
-    CONSTRAINT `fk_backlog_sprint`
-        FOREIGN KEY (`sprint_id`)
-        REFERENCES `sprint` (`sprint_id`)
-        ON UPDATE CASCADE
-        ON DELETE SET NULL
-
-) ENGINE=InnoDB
-  DEFAULT CHARSET=utf8mb4
-  COLLATE=utf8mb4_unicode_ci
-  COMMENT='Sprint management for projects';
+  `sprint_id` bigint NOT NULL COMMENT 'Jira sprint ID — used as PK, no AUTO_INCREMENT',
+  `project_id` bigint NOT NULL,
+  `sprint_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `sprint_goal` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `start_date` date NOT NULL,
+  `end_date` date NOT NULL,
+  `sprint_status` enum('Future','Active','Closed','On Hold','Cancelled') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT 'Future',
+  `total_estimated_hours` int DEFAULT '0',
+  `total_completed_hours` int DEFAULT '0',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`sprint_id`),
+  KEY `project_id` (`project_id`),
+  CONSTRAINT `sprint_ibfk_1` FOREIGN KEY (`project_id`) REFERENCES `projects` (`project_id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 -- ============================================ project_backlog_priority TABLE
@@ -473,8 +442,9 @@ CREATE TABLE IF NOT EXISTS `task_updates` (
 
 CREATE TABLE IF NOT EXISTS `transcripts` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `meeting_id` varchar(50) DEFAULT NULL COMMENT 'Reference to meetings.meeting_id',
     `title` VARCHAR(255) NOT NULL COMMENT 'Transcript title',
-    `category` ENUM('daily_standup', 'sprint_meeting', 'sprint_planning', 'retrospective', 'brainstorming') NOT NULL COMMENT 'Meeting type',
+    `category` ENUM('daily_standup', 'sprint_meeting', 'sprint_planning', 'retrospective', 'brainstorming', 'other') NOT NULL COMMENT 'Meeting type',
     `transcript_content` LONGTEXT NOT NULL COMMENT 'Full transcript text',
     `transcript_date` DATE NOT NULL COMMENT 'Date of the meeting',
     `tags` JSON DEFAULT NULL COMMENT 'Tags for categorization',
@@ -624,6 +594,11 @@ CREATE TABLE IF NOT EXISTS `downtime_notifications` (
         FOREIGN KEY (`project_id`)
         REFERENCES `projects` (`project_id`)
         ON DELETE SET NULL
+        ON UPDATE CASCADE,
+    CONSTRAINT `fk_transcripts_sprint`
+        FOREIGN KEY (`sprint_id`)
+        REFERENCES `sprint`(`sprint_id`)
+        ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='History of system downtime and maintenance notifications';
 
@@ -742,3 +717,22 @@ COMMENT='Project release notes with versioning and structured content';
       INDEX `idx_jira_project` (`project_key`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     COMMENT='Per-tenant Jira issue synchronization metadata';
+
+CREATE TABLE IF NOT EXISTS `sprint_leave` (
+  `leave_id` int NOT NULL AUTO_INCREMENT,
+  `sprint_id` int NOT NULL,
+  `project_id` bigint NOT NULL,
+  `developer_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `leave_date` date NOT NULL,
+  `leave_hours` int NOT NULL,
+  `reason` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `leave_type` enum('Full Day','Half Day','Short Leave') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT 'Full Day',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`leave_id`),
+  KEY `fk_leave_sprint` (`sprint_id`),
+  KEY `fk_leave_project` (`project_id`),
+  CONSTRAINT `fk_leave_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`project_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_leave_sprint` FOREIGN KEY (`sprint_id`) REFERENCES `sprint` (`sprint_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `sprint_leave_chk_1` CHECK ((`leave_hours` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -10,7 +10,7 @@ from app.schemas.transcript import (
     TranscriptListItem, TranscriptListResponse, TranscriptFilterParams
 )
 from app.core.logger import logger
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import date
 import json
 
@@ -23,114 +23,85 @@ class TranscriptService:
     
     async def create_transcript(
         self,
-        transcript_data: TranscriptCreate,
-        tenant_schema: str,
-        uploaded_by: str
-    ) -> TranscriptResponse:
-        """Create a new transcript"""
+        tenant_name: str,
+        title: str,
+        category: str,
+        transcript_content: str,
+        transcript_date: date,
+        tags: List[str] = None,
+        file_name: Optional[str] = None,
+        uploaded_by: Optional[str] = None,
+        project_id: Optional[int] = 0,
+        sprint_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a new transcript record and update meeting attendance
+        """
         try:
-            logger.info(f"Creating transcript in schema: {tenant_schema}, uploaded by: {uploaded_by}")
+            import json
+            import re
             
-            # Validate schema exists
-            check_query = "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = %s"
-            schema_check = await self.db.execute_query(check_query, (tenant_schema,), fetch_one=True)
+            # 1. Automatic categorisation if title contains common meeting keywords
+            if category == 'other' or not category:
+                lower_title = title.lower()
+                if 'standup' in lower_title or 'daily' in lower_title:
+                    category = 'daily_standup'
+                elif 'retrospective' in lower_title or 'retro' in lower_title:
+                    category = 'retrospective'
+                elif 'planning' in lower_title:
+                    category = 'sprint_planning'
+                elif 'sprint' in lower_title:
+                    category = 'sprint_meeting'
+
+            # 2. Extract participants from transcript content
+            speakers = re.findall(r'^([^:\n]+):', transcript_content, re.MULTILINE)
+            participants_list = sorted(list(set(s.strip() for s in speakers)))
             
-            if not schema_check:
-                raise ValueError(f"Schema '{tenant_schema}' does not exist. Available schemas should include: sas, saas, visionexdigital")
-            
-            # Convert tags to JSON string
-            tags_json = json.dumps(transcript_data.tags) if transcript_data.tags else None
-            
-            query = f"""
-                INSERT INTO {tenant_schema}.transcripts 
-                (title, category, transcript_content, transcript_date, tags, file_name, project_id, report_generated, uploaded_by, tenant_schema)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            # 3. Store Transcript
+            query = """
+                INSERT INTO transcripts (
+                    title, category, transcript_content, transcript_date, 
+                    tags, file_name, uploaded_by, tenant_schema, project_id, sprint_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
+            tags_json = json.dumps(tags) if tags else None
             
-            result = await self.db.execute_query(
+            await self.db.execute_query(
                 query,
-                (
-                    transcript_data.title,
-                    transcript_data.category.value,
-                    transcript_data.transcript_content,
-                    transcript_data.transcript_date,
-                    tags_json,
-                    transcript_data.file_name,
-                    transcript_data.project_id,
-                    'pending',  # Default report_generated status
-                    uploaded_by,
-                    tenant_schema
-                ),
+                (title, category, transcript_content, transcript_date, tags_json, file_name, uploaded_by, tenant_name, project_id, sprint_id),
                 commit=True,
                 schema=tenant_schema
             )
             
-            # Get the inserted transcript ID from the cursor
-            transcript_id = result.lastrowid
+            # 4. Update Meeting Attendance
+            # Try to find a matching meeting in MySQL for this project/sprint/date
+            if participants_list:
+                find_meeting_sql = """
+                    SELECT meeting_id FROM meetings 
+                    WHERE project_id = %s AND (sprint_id = %s OR %s IS NULL) AND meeting_date = %s
+                    LIMIT 1
+                """
+                meeting_res = await self.db.execute_query(
+                    find_meeting_sql, 
+                    (project_id, sprint_id, sprint_id, transcript_date),
+                    schema=tenant_name,
+                    fetch_one=True
+                )
+                
+                if meeting_res:
+                    update_attendees_sql = "UPDATE meetings SET attendees = %s WHERE meeting_id = %s"
+                    await self.db.execute_query(
+                        update_attendees_sql,
+                        (json.dumps(participants_list), meeting_res['meeting_id']),
+                        schema=tenant_name,
+                        commit=True
+                    )
+                    logger.info(f"Updated attendance for meeting {meeting_res['meeting_id']} based on transcript '{title}'")
+
+            # Fetch created
+            fetch_query = "SELECT * FROM transcripts WHERE tenant_schema = %s ORDER BY id DESC LIMIT 1"
+            return await self.db.execute_query(fetch_query, (tenant_name,), fetch_one=True, schema=tenant_name)
             
-            if not transcript_id:
-                raise Exception("Failed to get transcript ID after creation")
-            
-            logger.info(f"Transcript {transcript_id} created, verifying in {tenant_schema}.transcripts")
-            
-            # Verify record exists
-            verify_query = f"SELECT COUNT(*) as cnt FROM {tenant_schema}.transcripts WHERE id = %s"
-            verify_result = await self.db.execute_query(verify_query, (transcript_id,), fetch_one=True, schema=tenant_schema)
-            
-            if not verify_result or verify_result['cnt'] == 0:
-                raise ValueError(f"Transcript {transcript_id} inserted but not found in {tenant_schema}.transcripts. This may indicate a schema mismatch.")
-            
-            logger.info(f"Transcript {transcript_id} verified, fetching full details")
-            
-            # Fetch the created transcript with explicit schema
-            return await self.get_transcript(transcript_id, tenant_schema)
-        
-        except Exception as e:
-            logger.error(f"Error creating transcript: {e}")
-            raise
-    
-    async def get_transcript(
-        self,
-        transcript_id: int,
-        tenant_schema: str
-    ) -> TranscriptResponse:
-        """Get a transcript by ID"""
-        try:
-            query = f"""
-                SELECT id, title, category, transcript_content, transcript_date, 
-                       tags, file_name, project_id, report_generated, created_at, updated_at
-                FROM {tenant_schema}.transcripts
-                WHERE id = %s
-            """
-            
-            logger.info(f"Fetching transcript {transcript_id} from {tenant_schema}.transcripts")
-            result = await self.db.execute_query(
-                query, 
-                (transcript_id,), 
-                fetch_one=True,
-                schema=tenant_schema
-            )
-            
-            if not result:
-                raise ValueError(f"Transcript with ID {transcript_id} not found in schema {tenant_schema}")
-            
-            # Parse tags JSON
-            tags = json.loads(result['tags']) if result.get('tags') else None
-            
-            return TranscriptResponse(
-                id=result['id'],
-                title=result['title'],
-                category=result['category'],
-                transcript_content=result['transcript_content'],
-                transcript_date=result['transcript_date'],
-                tags=tags,
-                file_name=result.get('file_name'),
-                project_id=result.get('project_id'),
-                report_generated=result.get('report_generated', 'pending'),
-                created_at=result['created_at'],
-                updated_at=result['updated_at']
-            )
-        
         except Exception as e:
             logger.error(f"Error fetching transcript: {e}")
             raise
@@ -178,13 +149,14 @@ class TranscriptService:
             count_result = await self.db.execute_query(count_query, tuple(params), fetch_one=True)
             total = count_result['total'] if count_result else 0
             
-            # Fetch transcripts
-            offset = (filters.page - 1) * filters.page_size
-            list_query = f"""
-                SELECT id, title, category, transcript_date, tags, file_name, project_id, report_generated, created_at
-                FROM {tenant_schema}.transcripts
-                {where_sql}
-                ORDER BY transcript_date DESC, created_at DESC
+            # Fetch
+            query = f"""
+                SELECT t.id, t.title, t.category, t.transcript_date, t.tags, t.file_name, 
+                       t.created_at, t.project_id, t.sprint_id, s.sprint_name
+                FROM transcripts t
+                LEFT JOIN sprint s ON t.sprint_id = s.sprint_id
+                WHERE {where_str} 
+                ORDER BY t.transcript_date DESC, t.created_at DESC 
                 LIMIT %s OFFSET %s
             """
             params.extend([filters.page_size, offset])

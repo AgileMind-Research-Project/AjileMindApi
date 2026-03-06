@@ -176,7 +176,7 @@ class BacklogRepository:
         try:
             query = """
                 SELECT 
-                    b.id, b.project_id, b.summary, b.description, b.issue_type,
+                    b.id, b.project_id, b.sprint_id, b.summary, b.description, b.issue_type,
                     b.status, b.priority, b.assignee, b.tags, b.severity, b.parent_task_id,
                     b.created_at, b.updated_at, b.estimated_hours, b.story_points, b.is_jira,
                     p.project_name, p.key as project_key,
@@ -218,17 +218,11 @@ class BacklogRepository:
                     
                     # Normalize Issue Type
                     if item.get('issue_type'):
-                        itype = str(item['issue_type']).lower().strip()
-                        # Map 'task' or other variants to 'story' or keep if valid
-                        if itype == 'task':
-                            item['issue_type'] = 'story'
-                        elif itype in ['story', 'feature', 'change', 'bug', 'sub_task']:
-                            item['issue_type'] = itype
-                        else:
-                            # Default fallback if unknown
-                            item['issue_type'] = 'story'
+                        itype = str(item['issue_type']).lower().strip().replace(' ', '_').replace('-', '_')
+                        valid_types = ['epic', 'story', 'feature', 'task', 'change', 'bug', 'sub_task']
+                        item['issue_type'] = itype if itype in valid_types else 'story'
                     else:
-                        item['issue_type'] = 'story' # Default if missing
+                        item['issue_type'] = 'story'  # Default if missing
             
             return results or []
             

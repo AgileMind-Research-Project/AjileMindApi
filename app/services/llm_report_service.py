@@ -4,7 +4,13 @@ LLM Report Service
 Service for generating AI reports using LLaMA 3.2 via Ollama.
 """
 
-from langchain_ollama import OllamaLLM
+try:
+    from langchain_ollama import OllamaLLM
+    _OLLAMA_AVAILABLE = True
+except ImportError:
+    OllamaLLM = None
+    _OLLAMA_AVAILABLE = False
+
 from app.core.config import settings
 from app.core.logger import logger
 from app.schemas.report import DailyStandupReport, SprintMeetingReport, RetrospectiveReport, BrainstormingMeetingReport
@@ -18,6 +24,10 @@ class LLMReportService:
     
     def __init__(self):
         """Initialize Ollama LLM"""
+        if not _OLLAMA_AVAILABLE:
+            logger.warning("langchain_ollama is not available (incompatible langchain_core version). LLM report service disabled.")
+            self.available = False
+            return
         try:
             ollama_base_url = f"{settings.OLLAMA_HOST}:{settings.OLLAMA_PORT}"
             self.llm = OllamaLLM(

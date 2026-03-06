@@ -147,9 +147,13 @@ def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
         # Convert tenant name to schema format (e.g., "Acme Corp" -> "acme_corp")
         schema = tenant_name.lower().replace(" ", "_")
     
-    # Parse role - it might be a JSON string like '["SUPER_ADMIN"]' or a plain string
+    # Parse role - it might be a JSON string like '["SUPER_ADMIN"]', a plain string,
+    # or a Python list (when JWT was encoded with a list value)
     role = payload.get("role")
-    if isinstance(role, str):
+    if isinstance(role, list):
+        # JWT decoded a JSON array directly into a list
+        role = role[0] if role else None
+    elif isinstance(role, str):
         # Try to parse as JSON if it looks like an array
         if role.startswith("["):
             try:

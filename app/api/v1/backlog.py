@@ -188,6 +188,47 @@ async def list_project_backlog(
 
 
 @router.get(
+    "/{item_id}",
+    summary="Get Backlog Item",
+    description="Fetch a single backlog item by its ID (e.g. TAM-123)"
+)
+async def get_backlog_item(
+    item_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    backlog_service: BacklogService = Depends(get_backlog_service)
+) -> Dict[str, Any]:
+    """
+    Get details for a single backlog item.
+    Returns description, tags, story_points, status, priority, assignee etc.
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+
+        item = await backlog_service.backlog_repo.get_backlog_item(tenant_name, item_id)
+        if not item:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Backlog item '{item_id}' not found"
+            )
+
+        return {"success": True, "data": item}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching backlog item {item_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch backlog item: {str(e)}"
+        )
+
+
+@router.get(
     "/sprint/{sprint_id}",
     response_model=BacklogListResponse,
     summary="List Sprint Backlog Items",
@@ -212,17 +253,8 @@ async def list_sprint_backlog(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Tenant name not found in token"
             )
-        
-        # Convert updates to dict, excluding None values
-        update_data = {k: v for k, v in updates.dict().items() if v is not None}
-        
-        if not update_data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No updates provided"
-            )
             
-        result = await backlog_service.update_backlog_item(tenant_name, item_id, update_data)
+        items = await backlog_service.list_sprint_backlog(tenant_name, sprint_id)
         
         return BacklogListResponse(
             success=True,
@@ -233,10 +265,10 @@ async def list_sprint_backlog(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error updating item {item_id}: {str(e)}")
+        logger.error(f"Error listing sprint backlog {sprint_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update item: {str(e)}"
+            detail=f"Failed to list sprint backlog: {str(e)}"
         )
 
 
