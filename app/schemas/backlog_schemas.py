@@ -19,7 +19,6 @@ class IssueType(str, Enum):
     CHANGE = "change"
     BUG = "bug"
     SUB_TASK = "sub_task"
-    TASK = "task"
 
 
 class Priority(str, Enum):
