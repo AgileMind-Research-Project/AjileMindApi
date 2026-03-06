@@ -659,3 +659,75 @@ async def get_delay_analysis(
             detail=f"Failed to calculate delay analysis: {str(e)}"
         )
 
+
+@router.post(
+    "/{project_id}/delay-suggestions",
+    response_model=StandardResponse,
+    summary="Generate AI Delay Recovery Suggestions",
+    description="Use local LLM to generate actionable recovery suggestions based on current delay analysis"
+)
+async def get_delay_suggestions(
+    project_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    database: Database = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Generate AI-powered recovery suggestions for a delayed project.
+    Calls local Ollama LLM (llama3.2) with detailed delay metrics.
+    """
+    from app.services.llm_service import llm_service
+
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+
+        # Check access
+        user_roles = current_user.get("roles", [])
+        if not user_roles and current_user.get("role"):
+            user_roles = [current_user.get("role")]
+        user_projects = current_user.get("projects", [])
+
+        if not any(role in ["ADMIN", "SUPER_ADMIN"] for role in user_roles):
+            if project_id not in user_projects:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have access to this project"
+                )
+
+        # Check LLM availability
+        if not llm_service.llm:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI service unavailable. Ensure Ollama is running locally."
+            )
+
+        # Fetch fresh delay data
+        delay_service = DelayCalculationService(database)
+        delay_data = await delay_service.calculate_project_delay(project_id, tenant_name)
+
+        # Generate LLM suggestions
+        suggestions = await llm_service.generate_delay_suggestions(delay_data)
+
+        return {
+            "success": True,
+            "message": f"Generated {len(suggestions)} AI recovery suggestions",
+            "data": {
+                "project_id": project_id,
+                "project_name": delay_data.get("project_name"),
+                "risk_level": delay_data.get("risk_level"),
+                "suggestions": suggestions
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating delay suggestions: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate suggestions: {str(e)}"
+        )

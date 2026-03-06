@@ -235,7 +235,7 @@ class TrustIndexService:
         velocities = [
             s.get("velocity", 0) or 0
             for s in sprint_breakdown
-            if (s.get("status") or "").lower() in ("completed", "closed")
+            if (s.get("status") or "").lower() == "closed"
         ]
 
         if len(velocities) < 2:
@@ -261,7 +261,7 @@ class TrustIndexService:
         breakdown = (risk_data.get("metadata") or {}).get("sprint_progress_breakdown", [])
         completed = [
             s for s in breakdown
-            if (s.get("sprint_status") or "").lower() == "completed"
+            if (s.get("sprint_status") or "").lower() == "closed"
         ]
 
         if not completed:
