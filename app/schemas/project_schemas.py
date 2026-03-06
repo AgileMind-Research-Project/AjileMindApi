@@ -120,6 +120,23 @@ class CreateProjectRequest(BaseModel):
         ge=0,
         description="Project budget"
     )
+    trust_index_threshold: Optional[int] = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Trust index threshold"
+    )
+    prioritize_task_count: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Number of tasks to prioritize"
+    )
+    working_hours_for_day: Optional[int] = Field(
+        8,
+        ge=1,
+        le=24,
+        description="Number of working hours for a day"
+    )
     
     @validator('end_date')
     def validate_end_date(cls, v, values):
@@ -175,6 +192,9 @@ class ProjectResponse(BaseModel):
     backend_technologies: Optional[List[str]] = None
     cloud_host: Optional[str] = None
     budget: Optional[float] = None
+    trust_index_threshold: Optional[int] = None
+    prioritize_task_count: Optional[int] = None
+    working_hours_for_day: Optional[int] = 8
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     jira_url: Optional[str] = None
@@ -219,6 +239,9 @@ class UpdateProjectRequest(BaseModel):
     backend_technologies: Optional[List[str]] = None
     cloud_host: Optional[str] = Field(None, max_length=100)
     budget: Optional[float] = Field(None, ge=0)
+    trust_index_threshold: Optional[int] = Field(None, ge=0, le=100)
+    prioritize_task_count: Optional[int] = Field(None, ge=1)
+    working_hours_for_day: Optional[int] = Field(None, ge=1, le=24)
     
     @validator('end_date')
     def validate_dates(cls, v, values):

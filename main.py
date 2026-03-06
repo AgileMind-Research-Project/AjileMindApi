@@ -9,7 +9,17 @@ from contextlib import asynccontextmanager
 import uvicorn
 import socketio
 import sys
+import logging
 from pathlib import Path
+
+# ── Logging setup — must be before any module imports that use loggers ────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Add app directory to path
 sys.path.insert(0, str(Path(__file__).parent))

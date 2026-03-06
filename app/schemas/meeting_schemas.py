@@ -146,3 +146,34 @@ class ParticipantListResponse(BaseModel):
     """List of participants"""
     participants: List[ParticipantResponse] = Field(default_factory=list)
     total: int = Field(default=0)
+
+# ==================== AI Analysis Schemas ====================
+
+class ExtractedTask(BaseModel):
+    task_id: Optional[str] = None
+    summary: Optional[str] = None
+    description: Optional[str] = None
+    effort: Optional[float] = None
+    assignee: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+class ExtractedLeave(BaseModel):
+    developer_name: str
+    leave_date: Optional[str] = None
+    leave_hours: Optional[float] = None
+    leave_type: Optional[str] = "Full Day"
+    reason: Optional[str] = None
+
+class AIAnalysisResponse(BaseModel):
+    tasks: List[ExtractedTask] = []
+    leave_info: List[ExtractedLeave] = []
+
+class TaskSyncRequest(BaseModel):
+    tasks: List[ExtractedTask]
+    project_id: int
+    sprint_id: Optional[int] = None
+
+class LeaveSyncRequest(BaseModel):
+    leaves: List[ExtractedLeave]
+    project_id: int
+    sprint_id: int

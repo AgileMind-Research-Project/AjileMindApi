@@ -203,18 +203,27 @@ class MeetingSchedulerService:
         return None
 
     async def _discover_tenants(self) -> List[str]:
-        """Discovery: Get actual tenants from the registry or fallback to SHOW DATABASES"""
+        """Discovery: Get actual tenants by looking for tenant databases/tables according to schema"""
         try:
-            tenant_query = "SELECT tenant_id FROM agilemind_db.tenants WHERE status = 'active'"
-            tenant_records = await db.execute_query(tenant_query, fetch_all=True)
-            return [t['tenant_id'] for t in tenant_records]
-        except Exception as e:
-            logger.error(f"Could not discover tenants from registry: {e}")
-            # Fallback to SHOW DATABASES but with stricter exclusion
+            # According to database_schema.sql, tenants are identified by tables in information_schema
+            # We look for databases that end in '_db' or are listed as tenant domains
             db_query = "SHOW DATABASES"
             all_dbs = await db.execute_query(db_query, fetch_all=True)
-            excluded_dbs = ('information_schema', 'mysql', 'performance_schema', 'sys', 'agilemind_db', 'phpmyadmin', 'railway')
-            return [list(d.values())[0] for d in all_dbs if list(d.values())[0] not in excluded_dbs]
+            
+            # System databases to ignore
+            excluded_dbs = ('information_schema', 'mysql', 'performance_schema', 'sys', 'agilemind_db', 'phpmyadmin', 'railway', 'test')
+            
+            tenants = []
+            for d in all_dbs:
+                db_name = list(d.values())[0]
+                if db_name not in excluded_dbs:
+                    # In this architecture, each tenant has a database (e.g., 'sliit', 'visionexdigital')
+                    tenants.append(db_name)
+            
+            return tenants
+        except Exception as e:
+            logger.error(f"Tenant discovery failed: {e}")
+            return []
 
     async def _finalize_meeting(self, tenant: str, meeting_data: Dict[str, Any]):
         """Mark as ENDED in SQL/Redis and attempt to save transcript"""

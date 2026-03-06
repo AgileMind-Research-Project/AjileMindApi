@@ -942,3 +942,169 @@ class JiraService:
         except Exception as exc:
             logger.error(f"Error fetching sprints for board {board_id}: {exc}")
             return []
+
+    async def add_issues_to_sprint(
+        self,
+        tenant_name: str,
+        sprint_id: int,
+        issue_keys: List[str]
+    ) -> bool:
+        """
+        Add Jira issue keys to a sprint.
+
+        Calls:
+            POST /rest/agile/1.0/sprint/{sprint_id}/issue
+            Body: { "issues": ["TAM-1", "TAM-2", ...] }
+
+        Args:
+            tenant_name: Tenant schema name (to look up credentials)
+            sprint_id:   Jira sprint ID
+            issue_keys:  List of Jira issue keys (e.g. ["TAM-195", "TAM-196"])
+
+        Returns:
+            True if all issues were added (HTTP 204), False otherwise.
+        """
+        if not issue_keys:
+            return True  # nothing to add
+
+        credentials = await self.get_credentials(tenant_name)
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Jira integration not configured."
+            )
+
+        jira_url = credentials["jira_url"]
+        email = credentials["email"]
+        secret_name = (
+            f"tenant_{tenant_name}_jira_api_token_"
+            f"{jira_url.replace('https://','').replace('/','_')}"
+        )
+        secret_result = get_secret(secret_name)
+        if not secret_result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve Jira API token from secure storage"
+            )
+        api_token = secret_result.get("secret_value")
+
+        auth_b64 = base64.b64encode(f"{email}:{api_token}".encode("ascii")).decode("ascii")
+        headers = {
+            "Authorization": f"Basic {auth_b64}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{jira_url}/rest/agile/1.0/sprint/{sprint_id}/issue",
+                    headers=headers,
+                    json={"issues": issue_keys},
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status == 204:
+                        logger.info(
+                            f"Added {len(issue_keys)} issue(s) to Jira sprint {sprint_id}: "
+                            f"{issue_keys}"
+                        )
+                        return True
+                    else:
+                        body = await resp.text()
+                        logger.error(
+                            f"Failed to add issues to sprint {sprint_id} "
+                            f"(HTTP {resp.status}): {body}"
+                        )
+                        return False
+        except Exception as exc:
+            logger.error(f"Error adding issues to sprint {sprint_id}: {exc}")
+            return False
+
+    async def start_jira_sprint(
+        self,
+        tenant_name: str,
+        sprint_id: int,
+        sprint_name: str,
+        board_id: int,
+        start_date: str,
+        end_date: str
+    ) -> bool:
+        """
+        Activate (start) a Jira sprint via the Agile REST API.
+
+        Calls:
+            PUT /rest/agile/1.0/sprint/{sprint_id}
+            Body: { id, name, state: "active", startDate, endDate, originBoardId }
+
+        Args:
+            tenant_name: Tenant schema name (to look up credentials)
+            sprint_id:   Jira sprint ID
+            sprint_name: Sprint display name (e.g. "Sprint 1")
+            board_id:    Jira board ID (originBoardId)
+            start_date:  ISO string  e.g. "2026-03-06T09:00:00.000+0000"
+            end_date:    ISO string  e.g. "2026-03-20T18:00:00.000+0000"
+
+        Returns:
+            True if sprint was started (HTTP 200), False otherwise.
+        """
+        credentials = await self.get_credentials(tenant_name)
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Jira integration not configured."
+            )
+
+        jira_url = credentials["jira_url"]
+        email = credentials["email"]
+        secret_name = (
+            f"tenant_{tenant_name}_jira_api_token_"
+            f"{jira_url.replace('https://','').replace('/','_')}"
+        )
+        secret_result = get_secret(secret_name)
+        if not secret_result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve Jira API token from secure storage"
+            )
+        api_token = secret_result.get("secret_value")
+
+        auth_b64 = base64.b64encode(f"{email}:{api_token}".encode("ascii")).decode("ascii")
+        headers = {
+            "Authorization": f"Basic {auth_b64}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+        payload = {
+            "id": sprint_id,
+            "name": sprint_name,
+            "state": "active",
+            "startDate": start_date,
+            "endDate": end_date,
+            "originBoardId": board_id,
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.put(
+                    f"{jira_url}/rest/agile/1.0/sprint/{sprint_id}",
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status == 200:
+                        logger.info(
+                            f"Jira sprint {sprint_id} started: "
+                            f"{start_date} → {end_date} (board {board_id})"
+                        )
+                        return True
+                    else:
+                        body = await resp.text()
+                        logger.error(
+                            f"Failed to start Jira sprint {sprint_id} "
+                            f"(HTTP {resp.status}): {body}"
+                        )
+                        return False
+        except Exception as exc:
+            logger.error(f"Error starting Jira sprint {sprint_id}: {exc}")
+            return False

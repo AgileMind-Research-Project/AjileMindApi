@@ -5,7 +5,7 @@ Loads configuration from environment variables.
 """
 
 import os
-from typing import List, Union
+from typing import List, Union, Optional
 from pydantic_settings import BaseSettings
 from pydantic import EmailStr, field_validator
 
@@ -97,6 +97,14 @@ class Settings(BaseSettings):
     AUDIT_LOGGING_ENABLED: bool = True
     AUDIT_RETENTION_DAYS: int = 90
     
+    # OpenAI (Optional fallback)
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = "gpt-4-turbo-preview"
+
+    # Ollama (Local LLM)
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama3.2:latest"  # Use llama3.2 for speed + quality balance
+
     class Config:
         env_file = ".env"
         case_sensitive = True
