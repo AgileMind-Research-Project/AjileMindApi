@@ -4,11 +4,13 @@ from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
+
 class MeetingStatus(str, Enum):
     SCHEDULED = "SCHEDULED"
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
+
 
 class MeetingCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
@@ -18,7 +20,8 @@ class MeetingCreate(BaseModel):
     start_time: time
     end_time: time
     category: str = "Daily Meeting"
-    attendees: Optional[List[str]] = [] # List of user emails or IDs
+    attendees: Optional[List[str]] = []  # List of user emails or IDs
+
 
 class MeetingUpdate(BaseModel):
     title: Optional[str] = None
@@ -31,22 +34,23 @@ class MeetingUpdate(BaseModel):
     meeting_transcript: Optional[str] = None
     recording_url: Optional[str] = None
 
+
 class MeetingResponse(BaseModel):
-    id: int
     meeting_id: str
-    project_id: Optional[int]
+    project_id: Optional[int] = None
+    sprint_id: Optional[int] = None
     title: str
-    description: Optional[str]
-    date: date
-    start_time: time
-    end_time: time
-    status: MeetingStatus
-    category: str
-    meeting_transcript: Optional[str] = None
+    meeting_category: Optional[str] = None
+    meeting_date: Optional[date] = None
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
+    status: Optional[str] = "SCHEDULED"
+    meeting_link: Optional[str] = None
     attendees: Optional[List[str]] = None
-    created_at: datetime
-    created_by: Optional[str]
-    
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 
