@@ -148,6 +148,7 @@ class DelayCalculationService:
             FROM sprint s
             LEFT JOIN sprint_leave sl ON s.sprint_id = sl.sprint_id
             WHERE s.project_id = %s
+              AND s.sprint_status IN ('Active', 'Closed')
             GROUP BY s.sprint_id, s.sprint_name, s.start_date, s.end_date, 
                      s.sprint_status, s.total_estimated_hours, s.total_completed_hours
             ORDER BY s.start_date ASC
@@ -160,15 +161,16 @@ class DelayCalculationService:
         """Fetch task data for story point calculation"""
         query = """
             SELECT 
-                task_id,
-                sprint_id,
-                task_name,
-                status,
-                story_points,
-                estimated_hours,
-                logged_hours
-            FROM task
-            WHERE project_id = %s
+                pb.id AS task_id,
+                pb.sprint_id,
+                pb.summary AS task_name,
+                pb.status,
+                pb.story_points,
+                pb.estimated_hours,
+                pb.logged_hours
+            FROM project_backlog pb
+            JOIN sprint s ON pb.sprint_id = s.sprint_id
+            WHERE pb.project_id = %s AND (s.sprint_status = 'Active' OR s.sprint_status = 'Closed')
         """
         
         results = await db.execute_query(query, (project_id,), fetch_all=True, schema=tenant_db)
@@ -289,7 +291,7 @@ class DelayCalculationService:
         # Count Completed Sprints
         completed_sprints_list = [
             s for s in sprint_data 
-            if s['sprint_status'] in ['Completed', 'Closed']
+            if s['sprint_status'] == 'Closed'
         ]
         completed_sprints = len(completed_sprints_list)
         
@@ -298,7 +300,7 @@ class DelayCalculationService:
         completed_story_points = sum([
             task.get('story_points', 0) or 0 
             for task in task_data 
-            if task['status'] == 'Completed'
+            if (task.get('status') or '').lower() == 'done'
         ])
         remaining_story_points = total_story_points - completed_story_points
         
@@ -474,8 +476,8 @@ class DelayCalculationService:
         delay_days_raw = sprint_delay * sprint_size_days
         
         # Calculate Developer Availability Factor
-        total_leave_hours = sum([sprint.get('total_leave_hours', 0) or 0 for sprint in sprint_data])
-        total_planned_hours = sum([sprint.get('total_estimated_hours', 0) or 0 for sprint in sprint_data])
+        total_leave_hours = float(sum([sprint.get('total_leave_hours', 0) or 0 for sprint in sprint_data]))
+        total_planned_hours = float(sum([sprint.get('total_estimated_hours', 0) or 0 for sprint in sprint_data]))
         
         if total_planned_hours > 0:
             availability_ratio = 1 - (total_leave_hours / total_planned_hours)
@@ -582,7 +584,7 @@ class DelayCalculationService:
             
             # Core delay metrics
             'planned_total_sprints': round(planned_total_sprints, 2),
-            'expected_sprints_by_now': round(days_elapsed / sprint_size_days, 2) if sprint_size_days > 0 else 0.0,
+            'total_sprints': len(sprint_data),
             'completed_sprints': completed_sprints,
             'forecasted_remaining_sprints': round(forecasted_remaining_sprints, 2),
             'forecasted_total_sprints': round(forecasted_total_sprints, 2),
@@ -670,7 +672,7 @@ class DelayCalculationService:
         # Get completed sprints
         completed_sprints_list = [
             s for s in sprint_data 
-            if s['sprint_status'] in ['Completed', 'Closed']
+            if s['sprint_status'] == 'Closed'
         ]
         
         # Calculate velocity for each completed sprint
@@ -681,7 +683,7 @@ class DelayCalculationService:
             completed_sp = sum([
                 t.get('story_points', 0) or 0 
                 for t in sprint_tasks 
-                if t['status'] == 'Completed'
+                if t['status'] == 'done'
             ])
             sprint_velocities.append(completed_sp)
         
@@ -755,7 +757,7 @@ class DelayCalculationService:
         """
         completed_sprints_list = [
             s for s in sprint_data 
-            if s['sprint_status'] in ['Completed', 'Closed']
+            if s['sprint_status'] == 'Closed'
         ]
         
         if len(completed_sprints_list) < 2:
@@ -776,7 +778,7 @@ class DelayCalculationService:
             completed_sp = sum([
                 t.get('story_points', 0) or 0 
                 for t in sprint_tasks 
-                if t['status'] == 'Completed'
+                if t['status'] == 'done'
             ])
             sprint_velocities.append(completed_sp)
         
@@ -976,21 +978,12 @@ class DelayCalculationService:
                 'recommendation': 'Consider adjusting sprint commitments or adding resources'
             })
         
-        # Warning 3: Scope Creep
-        if scope_change_ratio > self.SCOPE_CHANGE_THRESHOLD:
-            warnings.append({
-                'type': 'SCOPE_CREEP',
-                'severity': 'HIGH',
-                'message': f"Project scope has increased by {scope_change_ratio*100:.1f}%",
-                'recommendation': 'Review and prioritize backlog, consider descoping low-priority items'
-            })
-        
         # Warning 4: Low Sprint Completion
         if completed_sprints > 0:
             # Check last sprint completion rate
             completed_sprints_list = [
                 s for s in sprint_data 
-                if s['sprint_status'] in ['Completed', 'Closed']
+                if s['sprint_status'] == 'Closed'
             ]
             
             if completed_sprints_list:
@@ -1003,7 +996,7 @@ class DelayCalculationService:
                     completed_sp = sum([
                         t.get('story_points', 0) or 0 
                         for t in sprint_tasks 
-                        if t['status'] == 'Completed'
+                        if t['status'] == 'done'
                     ])
                     
                     if planned_sp > 0:
@@ -1020,7 +1013,7 @@ class DelayCalculationService:
         if completed_sprints >= self.CONSECUTIVE_SPRINTS_FOR_TREND:
             completed_sprints_list = [
                 s for s in sprint_data 
-                if s['sprint_status'] in ['Completed', 'Closed']
+                if s['sprint_status'] == 'Closed'
             ]
             
             recent_sprints = completed_sprints_list[-self.CONSECUTIVE_SPRINTS_FOR_TREND:]
@@ -1035,7 +1028,7 @@ class DelayCalculationService:
                     completed_sp = sum([
                         t.get('story_points', 0) or 0 
                         for t in sprint_tasks 
-                        if t['status'] == 'Completed'
+                        if t['status'] == 'done'
                     ])
                     
                     if planned_sp > 0:
@@ -1103,7 +1096,7 @@ class DelayCalculationService:
             completed_story_points = sum([
                 t.get('story_points', 0) or 0 
                 for t in sprint_tasks 
-                if t.get('status') == 'Completed'
+                if (t.get('status') or '').lower() == 'done'
             ])
             
             # Calculate velocity for this sprint
@@ -1115,8 +1108,8 @@ class DelayCalculationService:
                 completion_rate = 0.0
             
             # Calculate availability impact
-            total_hours = sprint.get('total_estimated_hours', 0) or 0
-            leave_hours = sprint.get('total_leave_hours', 0) or 0
+            total_hours = float(sprint.get('total_estimated_hours', 0) or 0)
+            leave_hours = float(sprint.get('total_leave_hours', 0) or 0)
             
             if total_hours > 0:
                 availability = ((total_hours - leave_hours) / total_hours) * 100
@@ -1131,11 +1124,11 @@ class DelayCalculationService:
                 'status': sprint['sprint_status'],
                 'planned_story_points': planned_story_points,
                 'completed_story_points': completed_story_points,
-                'completion_rate': round(completion_rate, 2),
-                'velocity': sprint_velocity,
+                'completion_rate': round(float(completion_rate), 2),
+                'velocity': float(sprint_velocity),
                 'total_hours': total_hours,
                 'leave_hours': leave_hours,
-                'availability': round(availability, 2)
+                'availability': round(float(availability), 2)
             })
         
         # Sort by sprint number extracted from sprint name (e.g., "Sprint 1", "Sprint 2", "Sprint 3")
