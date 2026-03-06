@@ -29,19 +29,15 @@ async def list_daily_standups(
     List daily standup transcripts specifically.
     """
     try:
-        filters = TranscriptFilterParams(
-            category=TranscriptCategory.DAILY_STANDUP,
+        service = TranscriptService(db)
+        result = await service.get_transcripts(
+            tenant_name=current_user.get('tenant_schema'),
+            category=TranscriptCategory.DAILY_STANDUP.value,
             date_from=date.fromisoformat(date_from) if date_from else None,
             date_to=date.fromisoformat(date_to) if date_to else None,
             search=search,
             page=page,
             page_size=page_size
-        )
-        
-        service = TranscriptService(db)
-        result = await service.list_transcripts(
-            tenant_schema=current_user.get('tenant_schema'),
-            filters=filters
         )
         
         return result
@@ -109,21 +105,17 @@ async def upload_transcript(
                 detail=f"Invalid category. Must be one of: {', '.join([c.value for c in TranscriptCategory])}"
             )
         
-        transcript_data = TranscriptCreate(
+        service = TranscriptService(db)
+        result = await service.create_transcript(
+            tenant_name=current_user.get('tenant_schema'),
             title=title,
-            category=category_enum,
+            category=category_enum.value,
             transcript_content=transcript_content,
             transcript_date=parsed_date,
             tags=tags_list,
             file_name=file_name,
+            uploaded_by=current_user.get('user_id'),
             project_id=project_id
-        )
-        
-        service = TranscriptService(db)
-        result = await service.create_transcript(
-            transcript_data=transcript_data,
-            tenant_schema=current_user.get('tenant_schema'),
-            uploaded_by=current_user.get('user_id')
         )
         
         return result
@@ -150,19 +142,15 @@ async def list_transcripts(
         if category:
             category_enum = TranscriptCategory(category)
             
-        filters = TranscriptFilterParams(
-            category=category_enum,
+        service = TranscriptService(db)
+        result = await service.get_transcripts(
+            tenant_name=current_user.get('tenant_schema'),
+            category=category_enum.value if category_enum else None,
             date_from=date.fromisoformat(date_from) if date_from else None,
             date_to=date.fromisoformat(date_to) if date_to else None,
             search=search,
             page=page,
             page_size=page_size
-        )
-        
-        service = TranscriptService(db)
-        result = await service.list_transcripts(
-            tenant_schema=current_user.get('tenant_schema'),
-            filters=filters
         )
         return result
     except Exception as e:
@@ -177,10 +165,13 @@ async def get_transcript(
 ):
     try:
         service = TranscriptService(db)
-        return await service.get_transcript(
-            transcript_id=transcript_id,
-            tenant_schema=current_user.get('tenant_schema')
+        result = await service.get_transcript_by_id(
+            tenant_name=current_user.get('tenant_schema'),
+            transcript_id=transcript_id
         )
+        if not result:
+            raise ValueError("Transcript not found")
+        return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -196,11 +187,20 @@ async def update_transcript(
 ):
     try:
         service = TranscriptService(db)
-        return await service.update_transcript(
+        result = await service.update_transcript(
+            tenant_name=current_user.get('tenant_schema'),
             transcript_id=transcript_id,
-            transcript_data=transcript_data,
-            tenant_schema=current_user.get('tenant_schema')
+            title=transcript_data.title,
+            category=transcript_data.category.value if transcript_data.category else None,
+            transcript_content=transcript_data.transcript_content,
+            transcript_date=transcript_data.transcript_date,
+            tags=transcript_data.tags
         )
+        if not result:
+            raise ValueError("Transcript not found")
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Error updating transcript: {e}")
         raise HTTPException(status_code=500, detail="Failed to update transcript")
@@ -214,8 +214,8 @@ async def delete_transcript(
     try:
         service = TranscriptService(db)
         await service.delete_transcript(
-            transcript_id=transcript_id,
-            tenant_schema=current_user.get('tenant_schema')
+            tenant_name=current_user.get('tenant_schema'),
+            transcript_id=transcript_id
         )
         return JSONResponse(status_code=200, content={"message": "Deleted successfully"})
     except Exception as e:
