@@ -1113,3 +1113,140 @@ class JiraService:
         except Exception as exc:
             logger.error(f"Error starting Jira sprint {sprint_id}: {exc}")
             return False
+
+    async def get_issue_status(self, tenant_name: str, issue_key: str) -> Dict[str, Any]:
+        """
+        Get current status of a Jira issue.
+        """
+        credentials = await self.get_credentials(tenant_name)
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Jira integration not configured."
+            )
+        
+        jira_url = credentials["jira_url"]
+        email = credentials["email"]
+        secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
+        secret_result = get_secret(secret_name)
+        
+        if not secret_result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve Jira API token"
+            )
+        
+        api_token = secret_result.get("secret_value")
+        auth_b64 = base64.b64encode(f"{email}:{api_token}".encode("ascii")).decode("ascii")
+        
+        headers = {
+            "Authorization": f"Basic {auth_b64}",
+            "Accept": "application/json"
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{jira_url}/rest/api/3/issue/{issue_key}",
+                headers=headers,
+                params={"fields": "status,summary,resolution"},
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    fields = data.get("fields", {})
+                    status_data = fields.get("status", {})
+                    return {
+                        "issue_key": issue_key,
+                        "status": status_data.get("name"),
+                        "status_category": status_data.get("statusCategory", {}).get("name"),
+                        "summary": fields.get("summary"),
+                        "is_resolved": fields.get("resolution") is not None
+                    }
+                else:
+                    error_text = await response.text()
+                    raise HTTPException(
+                        status_code=response.status,
+                        detail=f"Failed to get Jira issue status: {error_text}"
+                    )
+
+    async def transition_issue_to_status(self, tenant_name: str, issue_key: str, target_status: str) -> Dict[str, Any]:
+        """
+        Transition a Jira issue to a new status.
+        """
+        credentials = await self.get_credentials(tenant_name)
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Jira integration not configured."
+            )
+        
+        jira_url = credentials["jira_url"]
+        email = credentials["email"]
+        secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
+        secret_result = get_secret(secret_name)
+        
+        if not secret_result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve Jira API token"
+            )
+        
+        api_token = secret_result.get("secret_value")
+        auth_b64 = base64.b64encode(f"{email}:{api_token}".encode("ascii")).decode("ascii")
+        
+        headers = {
+            "Authorization": f"Basic {auth_b64}",
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            # 1. Get available transitions
+            async with session.get(
+                f"{jira_url}/rest/api/3/issue/{issue_key}/transitions",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as trans_resp:
+                if trans_resp.status != 200:
+                    error_text = await trans_resp.text()
+                    raise HTTPException(
+                        status_code=trans_resp.status,
+                        detail=f"Failed to fetch available transitions: {error_text}"
+                    )
+                
+                transitions_data = await trans_resp.json()
+                transitions = transitions_data.get("transitions", [])
+                
+                # Find matching transition
+                transition_id = None
+                for t in transitions:
+                    if t.get("name").lower() == target_status.lower() or t.get("to", {}).get("name").lower() == target_status.lower():
+                        transition_id = t.get("id")
+                        break
+                
+                if not transition_id:
+                    available_statuses = [t.get("name") for t in transitions]
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Status '{target_status}' not available for transition. Available: {', '.join(available_statuses)}"
+                    )
+                
+                # 2. Perform transition
+                async with session.post(
+                    f"{jira_url}/rest/api/3/issue/{issue_key}/transitions",
+                    headers=headers,
+                    json={"transition": {"id": transition_id}},
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as post_resp:
+                    if post_resp.status == 204:
+                        return {
+                            "issue_key": issue_key,
+                            "new_status": target_status,
+                            "success": True
+                        }
+                    else:
+                        error_text = await post_resp.text()
+                        raise HTTPException(
+                            status_code=post_resp.status,
+                            detail=f"Failed to transition issue: {error_text}"
+                        )
