@@ -242,7 +242,9 @@ async def get_current_user_from_token(authorization: str = Header(None, alias="A
 
 
 def get_secrets():
-    client = boto3.client("secretsmanager", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+    
+    client = boto3.client("secretsmanager")
+
 
     secrets_result = {}
 
@@ -272,9 +274,8 @@ def get_secrets():
 
     return secrets_result
 
-
 def create_secret(secret_name, secret_value):
-    client = boto3.client("secretsmanager", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+    client = boto3.client("secretsmanager")
     
     try:
         response = client.create_secret(
@@ -304,7 +305,7 @@ def get_secret(secret_name):
     Returns:
         Dict with success status and secret_value or error message
     """
-    client = boto3.client("secretsmanager", region_name=os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+    client = boto3.client("secretsmanager")
     
     try:
         response = client.get_secret_value(SecretId=secret_name)
