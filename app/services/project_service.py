@@ -525,7 +525,7 @@ class ProjectService:
                 detail=f"Project with ID {project_id} not found"
             )
             
-        return await self.project_repo.get_sprints_by_project(tenant_name, project_id)
+        return await self.sprint_repo.list_sprints_by_project(tenant_name, project_id)
 
     async def get_active_sprints_with_tasks(
         self,
@@ -552,7 +552,41 @@ class ProjectService:
                 detail=f"Project with ID {project_id} not found"
             )
             
-        sprints = await self.project_repo.get_sprints_by_project(tenant_name, project_id, date_filter)
+        # The meeting table and projects table logic to fetch the correct active sprint
+        # For an active sprint, the requested date should fall between start_date and end_date
+        query = """
+            SELECT * FROM sprint
+            WHERE project_id = %s 
+              AND (
+                  sprint_status = 'Active' 
+                  OR (DATE(start_date) <= DATE(%s) AND DATE(end_date) >= DATE(%s))
+              )
+            ORDER BY start_date DESC
+        """
+        sprints = await self.db.execute_query(
+            query,
+            (project_id, date_filter, date_filter),
+            fetch_all=True,
+            schema=tenant_name
+        )
+        
+        # If no active sprints matching the exact date or Active status, return the latest sprint as fallback
+        if not sprints:
+            fallback_query = """
+                SELECT * FROM sprint
+                WHERE project_id = %s
+                ORDER BY start_date DESC
+                LIMIT 1
+            """
+            sprints = await self.db.execute_query(
+                fallback_query,
+                (project_id,),
+                fetch_all=True,
+                schema=tenant_name
+            )
+            
+        if not sprints:
+            sprints = []
         
         # Import BacklogRepository locally to avoid circular imports
         from app.db.repositories.backlog_repository import BacklogRepository
@@ -562,7 +596,9 @@ class ProjectService:
         for sprint in sprints:
             # Fetch tasks for this sprint
             tasks = await backlog_repo.list_backlog_by_sprint(tenant_name, sprint['sprint_id'])
-            sprint['tasks'] = tasks
-            result.append(sprint)
+            # Ensure sprint is a dictionary, not a tuple (since we use execute_query which returns list of dicts)
+            sprint_dict = dict(sprint)
+            sprint_dict['tasks'] = tasks
+            result.append(sprint_dict)
             
         return result

@@ -166,6 +166,45 @@ class BacklogRepository:
             logger.error(f"Error listing backlog items: {str(e)}")
             raise
     
+    async def list_backlog_by_sprint(
+        self,
+        tenant_name: str,
+        sprint_id: int
+    ) -> List[Dict[str, Any]]:
+        """List all backlog items for a sprint"""
+        try:
+            query = """
+                SELECT 
+                    id, project_id, sprint_id, summary, description, issue_type,
+                    status, priority, assignee, tags, severity, parent_task_id,
+                    created_at, updated_at
+                FROM project_backlog
+                WHERE sprint_id = %s
+                ORDER BY created_at ASC
+            """
+            
+            results = await self.db.execute_query(
+                query,
+                (sprint_id,),
+                fetch_all=True,
+                schema=tenant_name
+            )
+            
+            # Deserialize tags for each item
+            if results:
+                for item in results:
+                    if item.get('tags'):
+                        try:
+                            item['tags'] = json.loads(item['tags'])
+                        except:
+                            item['tags'] = None
+            
+            return results or []
+            
+        except Exception as e:
+            logger.error(f"Error listing sprint backlog items: {str(e)}")
+            return []
+    
     
     async def list_user_tasks(
         self,
