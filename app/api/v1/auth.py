@@ -1,7 +1,7 @@
 """
 Authentication API Endpoints
 
-Handles user authentication, registration, and password management.
+Handles user authentication, registration, and password management new tse m,egr for add this.
 """
 
 from fastapi import APIRouter, HTTPException, status, Depends
