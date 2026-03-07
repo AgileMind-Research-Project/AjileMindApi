@@ -9,9 +9,10 @@ Provides REST API for:
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
+import logging
+import json
 from typing import List, Optional
 from datetime import date, datetime
-import logging
 
 from app.utils.jwt import get_current_user_from_token
 from app.services.meeting_service import get_meeting_service
@@ -95,11 +96,7 @@ async def create_meeting(
             detail="Failed to create meeting"
         )
     
-    return {
-        "success": True,
-        "message": "Meeting created successfully",
-        "data": meeting
-    }
+    return meeting
 
 
 @router.get("/{meeting_id}", response_model=dict)
@@ -144,10 +141,7 @@ async def get_meeting(
                 detail="Meeting not found"
             )
     
-    return {
-        "success": True,
-        "data": meeting
-    }
+    return meeting
 
 
 @router.patch("/{meeting_id}/start", response_model=dict)
@@ -656,6 +650,67 @@ async def store_transcript(
     }
 
 
+@router.put("/{meeting_id}", response_model=dict)
+async def update_meeting_details(
+    meeting_id: str,
+    request_data: dict,
+    current_user: dict = Depends(get_current_user_from_token)
+):
+    """
+    Update meeting transcript (legacy PUT endpoint)
+    """
+    meeting_service = get_meeting_service()
+    tenant_name = current_user.get('tenant_name')
+    
+    transcript_content = request_data.get("meeting_transcript")
+    if transcript_content is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Request body must contain 'meeting_transcript' field"
+        )
+
+    # This is a proxy for the new update_transcript endpoint
+    transcript = await meeting_service.store_transcript(
+        meeting_id=meeting_id,
+        content=transcript_content,
+        format='text',
+        metadata={},
+        user_id=current_user.get('user_id') or current_user.get('sub'),
+        username=current_user.get('username') or current_user.get('email'),
+        tenant_name=tenant_name
+    )
+    
+    if not transcript:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update transcript"
+        )
+    
+    # Return the full meeting record to the frontend (unwrapped)
+    from app.db.database import db as mysql_db
+    query = """
+        SELECT m.*, t.transcript_content, t.id as transcript_id
+        FROM meetings m
+        LEFT JOIN transcripts t ON t.meeting_id COLLATE utf8mb4_unicode_ci = m.meeting_id COLLATE utf8mb4_unicode_ci
+        WHERE m.meeting_id = %s
+    """
+    meeting_data = await mysql_db.execute_query(query, (meeting_id,), fetch_one=True, schema=tenant_name)
+    
+    if meeting_data:
+        if isinstance(meeting_data.get('attendees'), str):
+            try:
+                meeting_data['attendees'] = json.loads(meeting_data['attendees'])
+            except:
+                meeting_data['attendees'] = []
+        return meeting_data
+
+    return {
+        "success": True,
+        "message": "Transcript updated successfully",
+        "data": transcript
+    }
+
+
 @router.patch("/{meeting_id}/transcripts", response_model=dict)
 async def update_transcript(
     meeting_id: str,
@@ -685,6 +740,24 @@ async def update_transcript(
             detail="Failed to update transcript"
         )
     
+    # Return the full meeting record to the frontend (unwrapped)
+    from app.db.database import db as mysql_db
+    query = """
+        SELECT m.*, t.transcript_content, t.id as transcript_id
+        FROM meetings m
+        LEFT JOIN transcripts t ON t.meeting_id COLLATE utf8mb4_unicode_ci = m.meeting_id COLLATE utf8mb4_unicode_ci
+        WHERE m.meeting_id = %s
+    """
+    meeting_data = await mysql_db.execute_query(query, (meeting_id,), fetch_one=True, schema=tenant_name)
+    
+    if meeting_data:
+        if isinstance(meeting_data.get('attendees'), str):
+            try:
+                meeting_data['attendees'] = json.loads(meeting_data['attendees'])
+            except:
+                meeting_data['attendees'] = []
+        return meeting_data
+
     return {
         "success": True,
         "message": "Transcript updated successfully",
