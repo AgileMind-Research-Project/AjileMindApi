@@ -30,7 +30,8 @@ class Database:
                 minsize=1,
                 maxsize=settings.DB_POOL_SIZE,
                 echo=settings.DEBUG,
-                autocommit=False
+                autocommit=False,
+                connect_timeout=600
             )
             logger.info(f"Database pool created: {settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}")
         except Exception as e:
