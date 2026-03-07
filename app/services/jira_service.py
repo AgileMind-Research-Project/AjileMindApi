@@ -1136,7 +1136,11 @@ class JiraService:
                 detail="Failed to retrieve Jira API token"
             )
         
-        api_token = secret_result.get("secret_value")
+        # Strip and uppercase the issue key
+        issue_key = issue_key.strip().upper()
+        jira_url = jira_url.rstrip('/')
+        api_token = secret_result.get("secret_value", "").strip()
+        
         auth_b64 = base64.b64encode(f"{email}:{api_token}".encode("ascii")).decode("ascii")
         
         headers = {
@@ -1161,6 +1165,14 @@ class JiraService:
                         "status_category": status_data.get("statusCategory", {}).get("name"),
                         "summary": fields.get("summary"),
                         "is_resolved": fields.get("resolution") is not None
+                    }
+                elif response.status == 404:
+                    return {
+                        "issue_key": issue_key,
+                        "status": "Local",
+                        "status_category": "Unknown",
+                        "summary": "Issue not found in Jira",
+                        "is_resolved": False
                     }
                 else:
                     error_text = await response.text()

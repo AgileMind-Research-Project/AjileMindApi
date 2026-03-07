@@ -122,7 +122,11 @@ class MeetingService:
         for field, value in data.items():
             db_field = field_mapping.get(field, field)
             update_fields.append(f"`{db_field}` = %s")
-            params.append(value)
+            # Serialize list/dict to JSON string for the DB
+            if field == 'attendees' and value is not None:
+                params.append(json.dumps(value))
+            else:
+                params.append(value)
             
         params.append(meeting_id)
         

@@ -1,6 +1,6 @@
 import json
 from datetime import date, time, datetime, timedelta
-from typing import Optional, List
+from typing import Optional, List, Any
 from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
@@ -20,7 +20,7 @@ class MeetingCreate(BaseModel):
     start_time: time
     end_time: time
     category: str = "Daily Meeting"
-    attendees: Optional[List[str]] = []  # List of user emails or IDs
+    attendees: Optional[List[Any]] = []  # List of user emails or IDs
 
 
 class MeetingUpdate(BaseModel):
@@ -33,6 +33,7 @@ class MeetingUpdate(BaseModel):
     category: Optional[str] = None
     meeting_transcript: Optional[str] = None
     recording_url: Optional[str] = None
+    attendees: Optional[List[Any]] = None
 
 
 class MeetingResponse(BaseModel):
@@ -46,7 +47,7 @@ class MeetingResponse(BaseModel):
     end_time: Optional[time] = None
     status: Optional[str] = "SCHEDULED"
     meeting_link: Optional[str] = None
-    attendees: Optional[List[str]] = None
+    attendees: Optional[List[Any]] = None
     created_by: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

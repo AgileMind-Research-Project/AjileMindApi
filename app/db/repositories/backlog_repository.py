@@ -177,6 +177,7 @@ class BacklogRepository:
                 SELECT 
                     id, project_id, sprint_id, summary, description, issue_type,
                     status, priority, assignee, tags, severity, parent_task_id,
+                    estimated_hours, story_points, is_jira,
                     created_at, updated_at
                 FROM project_backlog
                 WHERE sprint_id = %s
