@@ -13,6 +13,23 @@ from app.core.logger import logger
 class ReleaseNoteService:
     def __init__(self, db: Database):
         self.db = db
+        from app.db.repositories.backlog_repository import BacklogRepository
+        self.backlog_repo = BacklogRepository(db)
+
+    async def get_backlog_releases(
+        self,
+        tenant_name: str,
+        project_id: int
+    ) -> List[Dict[str, Any]]:
+        """Get releases tracked in the backlog for a specific project"""
+        return await self.backlog_repo.list_backlog_by_type(tenant_name, project_id, 'release')
+
+    async def get_all_backlog_releases(
+        self,
+        tenant_name: str
+    ) -> List[Dict[str, Any]]:
+        """Get all release-type backlog items across all projects"""
+        return await self.backlog_repo.list_all_by_type(tenant_name, 'release')
 
     async def create_release_note(
         self,
