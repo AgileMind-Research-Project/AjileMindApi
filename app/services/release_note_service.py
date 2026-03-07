@@ -27,8 +27,8 @@ class ReleaseNoteService:
             
             insert_query = f"""
                 INSERT INTO `{tenant_name}`.release_notes
-                (project_id, version, title, release_date, release_type, content, summary, created_by)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (project_id, version, title, release_date, release_type, start_sprint, end_sprint, content, summary, created_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             
             params = (
@@ -37,6 +37,8 @@ class ReleaseNoteService:
                 request.title,
                 request.release_date,
                 request.release_type.value,
+                request.start_sprint,
+                request.end_sprint,
                 content_json,
                 request.summary,
                 user_id
@@ -91,6 +93,7 @@ class ReleaseNoteService:
             # Fetch records
             query = f"""
                 SELECT id, project_id, version, title, release_date, release_type,
+                       start_sprint, end_sprint,
                        content, summary, status, created_by, created_at, updated_at,
                        published_at, published_by
                 FROM `{tenant_name}`.release_notes
@@ -131,6 +134,7 @@ class ReleaseNoteService:
         try:
             query = f"""
                 SELECT id, project_id, version, title, release_date, release_type,
+                       start_sprint, end_sprint,
                        content, summary, status, created_by, created_at, updated_at,
                        published_at, published_by
                 FROM `{tenant_name}`.release_notes
@@ -178,6 +182,14 @@ class ReleaseNoteService:
             if request.release_type is not None:
                 update_fields.append("release_type = %s")
                 params.append(request.release_type.value)
+            
+            if request.start_sprint is not None:
+                update_fields.append("start_sprint = %s")
+                params.append(request.start_sprint)
+                
+            if request.end_sprint is not None:
+                update_fields.append("end_sprint = %s")
+                params.append(request.end_sprint)
             
             if request.content is not None:
                 update_fields.append("content = %s")
