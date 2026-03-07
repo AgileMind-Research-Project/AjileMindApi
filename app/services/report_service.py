@@ -11,10 +11,12 @@ from app.schemas.report import (
 )
 from app.services.llm_report_service import get_llm_report_service
 from app.services.transcript_service import TranscriptService
+from app.services.new_task_service import NewTaskService
+from app.services.recurring_bug_service import RecurringBugService
 from app.core.logger import logger
 from typing import List, Optional, Dict, Any
 import json
-from datetime import datetime
+from datetime import datetime, date
 
 
 class ReportService:
@@ -59,7 +61,9 @@ class ReportService:
             report_type_map = {
                 "DAILY_STANDUP": "daily_standup",
                 "SPRINT_MEETING": "sprint_meeting",
-                "RETROSPECTIVE": "retrospective"
+                "SPRINT_PLANNING": "sprint_meeting",
+                "RETROSPECTIVE": "retrospective",
+                "BRAINSTORMING": "brainstorming"
             }
             report_type = report_type_map.get(category_str)
             
@@ -78,17 +82,21 @@ class ReportService:
             # Convert Pydantic model to dict
             report_content = report_data.model_dump() if hasattr(report_data, 'model_dump') else report_data.dict()
             
+            # Get project_id from transcript
+            project_id = getattr(transcript, 'project_id', None)
+            
             # Insert report into database
             insert_query = f"""
                 INSERT INTO {tenant_schema}.reports
-                (transcript_id, report_type, report_content, template_id, version, status, generated_by, tenant_schema)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (transcript_id, project_id, report_type, report_content, template_id, version, status, generated_by, tenant_schema)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             
             result = await self.db.execute_query(
                 insert_query,
                 (
                     request.transcript_id,
+                    project_id,
                     report_type,
                     json.dumps(report_content),
                     request.template_id,
@@ -117,6 +125,50 @@ class ReportService:
                 raise ValueError(f"Report {report_id} inserted but not found in {tenant_schema}.reports. This may indicate a schema mismatch.")
             
             logger.info(f"Report {report_id} verified, fetching full details")
+            
+            # Update transcript's report_generated status to 'done'
+            await transcript_service.update_report_generated_status(
+                transcript_id=request.transcript_id,
+                tenant_schema=tenant_schema,
+                status='done'
+            )
+            logger.info(f"Transcript {request.transcript_id} report_generated status updated to 'done'")
+            
+            # Extract and store tasks/bugs based on report type
+            try:
+                if report_type == 'brainstorming':
+                    # Extract new tasks from brainstorming report's next_steps
+                    next_steps = report_content.get('next_steps', [])
+                    if next_steps:
+                        new_task_service = NewTaskService(self.db)
+                        await new_task_service.create_tasks_from_report(
+                            report_id=report_id,
+                            transcript_id=request.transcript_id,
+                            project_id=project_id,
+                            next_steps=next_steps,
+                            tenant_schema=tenant_schema
+                        )
+                        logger.info(f"Extracted {len(next_steps)} new tasks from brainstorming report {report_id}")
+                
+                elif report_type in ['retrospective', 'daily_standup', 'sprint_meeting']:
+                    # Store ALL bugs/issues from report to recurring_bugs table
+                    if project_id:
+                        bug_service = RecurringBugService(self.db)
+                        meeting_date = getattr(transcript, 'meeting_date', None) or date.today()
+                        await bug_service.store_bugs_from_report(
+                            tenant_schema=tenant_schema,
+                            report_id=report_id,
+                            transcript_id=request.transcript_id,
+                            project_id=project_id,
+                            report_type=report_type,
+                            report_content=report_content,
+                            meeting_date=meeting_date
+                        )
+                        logger.info(f"Stored issues from {report_type} report {report_id}")
+            
+            except Exception as extract_error:
+                # Log but don't fail the report generation if extraction fails
+                logger.warning(f"Error extracting tasks/bugs from report {report_id}: {extract_error}")
             
             # Fetch the created report with explicit schema
             return await self.get_report(report_id, tenant_schema)

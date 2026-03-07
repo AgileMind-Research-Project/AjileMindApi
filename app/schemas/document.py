@@ -47,7 +47,7 @@ class DocumentListResponse(BaseModel):
     doc_title: str
     uploaded_date: date
     category: Optional[str]
-    created_at: datetime
+    created_at: Optional[datetime] = None
 
 
 class DocumentContentResponse(BaseModel):
@@ -72,6 +72,7 @@ class ChatQueryRequest(BaseModel):
     document_id: Optional[int] = Field(None, description="ID of the document to use as context. If None, search all documents")
     query: str = Field(..., min_length=1, description="User query for the chatbot")
     search_all: bool = Field(False, description="If True, search across all documents to find the most relevant one")
+    filter_date: Optional[str] = Field(None, description="Filter documents by this date (YYYY-MM-DD format). Only used when search_all is True.")
 
 
 class ChatQueryResponse(BaseModel):

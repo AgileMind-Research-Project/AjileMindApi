@@ -53,10 +53,13 @@ class JiraBacklogService:
         try:
             # Map our issue types to Jira issue types
             issue_type_mapping = {
+                "epic": "Epic",
                 "story": "Story",
-                "feature": "Epic",
+                "feature": "Story",  # Feature mapped to Story in Jira
+                "task": "Task",
                 "change": "Task",
-                "bug": "Bug"
+                "bug": "Bug",
+                "sub_task": "Sub-task"
             }
             
             jira_issue_type = issue_type_mapping.get(
@@ -221,7 +224,7 @@ class JiraBacklogService:
                     "issue_key": result["issue_key"],
                     "summary": item.summary
                 })
-                logger.info(f"✓ Created {result['issue_key']} ({idx}/{total})")
+                logger.info(f"[OK] Created {result['issue_key']} ({idx}/{total})")
             except Exception as e:
                 error_msg = f"Failed to create '{item.summary}': {str(e)}"
                 logger.error(error_msg)

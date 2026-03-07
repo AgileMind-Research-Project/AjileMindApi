@@ -5,7 +5,7 @@ Loads configuration from environment variables.
 """
 
 import os
-from typing import List, Union
+from typing import List, Union, Optional
 from pydantic_settings import BaseSettings
 from pydantic import EmailStr, field_validator
 
@@ -106,9 +106,14 @@ class Settings(BaseSettings):
     # Ollama/Llama Configuration (Local LLM)
     OLLAMA_HOST: str = "http://localhost"
     OLLAMA_PORT: int = 11434
-    OLLAMA_MODEL: str = "llama2"  # Options: llama2, llama3.2, mistral, neural-chat, etc.
+    OLLAMA_MODEL: str = "llama3.2"  # Options: tinyllama (1.1B), llama3.2:1b, llama2, mistral, etc.
     OLLAMA_MAX_TOKENS: int = 2000
     OLLAMA_TEMPERATURE: float = 0.7
+    
+    @property
+    def OLLAMA_BASE_URL(self) -> str:
+        """Construct Ollama base URL from host and port"""
+        return f"{self.OLLAMA_HOST.rstrip('/')}:{self.OLLAMA_PORT}"
     
     # LLM Provider Selection
     LLM_PROVIDER: str = "ollama"  # Options: openai, ollama, gemini, claude, anthropic

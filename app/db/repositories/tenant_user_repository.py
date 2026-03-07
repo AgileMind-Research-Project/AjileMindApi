@@ -179,7 +179,7 @@ class TenantUserRepository:
                         # Extract constraint info for logging
                         constraint_match = re.search(r'ADD CONSTRAINT `(\w+)`', statement)
                         constraint_name = constraint_match.group(1) if constraint_match else 'unknown'
-                        logger.info(f"✓ Added foreign key constraint: {constraint_name}")
+                        logger.info(f"[OK] Added foreign key constraint: {constraint_name}")
                     except Exception as e:
                         logger.error(f"Error adding foreign key constraint: {e}")
                         logger.warning(f"Continuing despite foreign key error...")

@@ -24,6 +24,8 @@ class CreateChannelRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Channel name")
     description: str = Field(default="", max_length=500, description="Channel description")
     is_private: bool = Field(default=False, description="Whether channel is private")
+    project_id: Optional[int] = Field(default=None, description="Associated project ID (for project channels)")
+    team_name: Optional[str] = Field(default=None, max_length=200, description="Project/team name for grouping")
 
 
 class UpdateChannelRequest(BaseModel):
@@ -49,6 +51,57 @@ class SendMessageRequest(BaseModel):
 class UpdateMessageRequest(BaseModel):
     """Request to update a message"""
     content: str = Field(..., min_length=1, max_length=5000, description="New message content")
+
+
+# ==================== Helper Functions ====================
+
+def check_and_auto_join(chat_service, channel_id: str, current_user: dict) -> bool:
+    """
+    Check if user is a member OR has project access.
+    If project access exists but not member -> auto-join.
+    Returns True if user has access (is member), False otherwise.
+    """
+    user_id = current_user.get('user_id') or current_user.get('sub')
+    
+    # 1. Check direct membership
+    if chat_service.is_user_in_channel(channel_id, user_id):
+        return True
+        
+    # 2. Check project access
+    channel = chat_service.get_channel(channel_id)
+    if not channel:
+        return False 
+        
+    project_id = channel.get('project_id')
+    user_projects = current_user.get('projects', []) 
+    # user_projects comes from JWT, usually list of ints
+    
+    if project_id is not None:
+        try:
+            pid_int = int(project_id)
+            # Check if project ID is in user's project list
+            # Handle potential string/int mismatch in list
+            user_pids = [int(p) for p in user_projects if str(p).isdigit()]
+                
+            if pid_int in user_pids:
+                # User has access! Auto-join
+                tenant_name = current_user.get('tenant_name')
+                username = current_user.get('username') or current_user.get('email')
+                
+                if tenant_name and username:
+                    chat_service.add_user_to_channel(
+                        tenant_name=tenant_name,
+                        channel_id=channel_id,
+                        user_id=user_id,
+                        username=username,
+                        role="member"
+                    )
+                    logger.info(f"User {user_id} auto-joined project channel {channel_id} (Project {pid_int})")
+                    return True
+        except (ValueError, TypeError):
+            pass
+            
+    return False
 
 
 # ==================== Channel Endpoints ====================
@@ -89,7 +142,9 @@ async def create_channel(
         created_by_user_id=user_id,
         created_by_username=username,
         description=request.description,
-        is_private=request.is_private
+        is_private=request.is_private,
+        project_id=request.project_id,
+        team_name=request.team_name
     )
     
     if not channel:
@@ -110,10 +165,10 @@ async def get_channels(
     current_user: dict = Depends(get_current_user_from_token)
 ):
     """
-    Get all channels for the current user's tenant
-    
-    **Returns:**
-    - List of channels the user is a member of
+    Get all channels for the current user's tenant.
+    Returns:
+    - All public channels (including project channels)
+    - Private channels the user is a member of
     """
     chat_service = get_redis_chat_service()
     
@@ -126,17 +181,53 @@ async def get_channels(
             detail="Missing tenant information in token"
         )
     
-    # Get user's channels
-    channels = chat_service.get_tenant_channels(
+    # 1. Get ALL channels for tenant (to find public ones)
+    all_channels = chat_service.get_tenant_channels(
+        tenant_name=tenant_name,
+        user_id=None
+    )
+    
+    # 2. Get user's joined channels (to assume membership for private ones)
+    # Optimization: get_tenant_channels(user_id=...) does this efficiently via Redis sets
+    user_joined_channels = chat_service.get_tenant_channels(
         tenant_name=tenant_name,
         user_id=user_id
     )
+    user_joined_ids = {c['id'] for c in user_joined_channels}
+
+    # 3. Filter/Merge
+    visible_channels = []
+    seen_ids = set()
+
+    # Add all joined channels (covers private & public that are joined)
+    for ch in user_joined_channels:
+        visible_channels.append(ch)
+        seen_ids.add(ch['id'])
+
+    # Add remaining public channels
+    for ch in all_channels:
+        if ch['id'] not in seen_ids:
+            # Check if public (is_private is boolean or string 'False')
+            is_private = ch.get('is_private', False)
+            if isinstance(is_private, str):
+                is_private = is_private.lower() == 'true'
+            
+            if not is_private:
+                visible_channels.append(ch)
+                seen_ids.add(ch['id'])
+
+    # Sort checks
+    visible_channels.sort(key=lambda x: x.get('name', '').lower())
+    
+    # Inject is_member flag
+    for ch in visible_channels:
+        ch['is_member'] = (ch['id'] in user_joined_ids)
     
     return {
         "success": True,
         "data": {
-            "channels": channels,
-            "total": len(channels)
+            "channels": visible_channels,
+            "total": len(visible_channels)
         }
     }
 
@@ -168,10 +259,8 @@ async def get_channel(
             detail="Channel not found"
         )
     
-    # Check if user is member
-    is_member = chat_service.is_user_in_channel(channel_id, user_id)
-    
-    if not is_member:
+    # Check if user is member (or has project access)
+    if not check_and_auto_join(chat_service, channel_id, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not a member of this channel"
@@ -421,6 +510,57 @@ async def remove_member(
     }
 
 
+@router.delete("/channels/{channel_id}")
+async def delete_channel(
+    channel_id: str,
+    current_user: dict = Depends(get_current_user_from_token)
+):
+    """
+    Delete a channel (Super Admin only)
+    """
+    chat_service = get_redis_chat_service()
+    
+    # Check permissions (Super Admin only)
+    roles = current_user.get('roles', [])
+    if 'SUPER_ADMIN' not in roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Super Admins can delete channels"
+        )
+    
+    tenant_name = current_user.get('tenant_name')
+    if not tenant_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing tenant information in token"
+        )
+    
+    # Check if channel exists
+    channel = chat_service.get_channel(channel_id)
+    if not channel:
+         raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Channel not found"
+        )
+
+    # Perform delete
+    success = chat_service.delete_channel(tenant_name, channel_id)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete channel"
+        )
+    
+    user_id = current_user.get('user_id') or current_user.get('sub')
+    logger.info(f"Channel {channel_id} deleted by Super Admin {user_id}")
+    
+    return {
+        "success": True,
+        "message": "Channel deleted successfully"
+    }
+
+
 @router.get("/channels/{channel_id}/members")
 async def get_members(
     channel_id: str,
@@ -439,9 +579,8 @@ async def get_members(
     
     user_id = current_user.get('user_id') or current_user.get('sub')
     
-    # Check if user is member
-    is_member = chat_service.is_user_in_channel(channel_id, user_id)
-    if not is_member:
+    # Check if user is member (or has project access)
+    if not check_and_auto_join(chat_service, channel_id, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not a member of this channel"
@@ -486,9 +625,8 @@ async def send_message(
     user_id = current_user.get('user_id') or current_user.get('sub')
     username = current_user.get('username') or current_user.get('email')
     
-    # Check if user is member
-    is_member = chat_service.is_user_in_channel(channel_id, user_id)
-    if not is_member:
+    # Check if user is member (or has project access)
+    if not check_and_auto_join(chat_service, channel_id, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not a member of this channel"
@@ -543,9 +681,8 @@ async def get_messages(
     limit = min(limit, 100)  # Max 100 messages
     offset = max(offset, 0)  # Min 0 offset
     
-    # Check if user is member
-    is_member = chat_service.is_user_in_channel(channel_id, user_id)
-    if not is_member:
+    # Check if user is member (or has project access)
+    if not check_and_auto_join(chat_service, channel_id, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not a member of this channel"

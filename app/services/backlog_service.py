@@ -7,14 +7,18 @@ Business logic for backlog management including file processing and Jira integra
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import io
+import json
 from fastapi import UploadFile, HTTPException, status
 from app.db.repositories.backlog_repository import BacklogRepository
+from app.db.repositories.project_repository import ProjectRepository
 from app.services.jira_backlog_service import JiraBacklogService
+from app.services.jira_service import JiraService
 from app.schemas.backlog_schemas import (
     BacklogItemCreate,
     BacklogItemFromFile,
     BacklogItemResponse,
-    BulkUploadResponse
+    BulkUploadResponse,
+    SubtaskCreateRequest
 )
 from app.db.database import Database
 from app.core.logger import logger
@@ -26,6 +30,7 @@ class BacklogService:
     def __init__(self, db: Database):
         self.db = db
         self.backlog_repo = BacklogRepository(db)
+        self.project_repo = ProjectRepository(db)
     
     async def parse_excel_file(
         self,
@@ -247,3 +252,290 @@ class BacklogService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to list sprint backlog items: {str(e)}"
             )
+
+    async def create_subtask(
+        self,
+        tenant_name: str,
+        request: SubtaskCreateRequest
+    ) -> BacklogItemResponse:
+        """Create a new subtask with sequential ID logic"""
+        try:
+            parent_id = request.parent_item_id
+            
+            # 1. Get parent task (verify existence and get subtasks)
+            parent_data = await self.backlog_repo.get_task_with_subtasks(tenant_name, parent_id)
+            if not parent_data or not parent_data.get('parent'):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Parent item {parent_id} not found"
+                )
+            
+            project_id = parent_data['parent']['project_id']
+            
+            # 2. Generate new ID
+            subtasks = parent_data.get('subtasks', [])
+            max_suffix = 0
+            
+            for sub in subtasks:
+                try:
+                    # Parse ID dynamically (splits by '-')
+                    parts = sub['id'].split('-')
+                    if parts and parts[-1].isdigit():
+                        suffix = int(parts[-1])
+                        if suffix > max_suffix:
+                            max_suffix = suffix
+                except Exception:
+                    pass
+            
+            new_suffix = max_suffix + 1
+            new_item_id = f"{parent_id}-SUB-{new_suffix}"
+            
+            # 3. Create Subtask 
+
+            await self.backlog_repo.create_backlog_item(
+                tenant_name=tenant_name,
+                item_id=new_item_id,
+                project_id=project_id, # Inherit project
+                summary=request.summary,
+                description=request.description,
+                issue_type='sub_task', # Force issue type
+                priority=request.priority.value if request.priority else None,
+                assignee=request.assignee,
+                tags=request.tags,
+                severity=request.severity,
+                status='todo',
+                parent_task_id=parent_id
+            )
+            
+            
+            # Fetch and return created item
+            created_item = await self.backlog_repo.get_backlog_item(tenant_name, new_item_id)
+            return BacklogItemResponse(**created_item)
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error creating subtask: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create subtask: {str(e)}"
+            )
+
+    async def sync_priority_items_to_jira(
+        self,
+        tenant_name: str,
+        project_id: int,
+        project_key: str,
+        jira_service: JiraService
+    ) -> Dict[str, Any]:
+        """
+        Sync prioritized items to Jira (create and link) and assign to future sprint.
+        
+        Process:
+        1. Fetch Future Sprint ID.
+        2. Fetch all prioritized items (parents) from project_backlog_priority.
+        3. Create/Update them in Jira.
+        4. Rename local items to match Jira keys.
+        5. Assign items to the future sprint in local DB.
+        6. Fetch and sync subtasks, assigning them to the same sprint.
+        """
+        try:
+            # 1. Fetch Future Sprint ID
+            sprint_query = """
+                SELECT sprint_id FROM sprint 
+                WHERE project_id = %s AND sprint_status = 'Future' 
+                ORDER BY start_date ASC LIMIT 1
+            """
+            sprint_result = await self.db.execute_query(
+                sprint_query,
+                (project_id,),
+                fetch_one=True,
+                schema=tenant_name
+            )
+            future_sprint_id = sprint_result['sprint_id'] if sprint_result else None
+            logger.info(f"Found future sprint_id: {future_sprint_id} for project {project_id}")
+
+            # 2. Fetch prioritized parents from priority table
+            parents_query = """
+                SELECT 
+                    pb.id, pb.summary, pb.description, pb.issue_type,
+                    pb.priority, pb.assignee, pb.tags, pb.is_jira,
+                    pbp.rank
+                FROM project_backlog_priority pbp
+                JOIN project_backlog pb ON pbp.backlog_id = pb.id
+                WHERE pbp.project_id = %s AND pbp.sprint_id IS NULL
+                ORDER BY pbp.rank ASC
+            """
+            
+            parents = await self.db.execute_query(
+                parents_query,
+                (project_id,),
+                fetch_all=True,
+                schema=tenant_name
+            )
+            
+            created_parents = []
+            synced_count = 0
+            
+            if parents:
+                for parent in parents:
+                    parent_id = parent['id']
+                    new_jira_key = parent_id
+                    
+                    try:
+                        priority_name = parent.get('priority').capitalize() if parent.get('priority') else None
+                        
+                        if parent.get('is_jira'):
+                            # UPDATE existing Jira issue
+                            await jira_service.update_issue(
+                                tenant_name=tenant_name,
+                                issue_key=parent_id,
+                                priority=priority_name,
+                                assignee_email=parent.get('assignee')
+                            )
+                        else:
+                            # CREATE new Jira issue
+                            jira_issue = await jira_service.create_issue(
+                                tenant_name=tenant_name,
+                                project_key=project_key,
+                                summary=parent['summary'],
+                                description=parent.get('description'),
+                                issue_type=parent['issue_type'] or 'Task',
+                                priority=priority_name,
+                                assignee_email=parent.get('assignee'),
+                                labels=json.loads(parent['tags']) if parent.get('tags') else None
+                            )
+                            new_jira_key = jira_issue['issue_key']
+                            
+                            # Rename local item and mark as is_jira
+                            if parent_id != new_jira_key:
+                                await self.backlog_repo.rename_backlog_item(tenant_name, parent_id, new_jira_key)
+                                await self.backlog_repo.update_task_jira_info(tenant_name, new_jira_key, new_jira_key)
+                        
+                        # Update sprint_id in both tables if sprint exists
+                        if future_sprint_id:
+                            # Update project_backlog
+                            await self.db.execute_query(
+                                "UPDATE project_backlog SET sprint_id = %s WHERE id = %s",
+                                (future_sprint_id, new_jira_key),
+                                commit=True,
+                                schema=tenant_name
+                            )
+                            # Update project_backlog_priority
+                            await self.db.execute_query(
+                                "UPDATE project_backlog_priority SET sprint_id = %s WHERE backlog_id = %s",
+                                (future_sprint_id, new_jira_key),
+                                commit=True,
+                                schema=tenant_name
+                            )
+                            logger.info(f"Assigned parent {new_jira_key} to sprint {future_sprint_id}")
+
+                        created_parents.append(new_jira_key)
+                        synced_count += 1
+                            
+                    except Exception as e:
+                        logger.error(f"Failed to sync parent {parent_id}: {str(e)}")
+            
+            # 3. Process Subtasks
+            if created_parents:
+                placeholders = ', '.join(['%s'] * len(created_parents))
+                subtasks_query = f"""
+                    SELECT 
+                        id, parent_task_id, summary, description, issue_type,
+                        priority, assignee, tags, is_jira
+                    FROM project_backlog
+                    WHERE parent_task_id IN ({placeholders})
+                """
+                
+                subtasks = await self.db.execute_query(
+                    subtasks_query,
+                    tuple(created_parents),
+                    fetch_all=True,
+                    schema=tenant_name
+                )
+                
+                if subtasks:
+                    for sub in subtasks:
+                        sub_id = sub['id']
+                        parent_key = sub['parent_task_id']
+                        new_sub_key = sub_id
+                        
+                        try:
+                            priority_name = sub.get('priority').capitalize() if sub.get('priority') else None
+                            
+                            if sub.get('is_jira'):
+                                # UPDATE existing subtask
+                                await jira_service.update_issue(
+                                    tenant_name=tenant_name,
+                                    issue_key=sub_id,
+                                    priority=priority_name,
+                                    assignee_email=sub.get('assignee')
+                                )
+                            else:
+                                # CREATE new subtask
+                                jira_sub = await jira_service.create_issue(
+                                    tenant_name=tenant_name,
+                                    project_key=project_key,
+                                    summary=sub['summary'],
+                                    description=sub.get('description'),
+                                    issue_type='Sub-task',
+                                    priority=priority_name,
+                                    assignee_email=sub.get('assignee'),
+                                    labels=json.loads(sub['tags']) if sub.get('tags') else None,
+                                    parent_key=parent_key
+                                )
+                                new_sub_key = jira_sub['issue_key']
+                                
+                                if sub_id != new_sub_key:
+                                    await self.backlog_repo.rename_backlog_item(tenant_name, sub_id, new_sub_key)
+                                    await self.backlog_repo.update_task_jira_info(tenant_name, new_sub_key, new_sub_key)
+                            
+                            # Assign subtask to sprint
+                            if future_sprint_id:
+                                await self.db.execute_query(
+                                    "UPDATE project_backlog SET sprint_id = %s WHERE id = %s",
+                                    (future_sprint_id, new_sub_key),
+                                    commit=True,
+                                    schema=tenant_name
+                                )
+                                # Also check if subtask is in priority table (unlikely but possible based on user request)
+                                await self.db.execute_query(
+                                    "UPDATE project_backlog_priority SET sprint_id = %s WHERE backlog_id = %s",
+                                    (future_sprint_id, new_sub_key),
+                                    commit=True,
+                                    schema=tenant_name
+                                )
+                                logger.info(f"Assigned subtask {new_sub_key} to sprint {future_sprint_id}")
+
+                            synced_count += 1
+                            
+                        except Exception as e:
+                            logger.error(f"Failed to sync subtask {sub_id}: {str(e)}")
+            
+            # Update next sprint date if items were synced
+            if synced_count > 0:
+                await self.project_repo.update_next_sprint_date(tenant_name, project_id)
+            
+            return {
+                "synced_count": synced_count,
+                "parents_processed": len(created_parents),
+                "sprint_assigned": future_sprint_id
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error syncing to Jira: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to sync to Jira: {str(e)}"
+            )
+
+
+    async def list_user_tasks(
+        self,
+        tenant_name: str,
+        email: str
+    ) -> List[Dict[str, Any]]:
+        """List tasks assigned to user"""
+        return await self.backlog_repo.list_user_tasks(tenant_name, email)

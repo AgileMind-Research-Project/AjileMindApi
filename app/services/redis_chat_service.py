@@ -34,7 +34,9 @@ class RedisChatService:
         created_by_user_id: str,
         created_by_username: str,
         description: str = "",
-        is_private: bool = False
+        is_private: bool = False,
+        project_id: Optional[int] = None,
+        team_name: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Create a new channel
@@ -46,6 +48,8 @@ class RedisChatService:
             created_by_username: Username of creator
             description: Channel description
             is_private: Whether channel is private
+            project_id: Associated project ID (optional, for project channels)
+            team_name: Project/team name used for sidebar grouping (optional)
         
         Returns:
             Channel data or None if failed
@@ -66,6 +70,12 @@ class RedisChatService:
                 'is_private': is_private,
                 'member_count': 1
             }
+
+            # Add project fields if provided (project channel)
+            if project_id is not None:
+                channel_data['project_id'] = project_id
+            if team_name:
+                channel_data['team_name'] = team_name
             
             # Store channel data
             channel_key = self.redis._channel_key(channel_id)
@@ -90,7 +100,7 @@ class RedisChatService:
             user_channels_key = self.redis._user_key(tenant_name, created_by_user_id, "channels")
             self.redis.add_to_set(user_channels_key, channel_id)
             
-            logger.info(f"✅ Channel created: {channel_id} ({channel_name}) by {created_by_username}")
+            logger.info(f"Channel created: {channel_id} ({channel_name}) by {created_by_username}")
             return channel_data
             
         except Exception as e:
@@ -186,7 +196,7 @@ class RedisChatService:
             for field, value in updates.items():
                 self.redis.update_hash(channel_key, field, value)
             
-            logger.info(f"✅ Channel updated: {channel_id}")
+            logger.info(f"Channel updated: {channel_id}")
             return True
             
         except Exception as e:
@@ -233,7 +243,7 @@ class RedisChatService:
             tenant_channels_key = self.redis._tenant_key(tenant_name, "channels")
             self.redis.remove_from_set(tenant_channels_key, channel_id)
             
-            logger.info(f"✅ Channel deleted: {channel_id}")
+            logger.info(f"Channel deleted: {channel_id}")
             return True
             
         except Exception as e:
@@ -288,7 +298,7 @@ class RedisChatService:
             member_count = self.redis.get_set_size(members_key)
             self.redis.update_hash(channel_key, 'member_count', member_count)
             
-            logger.info(f"✅ User {username} added to channel {channel_id}")
+            logger.info(f"User {username} added to channel {channel_id}")
             return True
             
         except Exception as e:
@@ -320,7 +330,7 @@ class RedisChatService:
             member_count = self.redis.get_set_size(members_key)
             self.redis.update_hash(channel_key, 'member_count', member_count)
             
-            logger.info(f"✅ User {user_id} removed from channel {channel_id}")
+            logger.info(f"User {user_id} removed from channel {channel_id}")
             return True
             
         except Exception as e:
@@ -424,7 +434,7 @@ class RedisChatService:
                 'data': message_data
             })
             
-            logger.info(f"✅ Message sent to channel {channel_id} by {username}")
+            logger.info(f"Message sent to channel {channel_id} by {username}")
             return message_data
             
         except Exception as e:
@@ -519,7 +529,7 @@ class RedisChatService:
                     msg_json = json.dumps(msg)
                     self.redis.push_to_list(messages_key, msg_json, left=False)
                 
-                logger.info(f"✅ Message {message_id} updated")
+                logger.info(f"Message {message_id} updated")
                 return True
             
             return False
@@ -569,7 +579,7 @@ class RedisChatService:
                     msg_json = json.dumps(msg)
                     self.redis.push_to_list(messages_key, msg_json, left=False)
                 
-                logger.info(f"✅ Message {message_id} deleted")
+                logger.info(f"Message {message_id} deleted")
                 return True
             
             return False
@@ -590,6 +600,6 @@ def get_redis_chat_service() -> RedisChatService:
     
     if _redis_chat_service is None:
         _redis_chat_service = RedisChatService()
-        logger.info("✅ Redis Chat Service initialized")
+        logger.info("Redis Chat Service initialized")
     
     return _redis_chat_service

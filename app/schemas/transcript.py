@@ -14,7 +14,15 @@ class TranscriptCategory(str, Enum):
     """Transcript category types"""
     DAILY_STANDUP = "daily_standup"
     SPRINT_MEETING = "sprint_meeting"
+    SPRINT_PLANNING = "sprint_planning"
     RETROSPECTIVE = "retrospective"
+    BRAINSTORMING = "brainstorming"
+
+
+class ReportGeneratedStatus(str, Enum):
+    """Report generation status"""
+    PENDING = "pending"
+    DONE = "done"
 
 
 class TranscriptCreate(BaseModel):
@@ -25,6 +33,7 @@ class TranscriptCreate(BaseModel):
     transcript_date: date
     tags: Optional[List[str]] = Field(default=None)
     file_name: Optional[str] = Field(default=None, max_length=255)
+    project_id: Optional[int] = Field(default=None)
 
 
 class TranscriptUpdate(BaseModel):
@@ -36,6 +45,7 @@ class TranscriptUpdate(BaseModel):
     tags: Optional[List[str]] = None
 
 
+
 class TranscriptResponse(BaseModel):
     """Schema for transcript response"""
     id: int
@@ -45,21 +55,26 @@ class TranscriptResponse(BaseModel):
     transcript_date: date
     tags: Optional[List[str]] = None
     file_name: Optional[str] = None
+    project_id: Optional[int] = None
+    report_generated: ReportGeneratedStatus = ReportGeneratedStatus.PENDING
     created_at: datetime
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
 
 
 class TranscriptListItem(BaseModel):
-    """Schema for transcript list item (without full content)"""
+    """Schema for transcript list item (includes content for preview)"""
     id: int
     title: str
     category: TranscriptCategory
+    transcript_content: Optional[str] = None
     transcript_date: date
     tags: Optional[List[str]] = None
     file_name: Optional[str] = None
+    project_id: Optional[int] = None
+    report_generated: ReportGeneratedStatus = ReportGeneratedStatus.PENDING
     created_at: datetime
 
     class Config:
@@ -81,5 +96,6 @@ class TranscriptFilterParams(BaseModel):
     date_to: Optional[date] = None
     tags: Optional[List[str]] = None
     search: Optional[str] = None
+    report_generated: Optional[ReportGeneratedStatus] = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)

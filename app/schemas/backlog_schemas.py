@@ -4,7 +4,7 @@ Backlog Schemas
 Pydantic models for backlog item validation and serialization.
 """
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -12,8 +12,10 @@ from enum import Enum
 
 class IssueType(str, Enum):
     """Backlog issue types"""
+    EPIC = "epic"
     STORY = "story"
     FEATURE = "feature"
+    TASK = "task"
     CHANGE = "change"
     BUG = "bug"
     SUB_TASK = "sub_task"
@@ -37,18 +39,18 @@ class BacklogItemBase(BaseModel):
     """Base backlog item fields"""
     summary: str = Field(..., max_length=255, description="Backlog item title")
     description: Optional[str] = Field(None, description="Detailed description")
-    issue_type: IssueType = Field(..., description="Type: story, feature, change, or bug")
+    issue_type: IssueType = Field(..., description="Type: epic, story, feature, task, change, bug, or sub_task")
     priority: Optional[Priority] = Field(None, description="Priority level")
     assignee: Optional[str] = Field(None, max_length=255, description="Assigned person")
     tags: Optional[List[str]] = Field(None, description="Tags/labels")
     severity: Optional[str] = Field(None, max_length=100, description="Severity (required for bugs)")
 
-    @validator('severity')
-    def validate_severity(cls, v, values):
+    @model_validator(mode='after')
+    def validate_severity(self):
         """Severity is required for bugs"""
-        if values.get('issue_type') == IssueType.BUG and not v:
+        if self.issue_type == IssueType.BUG and not self.severity:
             raise ValueError('Severity is required for bug type issues')
-        return v
+        return self
 
 
 class BacklogItemCreate(BacklogItemBase):
@@ -99,6 +101,30 @@ class BacklogItemResponse(BacklogItemBase):
     created_at: datetime
     updated_at: datetime
 
+    @field_validator('issue_type', mode='before')
+    @classmethod
+    def normalize_issue_type(cls, v):
+        """Normalize issue_type to lowercase for enum matching"""
+        if isinstance(v, str):
+            return v.lower().replace(' ', '_').replace('-', '_')
+        return v
+
+    @field_validator('priority', mode='before')
+    @classmethod
+    def normalize_priority(cls, v):
+        """Normalize priority to lowercase for enum matching"""
+        if isinstance(v, str):
+            return v.lower()
+        return v
+
+    @field_validator('status', mode='before')
+    @classmethod
+    def normalize_status(cls, v):
+        """Normalize status to lowercase for enum matching"""
+        if isinstance(v, str):
+            return v.lower().replace(' ', '_').replace('-', '_')
+        return v
+
     class Config:
         from_attributes = True
 
@@ -124,3 +150,31 @@ class BacklogListResponse(BaseModel):
     success: bool
     data: List[BacklogItemResponse]
     total: int
+
+
+class BacklogItemUpdate(BaseModel):
+    """Update backlog item request"""
+    summary: Optional[str] = Field(None, max_length=255)
+    description: Optional[str] = None
+    priority: Optional[Priority] = None
+    assignee: Optional[str] = Field(None, max_length=255)
+    tags: Optional[List[str]] = None
+    severity: Optional[str] = Field(None, max_length=100)
+
+
+class MergeBacklogItemsRequest(BaseModel):
+    """Request to merge multiple backlog items into one"""
+    target_item_id: str = Field(..., description="The ID of the item to keep and update")
+    source_item_ids: List[str] = Field(..., description="List of item IDs to merge into the target and then delete")
+    updates: BacklogItemUpdate = Field(..., description="The new data for the target item")
+
+
+class SubtaskCreateRequest(BaseModel):
+    """Request model for creating a subtask"""
+    parent_item_id: str = Field(..., description="ID of the parent backlog item")
+    summary: str = Field(..., max_length=255, description="Subtask title")
+    description: Optional[str] = Field(None, description="Detailed description")
+    priority: Optional[Priority] = Field(None, description="Priority level")
+    assignee: Optional[str] = Field(None, max_length=255, description="Assigned person")
+    tags: Optional[List[str]] = Field(None, description="Tags/labels")
+    severity: Optional[str] = Field(None, max_length=100, description="Severity (optional)")

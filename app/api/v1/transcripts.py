@@ -10,7 +10,8 @@ from app.db.database import Database, get_db
 from app.utils.jwt import get_current_user_from_token
 from app.schemas.transcript import (
     TranscriptCreate, TranscriptUpdate, TranscriptResponse,
-    TranscriptListResponse, TranscriptFilterParams, TranscriptCategory
+    TranscriptListResponse, TranscriptFilterParams, TranscriptCategory,
+    ReportGeneratedStatus
 )
 from app.services.transcript_service import TranscriptService
 from app.utils.document_parser import parse_document
@@ -28,6 +29,7 @@ async def upload_transcript(
     title: str = Form(...),
     category: str = Form(...),
     transcript_date: str = Form(...),
+    project_id: Optional[int] = Form(None),
     tags: Optional[str] = Form(None),
     pasted_content: Optional[str] = Form(None),
     current_user: dict = Depends(get_current_user_from_token),
@@ -40,6 +42,7 @@ async def upload_transcript(
     - **title**: Transcript title
     - **category**: DAILY_STANDUP, SPRINT_MEETING, or RETROSPECTIVE
     - **transcript_date**: Date of the meeting (YYYY-MM-DD)
+    - **project_id**: Optional project ID (must be a project assigned to the user)
     - **tags**: Optional JSON array of tags
     - **pasted_content**: Optional pasted text content (used if no file)
     """
@@ -92,21 +95,17 @@ async def upload_transcript(
                 detail=f"Invalid category. Must be one of: {', '.join([c.value for c in TranscriptCategory])}"
             )
         
-        # Create transcript
-        transcript_data = TranscriptCreate(
+        service = TranscriptService(db)
+        result = await service.create_transcript(
+            tenant_name=current_user.get('tenant_schema'),
             title=title,
-            category=category_enum,
+            category=category_enum.value,
             transcript_content=transcript_content,
             transcript_date=parsed_date,
             tags=tags_list,
-            file_name=file_name
-        )
-        
-        service = TranscriptService(db)
-        result = await service.create_transcript(
-            transcript_data=transcript_data,
-            tenant_schema=current_user.get('tenant_schema'),
-            uploaded_by=current_user.get('user_id')
+            file_name=file_name,
+            uploaded_by=current_user.get('user_id'),
+            project_id=project_id
         )
         
         return result
@@ -124,6 +123,7 @@ async def list_transcripts(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    report_generated: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: dict = Depends(get_current_user_from_token),
@@ -136,6 +136,7 @@ async def list_transcripts(
     - **date_from**: Filter by date from (YYYY-MM-DD)
     - **date_to**: Filter by date to (YYYY-MM-DD)
     - **search**: Search in title and content
+    - **report_generated**: Filter by report status (pending, done)
     - **page**: Page number (default: 1)
     - **page_size**: Items per page (default: 20, max: 100)
     """
@@ -164,12 +165,21 @@ async def list_transcripts(
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid date_to format")
         
+        # Parse report_generated filter
+        report_generated_enum = None
+        if report_generated:
+            try:
+                report_generated_enum = ReportGeneratedStatus(report_generated)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid report_generated status. Use 'pending' or 'done'")
+        
         # Create filter params
         filters = TranscriptFilterParams(
             category=category_enum,
             date_from=date_from_parsed,
             date_to=date_to_parsed,
             search=search,
+            report_generated=report_generated_enum,
             page=page,
             page_size=page_size
         )
@@ -203,6 +213,9 @@ async def get_transcript(
             tenant_schema=current_user.get('tenant_schema')
         )
         
+        if not result:
+            raise ValueError("Transcript not found")
+        
         return result
     
     except ValueError as e:
@@ -223,10 +236,17 @@ async def update_transcript(
     try:
         service = TranscriptService(db)
         result = await service.update_transcript(
+            tenant_name=current_user.get('tenant_schema'),
             transcript_id=transcript_id,
-            transcript_data=transcript_data,
-            tenant_schema=current_user.get('tenant_schema')
+            title=transcript_data.title,
+            category=transcript_data.category.value if transcript_data.category else None,
+            transcript_content=transcript_data.transcript_content,
+            transcript_date=transcript_data.transcript_date,
+            tags=transcript_data.tags
         )
+        
+        if not result:
+            raise ValueError("Transcript not found")
         
         return result
     
@@ -247,8 +267,8 @@ async def delete_transcript(
     try:
         service = TranscriptService(db)
         await service.delete_transcript(
-            transcript_id=transcript_id,
-            tenant_schema=current_user.get('tenant_schema')
+            tenant_name=current_user.get('tenant_schema'),
+            transcript_id=transcript_id
         )
         
         return JSONResponse(
@@ -259,3 +279,37 @@ async def delete_transcript(
     except Exception as e:
         logger.error(f"Error deleting transcript: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete transcript")
+
+
+@router.post("/{transcript_id}/analyze")
+async def analyze_transcript(
+    transcript_id: int,
+    current_user: dict = Depends(get_current_user_from_token),
+    db: Database = Depends(get_db)
+):
+    """
+    Use AI to extract tasks and leave info from a transcript.
+    """
+    try:
+        service = TranscriptService(db)
+        tenant_schema = current_user.get('tenant_schema')
+        
+        # Fetch the transcript content
+        query = f"SELECT transcript_content FROM {tenant_schema}.transcripts WHERE id = %s"
+        result = await db.execute_query(query, (transcript_id,), fetch_one=True, schema=tenant_schema)
+        
+        if not result or not result.get('transcript_content'):
+            raise HTTPException(status_code=404, detail="Transcript not found")
+        
+        content = result['transcript_content']
+        
+        from app.services.ai_service import get_ai_service
+        ai_service = get_ai_service()
+        analysis = await ai_service.analyze_transcript(content)
+        return analysis
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error analyzing transcript: {e}")
+        raise HTTPException(status_code=500, detail="Failed to analyze transcript")

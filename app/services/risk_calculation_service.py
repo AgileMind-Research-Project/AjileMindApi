@@ -336,20 +336,35 @@ class RiskCalculationService:
         return dict(result) if result else None
 
     async def _get_all_tasks(self, tenant_name: str, project_id: int) -> List[Dict[str, Any]]:
-        """Fetch all tasks for the project from tenant database"""
+        """Fetch tasks (from active/closed sprints) and all bugs from project_backlog."""
         query = """
-            SELECT task_id, project_id, sprint_id, parent_task_id, task_name,
-                   task_type, priority, status, estimated_hours, logged_hours,
-                   start_date, end_date, actual_start_date, actual_end_date,
-                   assignee, description, story_points
-            FROM task
-            WHERE project_id = %s
+            -- Tasks: only from Active or Closed sprints
+            SELECT pb.id AS task_id, pb.project_id, pb.sprint_id, pb.parent_task_id, pb.summary AS task_name,
+                   pb.issue_type AS task_type, pb.priority, pb.status, pb.estimated_hours, pb.logged_hours,
+                   pb.start_date, pb.end_date, pb.actual_start_date, pb.actual_end_date,
+                   pb.assignee, pb.description, pb.story_points
+            FROM project_backlog pb
+            JOIN sprint s ON pb.sprint_id = s.sprint_id
+            WHERE pb.project_id = %s
+              AND LOWER(pb.issue_type) = 'task'
+              AND s.sprint_status = 'Active'
+
+            UNION ALL
+
+            -- Bugs: all bugs for the project regardless of sprint assignment
+            SELECT pb.id AS task_id, pb.project_id, pb.sprint_id, pb.parent_task_id, pb.summary AS task_name,
+                   pb.issue_type AS task_type, pb.priority, pb.status, pb.estimated_hours, pb.logged_hours,
+                   pb.start_date, pb.end_date, pb.actual_start_date, pb.actual_end_date,
+                   pb.assignee, pb.description, pb.story_points
+            FROM project_backlog pb
+            WHERE pb.project_id = %s
+              AND LOWER(pb.issue_type) = 'bug'
         """
-        
+
         result = await db.execute_query(
-            query, 
-            (project_id,), 
-            fetch_all=True, 
+            query,
+            (project_id, project_id),
+            fetch_all=True,
             schema=tenant_name
         )
         return [dict(row) for row in result] if result else []
@@ -361,7 +376,7 @@ class RiskCalculationService:
                    total_estimated_hours, total_completed_hours,
                    start_date, end_date
             FROM sprint
-            WHERE project_id = %s
+            WHERE project_id = %s AND sprint_status IN ('Active', 'Closed', 'Future')
         """
         
         result = await db.execute_query(
@@ -492,25 +507,25 @@ class RiskCalculationService:
             task_type_lower = task_type.lower()
 
             # Count by status (ALL items including bugs)
-            if status_lower == 'to do':
+            if status_lower == 'todo':
                 metrics['todo_tasks'] += 1
-            elif status_lower == 'in progress':
+            elif status_lower == 'inprogress':
                 metrics['inprogress_tasks'] += 1
-            elif status_lower == 'completed':
+            elif status_lower == 'done':
                 metrics['completed_tasks'] += 1
             elif status_lower == 'blocked':
                 metrics['blocked_tasks'] += 1
 
             # Count ONLY tasks (task_type = 'Task', excluding bugs)
             if task_type_lower == 'task':
-                if status_lower == 'to do':
+                if status_lower == 'todo':
                     metrics['todo_tasks_only'] += 1
                     # Check if overdue
                     if end_date and end_date < today:
                         metrics['overdue_tasks'] += 1
                         days_overdue = (today - end_date).days
                         metrics['max_overdue_days'] = max(metrics['max_overdue_days'], days_overdue)
-                elif status_lower == 'in progress':
+                elif status_lower == 'inprogress':
                     metrics['inprogress_tasks_only'] += 1
                     logger.info(f"✅ Found In Progress Task: {task.get('task_name', 'Unknown')}")
                     # Check if overdue
@@ -518,7 +533,7 @@ class RiskCalculationService:
                         metrics['overdue_tasks'] += 1
                         days_overdue = (today - end_date).days
                         metrics['max_overdue_days'] = max(metrics['max_overdue_days'], days_overdue)
-                elif status_lower == 'completed':
+                elif status_lower == 'done':
                     metrics['completed_tasks_only'] += 1
 
             # Count dependencies
@@ -539,11 +554,11 @@ class RiskCalculationService:
                     metrics['low_bugs'] += 1
                 
                 # Count bugs by status
-                if status_lower == 'to do':
+                if status_lower == 'todo':
                     metrics['todo_bugs'] += 1
-                elif status_lower == 'in progress':
+                elif status_lower == 'inprogress':
                     metrics['inprogress_bugs'] += 1
-                elif status_lower == 'completed':
+                elif status_lower == 'done':
                     metrics['completed_bugs'] += 1
 
         metrics['uncompleted_tasks'] = metrics['todo_tasks'] + metrics['inprogress_tasks']
@@ -624,7 +639,7 @@ class RiskCalculationService:
             completed_hours = sprint.get('total_completed_hours') or 0
             start_date = sprint.get('start_date')
 
-            if sprint_status == 'Completed':
+            if sprint_status == 'Closed':
                 metrics['completed_sprints'] += 1
 
             if estimated_hours and estimated_hours > 0:
@@ -654,13 +669,13 @@ class RiskCalculationService:
                         should_count = True
                         
                         # Check if sprint never started (OVERDUE!)
-                        if sprint_status.lower() in ['to do', 'todo', 'not started']:
+                        if sprint_status.lower() == 'future':
                             is_overdue = True  # Sprint is overdue - count as 0% risk!
                         # else: Sprint is "In Progress" or "Completed" - count actual rate
                     # else: Future sprint (start_date > today) - don't count in average
                 else:
                     # No start date available - count only if sprint has started
-                    if sprint_status.lower() not in ['to do', 'todo', 'not started']:
+                    if sprint_status.lower() != 'future':
                         should_count = True
                 
                 if should_count:
@@ -716,9 +731,9 @@ class RiskCalculationService:
                 estimated_hours = sprint.get('total_estimated_hours') or 0
                 completed_hours = sprint.get('total_completed_hours') or 0
                 
-                if status == 'completed':
+                if status == 'closed':
                     sprint_completion_breakdown['completed'] += 1
-                elif status in ['in progress', 'inprogress']:
+                elif status == 'active':
                     sprint_completion_breakdown['in_progress'] += 1
                     # Track actual completion rate for in-progress sprints
                     if estimated_hours > 0:
@@ -1269,7 +1284,7 @@ class RiskCalculationService:
         # Find active sprints (In Progress)
         active_sprints = [
             sprint for sprint in sprints_list 
-            if (sprint.get('sprint_status') or '').strip().lower() == 'in progress'
+            if (sprint.get('sprint_status') or '').strip().lower() == 'active'
         ]
         
         if not active_sprints:
