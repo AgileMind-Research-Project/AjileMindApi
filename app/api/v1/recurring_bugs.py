@@ -33,7 +33,7 @@ async def list_recurring_bugs(
     Set show_all=true to see all bugs including those mentioned only once.
     """
     try:
-        tenant_schema = current_user.get('tenant_schema')
+        tenant_schema = current_user.get('tenant_name') or current_user.get('tenant_schema')
         
         service = RecurringBugService(db)
         result = await service.list_bugs(
@@ -60,7 +60,7 @@ async def get_bug_details(
 ):
     """Get all occurrences of a bug by its hash"""
     try:
-        tenant_schema = current_user.get('tenant_schema')
+        tenant_schema = current_user.get('tenant_name') or current_user.get('tenant_schema')
         
         service = RecurringBugService(db)
         result = await service.get_bug_details(
@@ -88,7 +88,7 @@ async def resolve_bug(
 ):
     """Mark all occurrences of a bug as resolved"""
     try:
-        tenant_schema = current_user.get('tenant_schema')
+        tenant_schema = current_user.get('tenant_name') or current_user.get('tenant_schema')
         
         service = RecurringBugService(db)
         await service.update_bug_status(
@@ -112,7 +112,7 @@ async def dismiss_bug(
 ):
     """Dismiss all occurrences of a bug"""
     try:
-        tenant_schema = current_user.get('tenant_schema')
+        tenant_schema = current_user.get('tenant_name') or current_user.get('tenant_schema')
         
         service = RecurringBugService(db)
         await service.update_bug_status(
@@ -136,7 +136,7 @@ async def create_backlog_for_bug(
 ):
     """Create a backlog item for a recurring bug"""
     try:
-        tenant_schema = current_user.get('tenant_schema')
+        tenant_schema = current_user.get('tenant_name') or current_user.get('tenant_schema')
         
         service = RecurringBugService(db)
         backlog_id = await service.create_backlog_item(

@@ -40,7 +40,7 @@ async def create_template(
         service = TemplateService(db)
         result = await service.create_template(
             template_data=template_data,
-            tenant_schema=current_user.get('tenant_schema'),
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema'),
             created_by=current_user.get('user_id')
         )
         
@@ -67,7 +67,7 @@ async def list_templates(
     try:
         service = TemplateService(db)
         result = await service.list_templates(
-            tenant_schema=current_user.get('tenant_schema'),
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema'),
             report_type=report_type,
             is_default=is_default
         )
@@ -90,7 +90,7 @@ async def get_template(
         service = TemplateService(db)
         result = await service.get_template(
             template_id=template_id,
-            tenant_schema=current_user.get('tenant_schema')
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema')
         )
         
         return result
@@ -119,7 +119,7 @@ async def update_template(
         result = await service.update_template(
             template_id=template_id,
             template_data=template_data,
-            tenant_schema=current_user.get('tenant_schema')
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema')
         )
         
         return result
@@ -142,7 +142,7 @@ async def delete_template(
         service = TemplateService(db)
         await service.delete_template(
             template_id=template_id,
-            tenant_schema=current_user.get('tenant_schema')
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema')
         )
         
         return JSONResponse(
