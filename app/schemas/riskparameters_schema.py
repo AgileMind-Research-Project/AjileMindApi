@@ -31,6 +31,9 @@ class RiskParameters(BaseModel):
     sprint_completion_level: int = 0
     sprint_completion_level_weight: int = 0
 
+    project_budget: int = 0
+    project_budget_weight: int = 0
+
 
 class ParameterBreakdown(BaseModel):
     parameter: str

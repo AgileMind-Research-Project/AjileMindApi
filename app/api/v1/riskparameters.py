@@ -228,12 +228,17 @@ async def get_risk_recommendations(
         metadata = risk_data.get('metadata', {})
         print(f"📊 Metadata keys: {list(metadata.keys())}")
         
+        # Fetch parameters configuration to calculate impact
+        print("⚙️ Fetching risk parameters configuration...")
+        params_config = await service.get_parameters(tenant_name, project_id)
+        
         # Generate recommendations using the recommendation service
         print("🤖 Generating recommendations...")
         recommendations = await recommendation_service.generate_recommendations(
             risk_type=risk_type,
             project_data=project_data,
-            metadata=metadata
+            metadata=metadata,
+            params_config=params_config
         )
         
         print(f"✅ Generated {len(recommendations)} recommendations")
