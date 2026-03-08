@@ -283,7 +283,10 @@ Generate a JSON response with this exact structure:
     "top_ideas": ["most promising idea 1", "most promising idea 2", ...],
     "categories": ["category 1", "category 2", ...],
     "key_themes": ["recurring theme 1", "recurring theme 2", ...],
-    "decisions_made": ["decision 1", "decision 2", ...],
+    "decisions_made": [
+        {{"decision": "decision description", "assignee": "person name or null"}},
+        ...
+    ],
     "next_steps": [
         {{"task": "action description", "assignee": "person name", "due_date": "estimate", "priority": "high"}},
         ...
@@ -310,6 +313,28 @@ JSON Response:
             logger.info(f"LLM Response: {response[:200]}...")
             
             report_data = self._extract_json_from_response(response)
+            
+            # Normalize decisions_made: LLM may return plain strings instead of Decision objects
+            if 'decisions_made' in report_data and report_data['decisions_made']:
+                report_data['decisions_made'] = [
+                    d if isinstance(d, dict) else {'decision': str(d)}
+                    for d in report_data['decisions_made']
+                ]
+            
+            # Normalize next_steps: LLM may return plain strings instead of ActionItem objects
+            if 'next_steps' in report_data and report_data['next_steps']:
+                report_data['next_steps'] = [
+                    s if isinstance(s, dict) else {'task': str(s)}
+                    for s in report_data['next_steps']
+                ]
+            
+            # Normalize ideas_generated: LLM may return plain strings
+            if 'ideas_generated' in report_data and report_data['ideas_generated']:
+                report_data['ideas_generated'] = [
+                    i if isinstance(i, dict) else {'idea': str(i)}
+                    for i in report_data['ideas_generated']
+                ]
+            
             return BrainstormingMeetingReport(**report_data)
         
         except Exception as e:

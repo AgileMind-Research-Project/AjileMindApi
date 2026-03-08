@@ -110,7 +110,7 @@ class RecurringBugService:
                 schema=tenant_schema
             )
             
-            bug_id = result.lastrowid if result else None
+            bug_id = result if result else None
             logger.info(f"Stored bug: '{bug_title[:50]}...' (hash: {bug_hash[:8]})")
             return bug_id
             

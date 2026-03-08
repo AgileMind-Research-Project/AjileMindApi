@@ -99,6 +99,8 @@ class Database:
                         result = await cursor.fetchone()
                     elif fetch_all:
                         result = await cursor.fetchall()
+                    elif commit:
+                        result = cursor.lastrowid
                     else:
                         result = cursor
                     

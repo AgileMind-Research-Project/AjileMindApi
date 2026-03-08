@@ -49,7 +49,7 @@ class NewTaskService:
                 schema=tenant_schema
             )
             
-            task_id = result.lastrowid
+            task_id = result
             return await self.get_task(task_id, tenant_schema)
         
         except Exception as e:

@@ -21,6 +21,40 @@ class TemplateService:
     def __init__(self, db: Database):
         self.db = db
     
+    async def ensure_table(self, tenant_schema: str):
+        """Ensure report_templates table exists with correct schema"""
+        try:
+            create_query = f"""
+                CREATE TABLE IF NOT EXISTS {tenant_schema}.report_templates (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    template_name VARCHAR(255) NOT NULL,
+                    report_type VARCHAR(50) NOT NULL,
+                    header_content LONGTEXT NULL,
+                    footer_content LONGTEXT NULL,
+                    sections LONGTEXT NOT NULL,
+                    styles LONGTEXT NULL,
+                    is_default BOOLEAN DEFAULT FALSE,
+                    created_by BIGINT NULL,
+                    tenant_schema VARCHAR(255) NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+            await self.db.execute_query(create_query, commit=True)
+            
+            # Fix ENUM column if it exists - convert to VARCHAR
+            try:
+                alter_query = f"""
+                    ALTER TABLE {tenant_schema}.report_templates 
+                    MODIFY COLUMN report_type VARCHAR(50) NOT NULL
+                """
+                await self.db.execute_query(alter_query, commit=True)
+            except Exception:
+                pass  # Already VARCHAR or table just created
+                
+        except Exception as e:
+            logger.error(f"Error ensuring report_templates table: {e}")
+    
     async def create_template(
         self,
         template_data: TemplateCreate,
@@ -29,22 +63,26 @@ class TemplateService:
     ) -> TemplateResponse:
         """Create a new report template"""
         try:
+            await self.ensure_table(tenant_schema)
             # Convert Pydantic models to JSON strings
-            header_json = json.dumps(template_data.header_content) if template_data.header_content else None
-            footer_json = json.dumps(template_data.footer_content) if template_data.footer_content else None
-            sections_json = json.dumps(template_data.sections)
-            styles_json = json.dumps(template_data.styles) if template_data.styles else None
+            header_json = json.dumps(template_data.header_content.model_dump()) if template_data.header_content else None
+            footer_json = json.dumps(template_data.footer_content.model_dump()) if template_data.footer_content else None
+            sections_json = json.dumps([s.model_dump() for s in template_data.sections])
+            styles_json = json.dumps(template_data.styles.model_dump()) if template_data.styles else None
             
-            query = f"""
+            insert_query = f"""
                 INSERT INTO {tenant_schema}.report_templates 
                 (template_name, report_type, header_content, footer_content, 
                  sections, styles, is_default, created_by, tenant_schema)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             
+            report_type_val = template_data.report_type.value if hasattr(template_data.report_type, 'value') else str(template_data.report_type)
+            logger.info(f"Creating template with report_type='{report_type_val}' (type={type(report_type_val).__name__})")
+            
             params = (
                 template_data.template_name,
-                template_data.report_type,
+                report_type_val,
                 header_json,
                 footer_json,
                 sections_json,
@@ -54,13 +92,48 @@ class TemplateService:
                 tenant_schema
             )
             
-            result = await self.db.execute_query(query, params, fetch_one=False)
-            template_id = result
+            # Use single connection for INSERT + SELECT to avoid stale transaction reads
+            import aiomysql as _aiomysql
+            async with self.db.get_connection() as conn:
+                async with conn.cursor(_aiomysql.DictCursor) as cursor:
+                    await cursor.execute(insert_query, params)
+                    template_id = cursor.lastrowid
+                    await conn.commit()
+                    
+                    if not template_id:
+                        raise ValueError("Failed to retrieve created template ID")
+                    
+                    logger.info(f"Created template {template_id} in schema {tenant_schema}")
+                    
+                    # Fetch on same connection to guarantee visibility
+                    select_query = f"""
+                        SELECT id, template_name, report_type, header_content, 
+                               footer_content, sections, styles, is_default, 
+                               created_by, tenant_schema, created_at, updated_at
+                        FROM {tenant_schema}.report_templates
+                        WHERE id = %s
+                    """
+                    await cursor.execute(select_query, (template_id,))
+                    result = await cursor.fetchone()
             
-            logger.info(f"Created template {template_id} in schema {tenant_schema}")
+            if not result:
+                raise ValueError(f"Template with ID {template_id} not found after creation")
             
-            # Fetch and return the created template
-            return await self.get_template(template_id, tenant_schema)
+            sections_raw = json.loads(result['sections'])
+            sections_list = sections_raw['sections'] if isinstance(sections_raw, dict) and 'sections' in sections_raw else sections_raw
+            
+            return TemplateResponse(
+                id=result['id'],
+                template_name=result['template_name'],
+                report_type=result['report_type'],
+                header_content=json.loads(result['header_content']) if result.get('header_content') else None,
+                footer_content=json.loads(result['footer_content']) if result.get('footer_content') else None,
+                sections=sections_list,
+                styles=json.loads(result['styles']) if result.get('styles') else None,
+                is_default=result['is_default'],
+                created_at=result['created_at'],
+                updated_at=result['updated_at']
+            )
         
         except Exception as e:
             logger.error(f"Error creating template: {e}")
@@ -100,8 +173,6 @@ class TemplateService:
                 sections=sections_list,
                 styles=json.loads(result['styles']) if result.get('styles') else None,
                 is_default=result['is_default'],
-                created_by=result.get('created_by'),
-                tenant_schema=result['tenant_schema'],
                 created_at=result['created_at'],
                 updated_at=result['updated_at']
             )
@@ -118,6 +189,7 @@ class TemplateService:
     ) -> List[TemplateResponse]:
         """List all templates with optional filters"""
         try:
+            await self.ensure_table(tenant_schema)
             query = f"""
                 SELECT id, template_name, report_type, header_content, 
                        footer_content, sections, styles, is_default, 
@@ -154,8 +226,6 @@ class TemplateService:
                     sections=sections_list,
                     styles=json.loads(row['styles']) if row.get('styles') else None,
                     is_default=row['is_default'],
-                    created_by=row.get('created_by'),
-                    tenant_schema=row['tenant_schema'],
                     created_at=row['created_at'],
                     updated_at=row['updated_at']
                 ))
@@ -184,23 +254,23 @@ class TemplateService:
             
             if template_data.report_type is not None:
                 update_fields.append("report_type = %s")
-                params.append(template_data.report_type)
+                params.append(template_data.report_type.value if hasattr(template_data.report_type, 'value') else template_data.report_type)
             
             if template_data.header_content is not None:
                 update_fields.append("header_content = %s")
-                params.append(json.dumps(template_data.header_content))
+                params.append(json.dumps(template_data.header_content.model_dump()))
             
             if template_data.footer_content is not None:
                 update_fields.append("footer_content = %s")
-                params.append(json.dumps(template_data.footer_content))
+                params.append(json.dumps(template_data.footer_content.model_dump()))
             
             if template_data.sections is not None:
                 update_fields.append("sections = %s")
-                params.append(json.dumps(template_data.sections))
+                params.append(json.dumps([s.model_dump() for s in template_data.sections]))
             
             if template_data.styles is not None:
                 update_fields.append("styles = %s")
-                params.append(json.dumps(template_data.styles))
+                params.append(json.dumps(template_data.styles.model_dump()))
             
             if template_data.is_default is not None:
                 update_fields.append("is_default = %s")
@@ -217,7 +287,7 @@ class TemplateService:
                 WHERE id = %s
             """
             
-            await self.db.execute_query(query, tuple(params), fetch_one=False)
+            await self.db.execute_query(query, tuple(params), commit=True)
             
             logger.info(f"Updated template {template_id} in schema {tenant_schema}")
             
@@ -243,7 +313,7 @@ class TemplateService:
                 WHERE id = %s
             """
             
-            await self.db.execute_query(query, (template_id,), fetch_one=False)
+            await self.db.execute_query(query, (template_id,), commit=True)
             
             logger.info(f"Deleted template {template_id} from schema {tenant_schema}")
         

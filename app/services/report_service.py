@@ -109,8 +109,8 @@ class ReportService:
                 schema=tenant_schema
             )
             
-            # Get the inserted report ID from the cursor
-            report_id = result.lastrowid
+            # Get the inserted report ID (execute_query returns lastrowid directly)
+            report_id = result
             
             if not report_id:
                 raise Exception("Failed to get report ID after creation")

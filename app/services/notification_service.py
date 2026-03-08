@@ -104,7 +104,7 @@ class NotificationService:
             
             # Execute insert
             result = await self.db.execute_query(insert_query, params, commit=True)
-            notification_id = result.lastrowid
+            notification_id = result
             logger.info(f"Notification persisted ID: {notification_id} Status: {status}")
             
         except Exception as e:
