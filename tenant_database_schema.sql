@@ -400,7 +400,7 @@ CREATE TABLE IF NOT EXISTS `meetings` (
     `end_time` TIME NOT NULL COMMENT 'End time',
     
     -- Status & Type
-    `status` ENUM('SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') DEFAULT 'SCHEDULED',
+    `status` ENUM('SCHEDULED', 'IN_PROGRESS', 'END', 'CANCELLED') DEFAULT 'SCHEDULED',
     `category` VARCHAR(100) DEFAULT 'Daily Meeting' COMMENT 'Meeting category (e.g., Daily, Sprint Planning)',
     
     -- Content
