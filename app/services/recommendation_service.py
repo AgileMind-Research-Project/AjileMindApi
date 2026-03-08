@@ -21,6 +21,9 @@ except ImportError as e:
     print(f"⚠️ LLM Service not available: {e}")
     print("   Falling back to rule-based recommendations")
 
+from app.services.risk_calculation_service import RiskCalculationService
+risk_calc_service = RiskCalculationService()
+
 
 class RecommendationService:
     """Service for generating AI-powered risk remediation recommendations"""
@@ -55,8 +58,9 @@ OUTPUT REQUIREMENTS:
         self,
         risk_type: str,
         project_data: Dict[str, Any],
-        metadata: Dict[str, Any]
-    ) -> List[str]:
+        metadata: Dict[str, Any],
+        params_config: Dict[str, Any] = None
+    ) -> List[Dict[str, Any]]:
         """
         Generate AI-powered recommendations for a specific risk type.
         
@@ -98,15 +102,32 @@ OUTPUT REQUIREMENTS:
                 metadata=metadata
             )
             
-            if llm_recommendations and len(llm_recommendations) > 0:
-                print(f"✅ AI generated {len(llm_recommendations)} recommendations")
-                return llm_recommendations
+            # Map recommendations to impact scores if available
+            result = []
+            if llm_recommendations:
+                # Calculate potential impact for this risk type
+                # For impact display, we show the reduction of 1 "unit" (1 bug, 1 task, etc.)
+                # This gives the user a sense of "value per action"
+                potential_reduction = 0.0
+                if params_config:
+                    potential_reduction = risk_calc_service.calculate_hypothetical_impact(
+                        current_metrics=metadata,
+                        params_config=params_config,
+                        param_to_improve=risk_type,
+                        improvement_amount=1.0
+                    )
+
+                for rec in llm_recommendations:
+                    result.append({
+                        "text": rec,
+                        "potential_reduction": potential_reduction
+                    })
+
+            if result:
+                print(f"✅ AI generated {len(result)} recommendations with impact scores")
+                return result
             else:
                 print("⚠️ AI returned empty recommendations")
-                print("   This may indicate:")
-                print("   - Ollama service stopped")
-                print("   - Model not responding")
-                print("   - Invalid project data")
                 return []
                 
         except Exception as e:
