@@ -19,6 +19,7 @@ class IssueType(str, Enum):
     CHANGE = "change"
     BUG = "bug"
     SUB_TASK = "sub_task"
+    RELEASE = "release"
 
 
 class Priority(str, Enum):
@@ -39,24 +40,24 @@ class BacklogItemBase(BaseModel):
     """Base backlog item fields"""
     summary: str = Field(..., max_length=255, description="Backlog item title")
     description: Optional[str] = Field(None, description="Detailed description")
-    issue_type: IssueType = Field(..., description="Type: epic, story, feature, task, change, bug, or sub_task")
+    issue_type: str = Field(..., description="Type of issue: epic, story, feature, task, bug, release, etc.")
     priority: Optional[Priority] = Field(None, description="Priority level")
     assignee: Optional[str] = Field(None, max_length=255, description="Assigned person")
     tags: Optional[List[str]] = Field(None, description="Tags/labels")
     severity: Optional[str] = Field(None, max_length=100, description="Severity (required for bugs)")
-
-    @model_validator(mode='after')
-    def validate_severity(self):
-        """Severity is required for bugs"""
-        if self.issue_type == IssueType.BUG and not self.severity:
-            raise ValueError('Severity is required for bug type issues')
-        return self
 
 
 class BacklogItemCreate(BacklogItemBase):
     """Create backlog item request"""
     project_id: int = Field(..., description="Project ID this item belongs to")
     sprint_id: Optional[int] = Field(None, description="Sprint ID to assign (optional)")
+
+    @model_validator(mode='after')
+    def validate_severity_for_bugs(self):
+        """Severity is required for bugs during creation"""
+        if self.issue_type == IssueType.BUG and not self.severity:
+            raise ValueError('Severity is required for bug type issues')
+        return self
 
 
 class BacklogItemFromFile(BaseModel):

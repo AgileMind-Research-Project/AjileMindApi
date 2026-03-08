@@ -68,3 +68,5 @@ class GenerateReleaseNoteRequest(BaseModel):
     version: str = Field(..., description="Version number for this release")
     include_tasks: bool = Field(True, description="Include project tasks in AI analysis")
     since_date: Optional[date] = Field(None, description="Only analyze items after this date")
+    start_sprint: Optional[int] = Field(None, description="Starting sprint for release range")
+    end_sprint: Optional[int] = Field(None, description="Ending sprint for release range")
