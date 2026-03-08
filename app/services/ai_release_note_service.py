@@ -62,6 +62,9 @@ class AIReleaseNoteService:
             # Get latest version for suggestion
             latest_version = await self._get_latest_version(tenant_name, project_id)
             
+            # Get project info for context
+            project_info = await self._get_project_info(tenant_name, project_id)
+            
             # Generate AI content using Mistral
             ai_content = await self._generate_ai_content(
                 backlog_data, project_info, latest_version, start_sprint, end_sprint
@@ -121,7 +124,7 @@ class AIReleaseNoteService:
                 story_points, sprint_id, parent_task_id, start_date, 
                 actual_start_date, end_date, actual_end_date, created_at, updated_at
             FROM `{tenant_name}`.project_backlog 
-            WHERE project_id = %s AND issue_type != 'release' AND status = 'done'
+            WHERE project_id = %s AND issue_type != 'release' AND status IN ('done', 'closed', 'resolved', 'completed', 'finished', 'ready_for_release')
             {sprint_filter}
             ORDER BY 
                 issue_type,
@@ -129,6 +132,8 @@ class AIReleaseNoteService:
                 created_at DESC
             LIMIT 50
         """
+        
+        return await self.db.execute_query(query, tuple(params), fetch_all=True)
         
     async def _get_latest_version(self, tenant_name: str, project_id: int) -> str:
         """Get the latest version number for a project"""

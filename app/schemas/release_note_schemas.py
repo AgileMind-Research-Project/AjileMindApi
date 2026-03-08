@@ -65,7 +65,7 @@ class ReleaseNoteResponse(BaseModel):
 
 class GenerateReleaseNoteRequest(BaseModel):
     project_id: int = Field(..., description="Project ID to generate release notes for")
-    version: str = Field(..., description="Version number for this release")
+    version: Optional[str] = Field(None, description="Version number for this release")
     include_tasks: bool = Field(True, description="Include project tasks in AI analysis")
     since_date: Optional[date] = Field(None, description="Only analyze items after this date")
     start_sprint: Optional[int] = Field(None, description="Starting sprint for release range")
