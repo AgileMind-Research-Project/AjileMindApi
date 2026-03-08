@@ -97,7 +97,7 @@ async def upload_transcript(
         
         service = TranscriptService(db)
         result = await service.create_transcript(
-            tenant_name=current_user.get('tenant_schema'),
+            tenant_name=current_user.get('tenant_name') or current_user.get('tenant_schema'),
             title=title,
             category=category_enum.value,
             transcript_content=transcript_content,
@@ -186,7 +186,7 @@ async def list_transcripts(
         
         service = TranscriptService(db)
         result = await service.list_transcripts(
-            tenant_schema=current_user.get('tenant_schema'),
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema'),
             filters=filters
         )
         
@@ -210,7 +210,7 @@ async def get_transcript(
         service = TranscriptService(db)
         result = await service.get_transcript(
             transcript_id=transcript_id,
-            tenant_schema=current_user.get('tenant_schema')
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema')
         )
         
         if not result:
@@ -236,7 +236,7 @@ async def update_transcript(
     try:
         service = TranscriptService(db)
         result = await service.update_transcript(
-            tenant_name=current_user.get('tenant_schema'),
+            tenant_name=current_user.get('tenant_name') or current_user.get('tenant_schema'),
             transcript_id=transcript_id,
             title=transcript_data.title,
             category=transcript_data.category.value if transcript_data.category else None,
@@ -267,7 +267,7 @@ async def delete_transcript(
     try:
         service = TranscriptService(db)
         await service.delete_transcript(
-            tenant_name=current_user.get('tenant_schema'),
+            tenant_name=current_user.get('tenant_name') or current_user.get('tenant_schema'),
             transcript_id=transcript_id
         )
         
@@ -292,7 +292,7 @@ async def analyze_transcript(
     """
     try:
         service = TranscriptService(db)
-        tenant_schema = current_user.get('tenant_schema')
+        tenant_schema = current_user.get('tenant_name') or current_user.get('tenant_schema')
         
         # Fetch the transcript content
         query = f"SELECT transcript_content FROM {tenant_schema}.transcripts WHERE id = %s"

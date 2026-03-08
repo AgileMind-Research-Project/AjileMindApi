@@ -38,7 +38,7 @@ async def generate_report(
         service = ReportService(db)
         result = await service.generate_report(
             request=request,
-            tenant_schema=current_user.get('tenant_schema'),
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema'),
             generated_by=current_user.get('user_id')
         )
         
@@ -84,7 +84,7 @@ async def list_reports(
         
         service = ReportService(db)
         result = await service.list_reports(
-            tenant_schema=current_user.get('tenant_schema'),
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema'),
             transcript_id=transcript_id,
             report_type=report_type,
             status=status,
@@ -112,7 +112,7 @@ async def get_report(
         service = ReportService(db)
         result = await service.get_report(
             report_id=report_id,
-            tenant_schema=current_user.get('tenant_schema')
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema')
         )
         
         return result
@@ -135,7 +135,7 @@ async def get_reports_by_transcript(
         service = ReportService(db)
         result = await service.get_reports_by_transcript(
             transcript_id=transcript_id,
-            tenant_schema=current_user.get('tenant_schema')
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema')
         )
         
         return result
@@ -162,7 +162,7 @@ async def update_report_content(
         result = await service.update_report_content(
             report_id=report_id,
             report_content=report_content,
-            tenant_schema=current_user.get('tenant_schema')
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema')
         )
         
         return result
@@ -197,7 +197,7 @@ async def update_report_status(
         result = await service.update_report_status(
             report_id=report_id,
             status=status_enum,
-            tenant_schema=current_user.get('tenant_schema')
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema')
         )
         
         return result
@@ -222,7 +222,7 @@ async def delete_report(
         service = ReportService(db)
         await service.delete_report(
             report_id=report_id,
-            tenant_schema=current_user.get('tenant_schema')
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema')
         )
         
         return JSONResponse(
@@ -255,7 +255,7 @@ async def export_report_endpoint(
         service = ReportService(db)
         report = await service.get_report(
             report_id=report_id,
-            tenant_schema=current_user.get('tenant_schema')
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema')
         )
         
         # Get template config if provided
@@ -266,7 +266,7 @@ async def export_report_endpoint(
             # Fetch template from database
             query = f"""
                 SELECT header_content, footer_content, styles
-                FROM {current_user.get('tenant_schema')}.report_templates
+                FROM {current_user.get('tenant_name') or current_user.get('tenant_schema')}.report_templates
                 WHERE id = %s
             """
             template_result = await db.execute_query(query, (template_id,), fetch_one=True)
