@@ -43,7 +43,7 @@ class ReleaseNoteService:
             )
             
             result = await self.db.execute_query(insert_query, params, commit=True)
-            release_note_id = result.lastrowid
+            release_note_id = result
             
             logger.info(f"Created release note ID: {release_note_id} for project {request.project_id}")
             

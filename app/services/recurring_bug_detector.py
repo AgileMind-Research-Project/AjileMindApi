@@ -321,7 +321,7 @@ class RecurringBugDetector:
                 commit=True
             )
             
-            bug_id = result.lastrowid if result else None
+            bug_id = result if result else None
             logger.info(f"Created new bug {bug_id} for project {project_id}, category: {bug_category}")
             return bug_id
     

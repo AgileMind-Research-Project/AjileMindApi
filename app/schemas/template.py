@@ -52,6 +52,7 @@ class TemplateCreate(BaseModel):
 class TemplateUpdate(BaseModel):
     """Schema for updating a template"""
     template_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    report_type: Optional[ReportType] = None
     header_content: Optional[TemplateHeaderFooter] = None
     footer_content: Optional[TemplateHeaderFooter] = None
     sections: Optional[List[TemplateSection]] = None
