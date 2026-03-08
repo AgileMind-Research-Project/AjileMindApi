@@ -130,23 +130,33 @@ class BacklogRepository:
     async def list_backlog_by_project(
         self,
         tenant_name: str,
-        project_id: int
+        project_id: int,
+        status: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """List all backlog items for a project"""
         try:
+            # Base query
             query = """
                 SELECT 
                     id, project_id, sprint_id, summary, description, issue_type,
                     status, priority, assignee, tags, severity, parent_task_id,
                     created_at, updated_at
                 FROM project_backlog
-                WHERE project_id = %s
-                ORDER BY created_at DESC
+                WHERE project_id = %s AND issue_type != 'release'
             """
+            
+            params = [project_id]
+            
+            # Add status filter if provided
+            if status:
+                query += " AND status = %s"
+                params.append(status)
+            
+            query += " ORDER BY created_at DESC"
             
             results = await self.db.execute_query(
                 query,
-                (project_id,),
+                tuple(params),
                 fetch_all=True,
                 schema=tenant_name
             )
@@ -248,10 +258,12 @@ class BacklogRepository:
     async def list_backlog_by_sprint(
         self,
         tenant_name: str,
-        sprint_id: int
+        sprint_id: int,
+        status: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """List all backlog items for a sprint"""
         try:
+            # Base query
             query = """
                 SELECT 
                     id, project_id, sprint_id, summary, description, issue_type,
@@ -259,13 +271,21 @@ class BacklogRepository:
                     estimated_hours, story_points, is_jira,
                     created_at, updated_at
                 FROM project_backlog
-                WHERE sprint_id = %s
-                ORDER BY created_at ASC
+                WHERE sprint_id = %s AND issue_type != 'release'
             """
+            
+            params = [sprint_id]
+            
+            # Add status filter if provided
+            if status:
+                query += " AND status = %s"
+                params.append(status)
+            
+            query += " ORDER BY created_at ASC"
             
             results = await self.db.execute_query(
                 query,
-                (sprint_id,),
+                tuple(params),
                 fetch_all=True,
                 schema=tenant_name
             )

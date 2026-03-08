@@ -84,6 +84,13 @@ class MistralClient:
             logger.info("Generating MOCK response")
             import time
             time.sleep(2) # Simulate processing time
+            
+            # Release note mock - provide a generic message if no items are actually detected
+            # but usually it's better to let the service handle the context
+            if "release note" in prompt.lower() or "summary" in prompt.lower():
+                return None # Return None to trigger fallback or handle specifically if needed
+            
+            # Default task mock
             return json.dumps([
                 {
                     "ticket_id": "TASK-101",

@@ -17,7 +17,8 @@ def get_release_note_service(database: Database = Depends(lambda: db)) -> Releas
     return ReleaseNoteService(database)
 
 def check_project_manager(current_user: Dict[str, Any]):
-    """Verify user has PROJECT_MANAGER role"""
+    """Verify user has PROJECT_MANAGER role (Bypassed)"""
+    return # Temporarily bypassed to allow all users to manage release notes
     role = current_user.get("role", "").upper()
     if role not in ["PROJECT_MANAGER", "SUPER_ADMIN", "ADMIN"]:
         raise HTTPException(

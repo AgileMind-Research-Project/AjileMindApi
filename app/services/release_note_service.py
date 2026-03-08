@@ -309,44 +309,51 @@ class ReleaseNoteService:
     ) -> Dict[str, Any]:
         """Generate release note content using AI based on project data"""
         try:
-            # This is a placeholder - you'll need to integrate with your AI service
-            # For now, we'll return a template structure
-            
             logger.info(f"Generating AI release note for project {request.project_id}, version {request.version}")
             
-            # TODO: Query project tasks, sprints, backlog items
-            # TODO: Call AI service to analyze and generate content
+            # Import AI service
+            from app.services.ai_release_note_service import AIReleaseNoteService
             
-            # Placeholder response
-            generated_content = {
-                "features": [
-                    "New user authentication system",
-                    "Enhanced dashboard with real-time analytics",
-                    "Mobile responsive design improvements"
-                ],
-                "bug_fixes": [
-                    "Fixed login timeout issue",
-                    "Resolved data sync errors",
-                    "Corrected timezone display issues"
-                ],
-                "improvements": [
-                    "40% faster page load times",
-                    "Improved error handling and user feedback",
-                    "Enhanced accessibility features"
-                ],
-                "breaking_changes": [],
-                "known_issues": []
-            }
+            # Initialize AI service
+            ai_service = AIReleaseNoteService(self.db)
             
-            summary = f"This release includes major improvements to the user interface and performance optimizations."
+            # Extract sprint parameters from request
+            start_sprint = getattr(request, 'start_sprint', None)
+            end_sprint = getattr(request, 'end_sprint', None)
+            
+            # Generate AI content
+            ai_result = await ai_service.generate_release_note_content(
+                tenant_name=tenant_name,
+                project_id=request.project_id,
+                start_sprint=start_sprint,
+                end_sprint=end_sprint,
+                version=request.version
+            )
             
             return {
                 "success": True,
-                "content": generated_content,
-                "summary": summary,
-                "message": "Release note content generated successfully"
+                "content": ai_result["content"],
+                "summary": ai_result["summary"],
+                "release_type": ai_result.get("release_type", "MINOR"),
+                "suggested_version": ai_result.get("suggested_version", request.version),
+                "message": "Release note content generated successfully using AI"
             }
             
         except Exception as e:
             logger.error(f"Failed to generate AI release note: {e}")
-            raise
+            
+            # Fallback to basic template on AI failure
+            fallback_content = {
+                "features": [f"Release {request.version} for project {request.project_id}"],
+                "bug_fixes": [],
+                "improvements": [],
+                "breaking_changes": [],
+                "known_issues": ["AI generation temporarily unavailable"]
+            }
+            
+            return {
+                "success": True,
+                "content": fallback_content,
+                "summary": f"Release {request.version} - AI generation failed, manual review required.",
+                "message": "Release note template generated (AI service unavailable)"
+            }
