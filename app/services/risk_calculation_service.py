@@ -7,6 +7,7 @@ Calculates project risk scores based on selected parameters and weights.
 from typing import Dict, List, Any, Optional
 from datetime import date, datetime
 import aiomysql
+import copy
 from app.db.database import db
 from app.core.logger import logger
 from fastapi import HTTPException
@@ -46,9 +47,11 @@ class RiskCalculationService:
             sprints_list = await self._get_all_sprints(tenant_name, project_id)
             leaves_list = await self._get_all_leaves(tenant_name, project_id)
             blockers_list = await self._get_all_blockers(tenant_name, project_id)
+            project_budget = await self._get_project_budget(tenant_name, project_id)
 
             # Step 3: Calculate base metrics
             metrics = self._calculate_base_metrics(tasks_list, sprints_list, leaves_list, blockers_list)
+            metrics['project_budget_limit'] = project_budget
 
             # Step 3.5: Calculate available developers (low workload)
             available_developers_data = self._calculate_available_developers(
@@ -57,175 +60,11 @@ class RiskCalculationService:
             metrics['available_developers_data'] = available_developers_data
 
 
-            # Step 4: Calculate individual risk scores
-            breakdown = []
-            total_weight = 0
-            weighted_sum = 0.0
-
-            # Check each parameter and calculate if enabled
-            if params_config.get('uncompleted_tasks'):
-                risk_score = self._calculate_uncompleted_tasks_risk(metrics)
-                weight = params_config.get('uncompleted_tasks_weight', 0)
-                if weight > 0:
-                    weighted_value = risk_score * weight
-                    breakdown.append({
-                        'parameter': 'uncompleted_tasks',
-                        'enabled': True,
-                        'risk_score': round(risk_score, 4),
-                        'weight': weight,
-                        'weighted_value': round(weighted_value, 4),
-                        'contribution': 0.0
-                    })
-                    total_weight += weight
-                    weighted_sum += weighted_value
-
-            if params_config.get('detected_bugs'):
-                risk_score = self._calculate_detected_bugs_risk(metrics)
-                weight = params_config.get('detected_bugs_weight', 0)
-                if weight > 0:
-                    weighted_value = risk_score * weight
-                    breakdown.append({
-                        'parameter': 'detected_bugs',
-                        'enabled': True,
-                        'risk_score': round(risk_score, 4),
-                        'weight': weight,
-                        'weighted_value': round(weighted_value, 4),
-                        'contribution': 0.0
-                    })
-                    total_weight += weight
-                    weighted_sum += weighted_value
-
-            if params_config.get('blockers_count'):
-                risk_score = self._calculate_blockers_count_risk(metrics)
-                weight = params_config.get('blockers_count_weight', 0)
-                if weight > 0:
-                    weighted_value = risk_score * weight
-                    breakdown.append({
-                        'parameter': 'blockers_count',
-                        'enabled': True,
-                        'risk_score': round(risk_score, 4),
-                        'weight': weight,
-                        'weighted_value': round(weighted_value, 4),
-                        'contribution': 0.0
-                    })
-                    total_weight += weight
-                    weighted_sum += weighted_value
-
-            # Developer workload is EXCLUDED from risk calculation (removed)
-            # It only appears as metadata in uncompleted tasks insights
-
-            if params_config.get('task_dependency'):
-                risk_score = self._calculate_task_dependency_risk(metrics)
-                weight = params_config.get('task_dependency_weight', 0)
-                if weight > 0:
-                    weighted_value = risk_score * weight
-                    breakdown.append({
-                        'parameter': 'task_dependency',
-                        'enabled': True,
-                        'risk_score': round(risk_score, 4),
-                        'weight': weight,
-                        'weighted_value': round(weighted_value, 4),
-                        'contribution': 0.0
-                    })
-                    total_weight += weight
-                    weighted_sum += weighted_value
-
-            if params_config.get('timeline_conflict'):
-                # Get both risk score and detailed timeline conflict data
-                timeline_result = self._calculate_timeline_conflict_risk(metrics, tasks_list)
-                risk_score = timeline_result['risk_score']
-                metrics['timeline_conflicts'] = timeline_result['conflicts']  # Store for metadata
-                
-                weight = params_config.get('timeline_conflict_weight', 0)
-                if weight > 0:
-                    weighted_value = risk_score * weight
-                    breakdown.append({
-                        'parameter': 'timeline_conflict',
-                        'enabled': True,
-                        'risk_score': round(risk_score, 4),
-                        'weight': weight,
-                        'weighted_value': round(weighted_value, 4),
-                        'contribution': 0.0
-                    })
-                    total_weight += weight
-                    weighted_sum += weighted_value
-
-            if params_config.get('developer_availability'):
-                risk_score = self._calculate_developer_availability_risk(metrics)
-                weight = params_config.get('developer_availability_weight', 0)
-                if weight > 0:
-                    weighted_value = risk_score * weight
-                    breakdown.append({
-                        'parameter': 'developer_availability',
-                        'enabled': True,
-                        'risk_score': round(risk_score, 4),
-                        'weight': weight,
-                        'weighted_value': round(weighted_value, 4),
-                        'contribution': 0.0
-                    })
-                    total_weight += weight
-                    weighted_sum += weighted_value
-
-            if params_config.get('task_progress'):
-                risk_score = self._calculate_task_progress_risk(metrics)
-                weight = params_config.get('task_progress_weight', 0)
-                if weight > 0:
-                    weighted_value = risk_score * weight
-                    breakdown.append({
-                        'parameter': 'task_progress',
-                        'enabled': True,
-                        'risk_score': round(risk_score, 4),
-                        'weight': weight,
-                        'weighted_value': round(weighted_value, 4),
-                        'contribution': 0.0
-                    })
-                    total_weight += weight
-                    weighted_sum += weighted_value
-
-            if params_config.get('sprint_completion_level'):
-                risk_score = self._calculate_sprint_completion_risk(metrics)
-                weight = params_config.get('sprint_completion_level_weight', 0)
-                if weight > 0:
-                    weighted_value = risk_score * weight
-                    breakdown.append({
-                        'parameter': 'sprint_completion_level',
-                        'enabled': True,
-                        'risk_score': round(risk_score, 4),
-                        'weight': weight,
-                        'weighted_value': round(weighted_value, 4),
-                        'contribution': 0.0
-                    })
-                    total_weight += weight
-                    weighted_sum += weighted_value
-
-            # Add disabled parameters to breakdown
-            all_parameters = [
-                'uncompleted_tasks', 'detected_bugs', 'blockers_count',
-                'developer_workload', 'task_dependency', 'timeline_conflict',
-                'developer_availability', 'task_progress', 'sprint_completion_level'
-            ]
-            enabled_params = [p['parameter'] for p in breakdown if p['enabled']]
-            for param in all_parameters:
-                if param not in enabled_params:
-                    breakdown.append({
-                        'parameter': param,
-                        'enabled': False,
-                        'risk_score': None,
-                        'weight': params_config.get(f'{param}_weight', 0),
-                        'weighted_value': None,
-                        'contribution': None
-                    })
-
-            # Check if any parameters are enabled
-            if total_weight == 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No risk parameters are enabled or have non-zero weights. Please configure risk parameters."
-                )
-
-            # Step 5: Calculate total risk score (normalized weighted average)
-            total_risk_score = weighted_sum / total_weight
-            total_risk_score = max(0.0, min(1.0, total_risk_score))  # Clamp to 0-1
+            # Step 4-5: Calculate individual and total risk scores
+            risk_result = self._calculate_risk_from_metrics(metrics, params_config)
+            breakdown = risk_result['breakdown']
+            total_risk_score = risk_result['total_risk_score']
+            total_weight = risk_result['total_weight']
 
             # Calculate contribution for each parameter
             for item in breakdown:
@@ -261,10 +100,17 @@ class RiskCalculationService:
                     'inprogress_tasks_risk': metrics['inprogress_tasks_risk'],
                     'overdue_tasks_risk': metrics['overdue_tasks_risk'],
                     # Bug breakdown
+                    # Bug breakdown
                     'total_bugs': metrics['total_bugs'],
+                    'critical_bugs': metrics['critical_bugs'],
+                    'high_bugs': metrics['high_bugs'],
+                    'medium_bugs': metrics['medium_bugs'],
+                    'low_bugs': metrics['low_bugs'],
                     'high_priority_bugs': metrics['critical_bugs'] + metrics['high_bugs'],
                     'medium_priority_bugs': metrics['medium_bugs'],
                     'low_priority_bugs': metrics['low_bugs'],
+                    'weighted_bug_score': metrics['weighted_bug_score'],
+                    'max_bug_score': metrics['max_bug_score'],
                     # Bug status breakdown
                     'todo_bugs': metrics['todo_bugs'],
                     'inprogress_bugs': metrics['inprogress_bugs'],
@@ -284,6 +130,8 @@ class RiskCalculationService:
                     'high_blockers': metrics['high_blockers'],
                     'medium_blockers': metrics['medium_blockers'],
                     'low_blockers': metrics['low_blockers'],
+                    'weighted_blocker_score': metrics['weighted_blocker_score'],
+                    'max_blocker_score': metrics['max_blocker_score'],
                     # Blocker risk percentages (for insights)
                     'open_blockers_risk': metrics['open_blockers_risk'],
                     'inprogress_blockers_risk': metrics['inprogress_blockers_risk'],
@@ -294,6 +142,7 @@ class RiskCalculationService:
                     'low_blockers_risk': metrics['low_blockers_risk'],
                     # Developer breakdown (task_type='Task' only)
                     'developer_breakdown': metrics['developer_breakdown'],
+                    'tasks_with_dependencies': metrics['tasks_with_dependencies'],
                     # Timeline conflict insights
                     'timeline_conflicts': metrics.get('timeline_conflicts', []),
                     # Developer availability insights
@@ -308,6 +157,9 @@ class RiskCalculationService:
                     'total_sprints': metrics['total_sprints'],
                     'total_leave_hours': metrics['total_leave_hours'],
                     'total_sprint_hours': metrics['total_sprint_hours'],
+                    # Project Budget metrics
+                    'project_budget_limit': metrics.get('project_budget_limit', 0),
+                    'total_logged_hours': metrics.get('total_logged_hours', 0),
                     # Available developers (low workload)
                     'available_developers_data': metrics.get('available_developers_data', {})
                 },
@@ -368,6 +220,14 @@ class RiskCalculationService:
             schema=tenant_name
         )
         return [dict(row) for row in result] if result else []
+
+    async def _get_project_budget(self, tenant_name: str, project_id: int) -> float:
+        """Fetch project budget from projects table."""
+        query = "SELECT budget FROM projects WHERE project_id = %s"
+        result = await db.execute_query(query, (project_id,), fetch_one=True, schema=tenant_name)
+        if result and result.get('budget'):
+            return float(result['budget'])
+        return 0.0
 
     async def _get_all_sprints(self, tenant_name: str, project_id: int) -> List[Dict[str, Any]]:
         """Fetch all sprints for the project from tenant database"""
@@ -474,7 +334,10 @@ class RiskCalculationService:
             'completed_sprints': 0,
             'total_sprint_hours': 0,
             'total_leave_hours': 0,
-            'avg_completion_rate': 0.0
+            'avg_completion_rate': 0.0,
+            # Budget metrics
+            'total_logged_hours': 0,
+            'total_estimated_hours': 0
         }
 
         today = date_type.today()
@@ -553,13 +416,16 @@ class RiskCalculationService:
                 elif priority_lower == 'low':
                     metrics['low_bugs'] += 1
                 
-                # Count bugs by status
                 if status_lower == 'todo':
                     metrics['todo_bugs'] += 1
                 elif status_lower == 'inprogress':
                     metrics['inprogress_bugs'] += 1
                 elif status_lower == 'done':
                     metrics['completed_bugs'] += 1
+
+            # Sum hours for budget risk
+            metrics['total_logged_hours'] += (task.get('logged_hours') or 0)
+            metrics['total_estimated_hours'] += (task.get('estimated_hours') or 0)
 
         metrics['uncompleted_tasks'] = metrics['todo_tasks'] + metrics['inprogress_tasks']
 
@@ -1001,9 +867,10 @@ class RiskCalculationService:
 
     def _calculate_detected_bugs_risk(self, metrics: Dict[str, Any]) -> float:
         """Calculate detected bugs risk score"""
-        if metrics['max_bug_score'] == 0:
+        max_score = metrics.get('max_bug_score', 0)
+        if max_score == 0:
             return 0.0
-        risk = metrics['weighted_bug_score'] / metrics['max_bug_score']
+        risk = metrics.get('weighted_bug_score', 0) / max_score
         return max(0.0, min(1.0, risk))
 
     def _calculate_blockers_count_risk(self, metrics: Dict[str, Any]) -> float:
@@ -1011,9 +878,10 @@ class RiskCalculationService:
         Calculate blockers count risk score using tbl_blocker table data.
         Uses weighted severity scores for more accurate risk assessment.
         """
-        if metrics['max_blocker_score'] == 0:
+        max_score = metrics.get('max_blocker_score', 0)
+        if max_score == 0:
             return 0.0
-        risk = metrics['weighted_blocker_score'] / metrics['max_blocker_score']
+        risk = metrics.get('weighted_blocker_score', 0) / max_score
         return max(0.0, min(1.0, risk))
 
     def _calculate_developer_workload_risk(self, metrics: Dict[str, Any]) -> float:
@@ -1259,6 +1127,20 @@ class RiskCalculationService:
         risk = 1 - completion_rate
         return max(0.0, min(1.0, risk))
 
+    def _calculate_project_budget_risk(self, metrics: Dict[str, Any]) -> float:
+        """Calculate project budget risk score based on spending vs budget"""
+        budget = metrics.get('project_budget_limit', 0)
+        if budget == 0:
+            return 0.0
+            
+        # Assume an average hourly rate for budget calculation if not provided
+        # Or just use hours ratio if budget is in hours (but here budget is usually money)
+        hourly_rate = 50.0 # Default fallback
+        estimated_spend = metrics['total_logged_hours'] * hourly_rate
+        
+        risk = estimated_spend / budget
+        return max(0.0, min(1.0, risk))
+
     def _calculate_available_developers(
         self,
         tasks_list: List[Dict[str, Any]],
@@ -1492,3 +1374,180 @@ class RiskCalculationService:
             return "HIGH"
         else:
             return "CRITICAL"
+
+    def _calculate_risk_from_metrics(self, metrics: Dict[str, Any], params_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculates risk breakdown and total score from metrics and configuration"""
+        breakdown = []
+        total_weight = 0
+        weighted_sum = 0.0
+
+        parameters = [
+            ('uncompleted_tasks', self._calculate_uncompleted_tasks_risk),
+            ('detected_bugs', self._calculate_detected_bugs_risk),
+            ('blockers_count', self._calculate_blockers_count_risk),
+            ('task_dependency', self._calculate_task_dependency_risk),
+            ('timeline_conflict', lambda m: self._calculate_timeline_conflict_risk(m, [])['risk_score']), # Dummy tasks_list for hypothetical
+            ('developer_availability', self._calculate_developer_availability_risk),
+            ('task_progress', self._calculate_task_progress_risk),
+            ('sprint_completion_level', self._calculate_sprint_completion_risk),
+            ('project_budget', self._calculate_project_budget_risk)
+        ]
+
+        # Use actual timeline conflict risk from metrics if available
+        if 'timeline_conflict_score' in metrics:
+            parameters[4] = ('timeline_conflict', (lambda m: m['timeline_conflict_score']))
+        elif 'timeline_conflicts' in metrics:
+             # If we have conflict details, we can use them
+             pass
+
+        for param_name, calc_func in parameters:
+            enabled = params_config.get(param_name, False)
+            weight = params_config.get(f'{param_name}_weight', 0)
+            
+            if enabled and weight > 0:
+                risk_score = calc_func(metrics)
+                weighted_value = risk_score * weight
+                breakdown.append({
+                    'parameter': param_name,
+                    'enabled': True,
+                    'risk_score': round(risk_score, 4),
+                    'weight': weight,
+                    'weighted_value': round(weighted_value, 4),
+                    'contribution': 0.0
+                })
+                total_weight += weight
+                weighted_sum += weighted_value
+            else:
+                breakdown.append({
+                    'parameter': param_name,
+                    'enabled': False,
+                    'risk_score': None,
+                    'weight': weight,
+                    'weighted_value': None,
+                    'contribution': None
+                })
+
+        total_risk_score = 0.0
+        if total_weight > 0:
+            total_risk_score = weighted_sum / total_weight
+            total_risk_score = max(0.0, min(1.0, total_risk_score))
+
+            for item in breakdown:
+                if item['enabled']:
+                    item['contribution'] = round(item['weighted_value'] / total_weight, 4)
+
+        return {
+            'total_risk_score': total_risk_score,
+            'total_weight': total_weight,
+            'breakdown': breakdown
+        }
+
+    def calculate_hypothetical_impact(
+        self, 
+        current_metrics: Dict[str, Any], 
+        params_config: Dict[str, Any], 
+        param_to_improve: str, 
+        improvement_amount: float = 1.0
+    ) -> float:
+        """
+        Calculates the potential reduction in total risk score.
+        
+        Args:
+            current_metrics: Current project metrics
+            params_config: Risk parameter weights/enabled status
+            param_to_improve: The parameter being addressed (e.g., 'detected_bugs')
+            improvement_amount: Amount of improvement (e.g., 1.0 for one bug/task)
+            
+        Returns:
+            The potential reduction in risk percentage (0-100)
+        """
+        # 1. Calculate current total risk
+        current_result = self._calculate_risk_from_metrics(current_metrics, params_config)
+        current_percentage = current_result['total_risk_score'] * 100
+        
+        # 2. Clone metrics for hypothetical scenario
+        hypothetical_metrics = copy.deepcopy(current_metrics)
+        
+        # 3. Apply improvement based on type
+        if param_to_improve == 'detected_bugs':
+            # Reduce bugs starting from highest priority
+            if hypothetical_metrics.get('critical_bugs', 0) > 0:
+                hypothetical_metrics['critical_bugs'] = max(0, hypothetical_metrics['critical_bugs'] - improvement_amount)
+            elif hypothetical_metrics.get('high_bugs', 0) > 0:
+                hypothetical_metrics['high_bugs'] = max(0, hypothetical_metrics['high_bugs'] - improvement_amount)
+            elif hypothetical_metrics.get('medium_bugs', 0) > 0:
+                hypothetical_metrics['medium_bugs'] = max(0, hypothetical_metrics['medium_bugs'] - improvement_amount)
+            else:
+                hypothetical_metrics['low_bugs'] = max(0, hypothetical_metrics['low_bugs'] - improvement_amount)
+            
+            # Re-calculate weighted bug score
+            hypothetical_metrics['weighted_bug_score'] = (
+                (hypothetical_metrics.get('critical_bugs', 0) * self.CRITICAL_BUG_WEIGHT) +
+                (hypothetical_metrics.get('high_bugs', 0) * self.HIGH_BUG_WEIGHT) +
+                (hypothetical_metrics.get('medium_bugs', 0) * self.MEDIUM_BUG_WEIGHT) +
+                (hypothetical_metrics.get('low_bugs', 0) * self.LOW_BUG_WEIGHT)
+            )
+            
+        elif param_to_improve == 'uncompleted_tasks':
+            hypothetical_metrics['uncompleted_tasks'] = max(0, hypothetical_metrics.get('uncompleted_tasks', 0) - improvement_amount)
+            hypothetical_metrics['completed_tasks'] = hypothetical_metrics.get('completed_tasks', 0) + improvement_amount
+            
+        elif param_to_improve == 'blockers_count':
+            # Use same logic as bugs for priority if available, otherwise just count
+            unresolved = hypothetical_metrics.get('open_blockers', 0) + hypothetical_metrics.get('inprogress_blockers', 0)
+            if unresolved > 0:
+                if hypothetical_metrics.get('critical_blockers', 0) > 0:
+                    hypothetical_metrics['critical_blockers'] = max(0, hypothetical_metrics['critical_blockers'] - improvement_amount)
+                elif hypothetical_metrics.get('high_blockers', 0) > 0:
+                    hypothetical_metrics['high_blockers'] = max(0, hypothetical_metrics['high_blockers'] - improvement_amount)
+                
+                # Re-calculate weighted blocker score
+                hypothetical_metrics['weighted_blocker_score'] = (
+                    (hypothetical_metrics.get('critical_blockers', 0) * 3) +
+                    (hypothetical_metrics.get('high_blockers', 0) * 2) +
+                    (hypothetical_metrics.get('medium_blockers', 0) * 1.5) +
+                    (hypothetical_metrics.get('low_blockers', 0) * 1)
+                )
+
+        elif param_to_improve == 'task_dependency':
+            hypothetical_metrics['tasks_with_dependencies'] = max(0, hypothetical_metrics.get('tasks_with_dependencies', 0) - improvement_amount)
+
+        elif param_to_improve == 'timeline_conflict':
+            # Timeline conflict score is 0.0 to 1.0. Reducing it by the improvement amount (clamped)
+            # Typically 1.0 improvement here means resolving ALL conflicts
+            hypothetical_metrics['timeline_conflict_score'] = max(0.0, hypothetical_metrics.get('timeline_conflict_score', 0.0) - improvement_amount)
+
+        elif param_to_improve == 'developer_availability':
+            # Reduce leave hours. improvement_amount 1.0 = 8 hours (1 day)
+            hours_per_unit = 8.0 
+            hypothetical_metrics['total_leave_hours'] = max(0.0, hypothetical_metrics.get('total_leave_hours', 0.0) - (improvement_amount * hours_per_unit))
+
+        elif param_to_improve == 'task_progress':
+            # Improve avg_completion_rate. 1.0 improvement = +10% rate
+            rate_improvement = improvement_amount * 0.1
+            hypothetical_metrics['avg_completion_rate'] = min(1.0, hypothetical_metrics.get('avg_completion_rate', 0.0) + rate_improvement)
+
+        elif param_to_improve == 'sprint_completion_level':
+            # Increase completed sprints
+            hypothetical_metrics['completed_sprints'] = hypothetical_metrics.get('completed_sprints', 0) + improvement_amount
+            if hypothetical_metrics['completed_sprints'] > hypothetical_metrics.get('total_sprints', 0):
+                hypothetical_metrics['total_sprints'] = hypothetical_metrics['completed_sprints']
+
+        elif param_to_improve == 'developer_workload':
+            # Developer workload risk in this service uses uncompleted tasks metrics
+            hypothetical_metrics['uncompleted_tasks'] = max(0, hypothetical_metrics.get('uncompleted_tasks', 0) - improvement_amount)
+            hypothetical_metrics['completed_tasks'] = hypothetical_metrics.get('completed_tasks', 0) + improvement_amount
+
+        elif param_to_improve == 'project_budget':
+            # Budget risk improvement: reduce logged hours or increase budget limit
+            # Here we simulate reducing spending (logged hours)
+            hours_per_unit = 10.0 # Simulate reducing 10 hours for 1 improvement unit
+            hypothetical_metrics['total_logged_hours'] = max(0.0, hypothetical_metrics.get('total_logged_hours', 0.0) - (improvement_amount * hours_per_unit))
+
+        # 4. Calculate hypothetical risk
+        hypothetical_result = self._calculate_risk_from_metrics(hypothetical_metrics, params_config)
+        hypothetical_percentage = hypothetical_result['total_risk_score'] * 100
+        
+        # 5. Return the delta
+        reduction = max(0.0, current_percentage - hypothetical_percentage)
+        return round(reduction, 2)
