@@ -51,7 +51,7 @@ async def get_all_documents(
     Returns list of all documents for the user's tenant
     """
     try:
-        schema = current_user.get("schema") or current_user.get("tenant_schema")
+        schema = current_user.get("tenant_name") or current_user.get("schema") or current_user.get("tenant_schema")
         
         if not schema:
             raise HTTPException(
@@ -66,8 +66,6 @@ async def get_all_documents(
         else:
             documents = await document_service.get_all_documents(schema, limit)
             logger.info(f"Fetched {len(documents)} documents for user {current_user.get('id')}")
-        
-        return documents
         
         return documents
         
@@ -102,7 +100,7 @@ async def create_document(
     """
     try:
         # Get schema from current user's tenant
-        schema = current_user.get("schema") or current_user.get("tenant_schema")
+        schema = current_user.get("tenant_name") or current_user.get("schema") or current_user.get("tenant_schema")
         
         if not schema:
             raise HTTPException(
@@ -141,7 +139,7 @@ async def get_unique_dates(
     Returns list of dates when documents were uploaded with counts
     """
     try:
-        schema = current_user.get("schema") or current_user.get("tenant_schema")
+        schema = current_user.get("tenant_name") or current_user.get("schema") or current_user.get("tenant_schema")
         
         if not schema:
             raise HTTPException(
@@ -185,7 +183,7 @@ async def get_documents_by_date(
     Returns list of documents uploaded on the specified date
     """
     try:
-        schema = current_user.get("schema") or current_user.get("tenant_schema")
+        schema = current_user.get("tenant_name") or current_user.get("schema") or current_user.get("tenant_schema")
         
         if not schema:
             raise HTTPException(
@@ -232,7 +230,7 @@ async def get_document(
     Returns complete document including content
     """
     try:
-        schema = current_user.get("schema") or current_user.get("tenant_schema")
+        schema = current_user.get("tenant_name") or current_user.get("schema") or current_user.get("tenant_schema")
         
         if not schema:
             raise HTTPException(
@@ -276,7 +274,7 @@ async def get_document_content(
     Returns document with full content for RAG chatbot
     """
     try:
-        schema = current_user.get("schema") or current_user.get("tenant_schema")
+        schema = current_user.get("tenant_name") or current_user.get("schema") or current_user.get("tenant_schema")
         
         if not schema:
             raise HTTPException(
@@ -326,7 +324,7 @@ async def chat_with_document(
     Returns chatbot response based on document content
     """
     try:
-        schema = current_user.get("schema") or current_user.get("tenant_schema")
+        schema = current_user.get("tenant_name") or current_user.get("schema") or current_user.get("tenant_schema")
         
         if not schema:
             raise HTTPException(
@@ -437,7 +435,7 @@ async def chat_with_all_documents(
     Returns chatbot response from the most relevant document
     """
     try:
-        schema = current_user.get("schema") or current_user.get("tenant_schema")
+        schema = current_user.get("tenant_name") or current_user.get("schema") or current_user.get("tenant_schema")
         
         if not schema:
             raise HTTPException(
@@ -511,7 +509,7 @@ async def search_documents(
     Returns matching documents
     """
     try:
-        schema = current_user.get("schema") or current_user.get("tenant_schema")
+        schema = current_user.get("tenant_name") or current_user.get("schema") or current_user.get("tenant_schema")
         
         if not schema:
             raise HTTPException(
@@ -567,7 +565,7 @@ async def get_documents_by_category(
     Returns all documents in the specified category
     """
     try:
-        schema = current_user.get("schema") or current_user.get("tenant_schema")
+        schema = current_user.get("tenant_name") or current_user.get("schema") or current_user.get("tenant_schema")
         
         if not schema:
             raise HTTPException(
@@ -622,7 +620,7 @@ async def upload_document(
     """
     try:
         # Get schema from current user's tenant
-        schema = current_user.get("schema") or current_user.get("tenant_schema")
+        schema = current_user.get("tenant_name") or current_user.get("schema") or current_user.get("tenant_schema")
         
         if not schema:
             raise HTTPException(
@@ -796,7 +794,7 @@ async def delete_document(
     """Delete a report"""
     try:
         # Get tenant schema from user
-        tenant_schema = current_user.get("tenant_schema") or current_user.get("schema", "gmail")
+        tenant_schema = current_user.get("tenant_name") or current_user.get("tenant_schema") or current_user.get("schema")
         
         # Check if report exists
         query = f"""
