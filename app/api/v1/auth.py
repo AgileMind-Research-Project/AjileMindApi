@@ -1,7 +1,7 @@
 """
 Authentication API Endpoints
 
-Handles user authentication, registration, and password management.
+Handles user authentication, registration, and password management new tse m,egr for add this.
 """
 
 from fastapi import APIRouter, HTTPException, status, Depends
@@ -404,8 +404,13 @@ async def invite_user(
                 detail="Invalid token: missing tenant information"
             )
         
-        # Check user role
-        if current_user.get("role") not in ["SUPER_ADMIN", "ADMIN"]:
+        # Check user roles
+        user_roles = current_user.get("roles", [])
+        # Fallback to single role for backward compatibility
+        if not user_roles and current_user.get("role"):
+            user_roles = [current_user.get("role")]
+        
+        if not any(role in ["SUPER_ADMIN", "ADMIN"] for role in user_roles):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only administrators can invite users"
