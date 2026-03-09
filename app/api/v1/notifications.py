@@ -14,6 +14,9 @@ from app.utils.jwt import get_current_user_from_token
 from pydantic import BaseModel, Field
 
 
+from app.schemas.notification_schemas import DowntimeNotificationRequest, NotificationResponse
+from app.services.notification_service import NotificationService
+
 router = APIRouter()
 
 
@@ -350,15 +353,7 @@ async def delete_notification(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete notification: {str(e)}"
         )
-from fastapi import APIRouter, HTTPException, status, Depends
-from typing import Dict, Any
 
-from app.utils.jwt import get_current_user_from_token
-from app.db.database import db, Database
-from app.schemas.notification_schemas import DowntimeNotificationRequest, NotificationResponse
-from app.services.notification_service import NotificationService
-
-router = APIRouter()
 
 def get_notification_service(database: Database = Depends(lambda: db)) -> NotificationService:
     return NotificationService(database)
