@@ -41,13 +41,13 @@ async def create_meeting(
 
 @router.get(
     "/",
-    response_model=List[MeetingResponse],
     summary="List Meetings",
     description="List meetings with optional filters"
 )
 async def list_meetings(
     project_id: Optional[int] = None,
     date_filter: Optional[date] = Query(None, alias="date"),
+    meeting_category: Optional[str] = Query(None, description="Filter by meeting category"),
     current_user: Dict[str, Any] = Depends(get_current_user_from_token),
     service: MeetingService = Depends(get_meeting_service)
 ):
@@ -56,7 +56,7 @@ async def list_meetings(
         if not tenant_name:
             raise HTTPException(status_code=400, detail="Tenant name not found")
             
-        return await service.list_meetings(tenant_name, project_id, date_filter)
+        return await service.list_meetings(tenant_name, project_id, date_filter, meeting_category)
         
     except Exception as e:
         logger.error(f"Error listing meetings: {e}")

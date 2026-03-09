@@ -285,6 +285,8 @@ async def get_jira_status(
                 }
             }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error checking Jira status: {str(e)}")
         raise HTTPException(
@@ -338,6 +340,8 @@ async def disconnect_jira(
             }
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error disconnecting Jira: {str(e)}")
         raise HTTPException(
@@ -377,6 +381,8 @@ async def get_issue_status(
             "data": result
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting issue status: {str(e)}")
         raise HTTPException(

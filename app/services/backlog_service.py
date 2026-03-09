@@ -224,11 +224,12 @@ class BacklogService:
     async def list_backlog(
         self,
         tenant_name: str,
-        project_id: int
+        project_id: int,
+        status: Optional[str] = None
     ) -> List[BacklogItemResponse]:
         """List all backlog items for a project"""
         try:
-            items = await self.backlog_repo.list_backlog_by_project(tenant_name, project_id)
+            items = await self.backlog_repo.list_backlog_by_project(tenant_name, project_id, status)
             return [BacklogItemResponse(**item) for item in items]
         except Exception as e:
             logger.error(f"Error listing backlog: {str(e)}")
@@ -240,11 +241,12 @@ class BacklogService:
     async def list_sprint_backlog(
         self,
         tenant_name: str,
-        sprint_id: int
+        sprint_id: int,
+        status: Optional[str] = None
     ) -> List[BacklogItemResponse]:
         """List all backlog items for a sprint"""
         try:
-            items = await self.backlog_repo.list_backlog_by_sprint(tenant_name, sprint_id)
+            items = await self.backlog_repo.list_backlog_by_sprint(tenant_name, sprint_id, status)
             return [BacklogItemResponse(**item) for item in items]
         except Exception as e:
             logger.error(f"Error listing sprint backlog: {str(e)}")

@@ -27,6 +27,8 @@ class CreateReleaseNoteRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255, description="Release title")
     release_date: Optional[date] = Field(None, description="Scheduled or actual release date")
     release_type: ReleaseType = Field(ReleaseType.MINOR, description="Type of release")
+    start_sprint: Optional[int] = Field(None, description="Starting sprint ID for this release range")
+    end_sprint: Optional[int] = Field(None, description="Ending sprint ID for this release range")
     content: ReleaseNoteContent = Field(..., description="Structured release content")
     summary: Optional[str] = Field(None, description="Executive summary of the release")
 
@@ -35,6 +37,8 @@ class UpdateReleaseNoteRequest(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=255)
     release_date: Optional[date] = None
     release_type: Optional[ReleaseType] = None
+    start_sprint: Optional[int] = None
+    end_sprint: Optional[int] = None
     content: Optional[ReleaseNoteContent] = None
     summary: Optional[str] = None
 
@@ -45,6 +49,8 @@ class ReleaseNoteResponse(BaseModel):
     title: str
     release_date: Optional[date]
     release_type: str
+    start_sprint: Optional[int]
+    end_sprint: Optional[int]
     content: Dict[str, Any]
     summary: Optional[str]
     status: str
@@ -59,6 +65,8 @@ class ReleaseNoteResponse(BaseModel):
 
 class GenerateReleaseNoteRequest(BaseModel):
     project_id: int = Field(..., description="Project ID to generate release notes for")
-    version: str = Field(..., description="Version number for this release")
+    version: Optional[str] = Field(None, description="Version number for this release")
     include_tasks: bool = Field(True, description="Include project tasks in AI analysis")
     since_date: Optional[date] = Field(None, description="Only analyze items after this date")
+    start_sprint: Optional[int] = Field(None, description="Starting sprint for release range")
+    end_sprint: Optional[int] = Field(None, description="Ending sprint for release range")
