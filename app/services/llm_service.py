@@ -271,6 +271,72 @@ Generate 3-5 specific, actionable recommendations to mitigate this risk."""
         
         return cleaned
 
+    async def generate_blocker_suggestions(self, blocker_description: str) -> Dict[str, Any]:
+        """
+        Generate AI-powered suggestions and suggested mentor roles for a given blocker.
+
+        Args:
+            blocker_description: The description of the blocker.
+
+        Returns:
+            Dict containing 'suggestions' (list of strings) and 'suggested_mentor_role' (string)
+        """
+        if not self.llm:
+            return {
+                "suggestions": ["Break down the task into smaller sub-tasks.", "Consult with the team lead."],
+                "suggested_mentor_role": "Senior Developer"
+            }
+
+        try:
+            prompt = f"""You are an expert AI project management consultant.
+Analyze the following blocker description and provide actionable recovery steps and the most appropriate senior position to help solve it.
+
+BLOCKER DESCRIPTION:
+{blocker_description}
+
+IMPORTANT RULES:
+1. Generate EXACTLY 3-4 specific and actionable recovery steps.
+2. Suggest EXACTLY ONE senior position/role (e.g., Tech Lead, Senior Developer, DevOps Engineer, Product Owner, Architect) that should support the developer.
+3. Keep each suggestion to 1-2 sentences.
+4. Return the result in the following JSON format:
+{{
+  "suggestions": ["...", "...", "..."],
+  "suggested_mentor_role": "..."
+}}
+
+Generate the JSON response now:"""
+            
+            response = await self._call_llm(prompt)
+            
+            # Extract JSON from response
+            try:
+                # Find JSON block if it exists
+                json_start = response.find('{')
+                json_end = response.rfind('}') + 1
+                if json_start != -1 and json_end != -1:
+                    json_str = response[json_start:json_end]
+                    result = json.loads(json_str)
+                    return {
+                        "suggestions": result.get("suggestions", []),
+                        "suggested_mentor_role": result.get("suggested_mentor_role", "Senior Developer")
+                    }
+            except:
+                pass
+
+            # Fallback parsing if JSON parsing fails
+            suggestions = self._parse_recommendations(response)
+            return {
+                "suggestions": suggestions[:3],
+                "suggested_mentor_role": "Senior Developer / Tech Lead"
+            }
+
+        except Exception as e:
+            print(f"â Œ Blocker suggestion generation failed: {e}")
+            return {
+                "suggestions": ["Consult with the team lead to resolve the dependency."],
+                "suggested_mentor_role": "Senior Developer"
+            }
+
     async def generate_delay_suggestions(self, delay_data: Dict[str, Any]) -> List[str]:
         """
         Generate AI-powered recovery suggestions based on delay analysis data.
