@@ -138,6 +138,27 @@ async def list_release_notes(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get(
+    "/latest-version/{project_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Get Latest Version",
+    description="Get the latest version number for a project"
+)
+async def get_latest_version(
+    project_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    service: ReleaseNoteService = Depends(get_release_note_service)
+):
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(status_code=400, detail="Tenant name not found")
+        
+        version_data = await service.get_latest_version(tenant_name=tenant_name, project_id=project_id)
+        return {"version": version_data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get(
     "/{release_note_id}",
     status_code=status.HTTP_200_OK,
     summary="Get Release Note",

@@ -16,6 +16,16 @@ class ReleaseNoteService:
         from app.db.repositories.backlog_repository import BacklogRepository
         self.backlog_repo = BacklogRepository(db)
 
+    async def get_latest_version(self, tenant_name: str, project_id: int) -> Optional[str]:
+        """Get the latest version number for a project from existing release notes"""
+        try:
+            query = f"SELECT version FROM `{tenant_name}`.release_notes WHERE project_id = %s ORDER BY created_at DESC LIMIT 1"
+            result = await self.db.execute_query(query, (project_id,), fetch_one=True)
+            return result['version'] if result else None
+        except Exception as e:
+            logger.error(f"Error fetching latest version for project {project_id}: {e}")
+            return None
+
     async def get_backlog_releases(
         self,
         tenant_name: str,
