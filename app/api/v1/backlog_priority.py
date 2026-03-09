@@ -12,6 +12,8 @@ from app.core.logger import logger
 from app.utils.jwt import get_current_user_from_token
 from app.services.backlog_service import BacklogService
 from app.services.jira_service import JiraService
+from app.schemas.automation_schemas import AutomationApprovalResponse, AutomationApprovalUpdate
+from datetime import datetime
 
 
 router = APIRouter()
@@ -592,3 +594,131 @@ async def remove_from_priority_list(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to remove item: {str(e)}"
         )
+
+
+# ============================================
+# AUTOMATION APPROVAL ENDPOINTS
+# ============================================
+
+@router.get(
+    "/projects/{project_id}/sprints/{sprint_id}/automation-approval",
+    response_model=Dict[str, Any],
+    summary="Get Automation Approval Status",
+    description="Retrieve the automation approval status for a specific project and sprint"
+)
+async def get_automation_approval(
+    project_id: int,
+    sprint_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    database: Database = Depends(get_database)
+):
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(status_code=400, detail="Tenant name not found")
+
+        query = """
+            SELECT * FROM automation_approvals
+            WHERE project_id = %s AND sprint_id = %s
+        """
+        
+        result = await database.execute_query(
+            query,
+            (project_id, sprint_id),
+            fetch_one=True,
+            schema=tenant_name
+        )
+
+        if not result:
+            return {
+                "success": True,
+                "data": {
+                    "project_id": project_id,
+                    "sprint_id": sprint_id,
+                    "backlog_prioritize": False,
+                    "split_tasks": False,
+                    "assign_tasks": False,
+                    "approved_by": None,
+                    "approved_at": None
+                }
+            }
+
+        return {
+            "success": True,
+            "data": result
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching automation approval: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/projects/{project_id}/sprints/{sprint_id}/automation-approval/approve",
+    response_model=Dict[str, Any],
+    summary="Approve Automation",
+    description="Set automation approval for a project and sprint"
+)
+async def approve_automation(
+    project_id: int,
+    sprint_id: int,
+    request: AutomationApprovalUpdate,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    database: Database = Depends(get_database)
+):
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(status_code=400, detail="Tenant name not found")
+
+        user_email = current_user.get("email")
+        now = datetime.now()
+
+        # Check if record exists
+        check_query = "SELECT 1 FROM automation_approvals WHERE project_id = %s AND sprint_id = %s"
+        exists = await database.execute_query(check_query, (project_id, sprint_id), fetch_one=True, schema=tenant_name)
+
+        if exists:
+            update_query = """
+                UPDATE automation_approvals
+                SET backlog_prioritize = COALESCE(%s, backlog_prioritize),
+                    split_tasks = COALESCE(%s, split_tasks),
+                    assign_tasks = COALESCE(%s, assign_tasks),
+                    approved_by = %s,
+                    approved_at = %s,
+                    updated_at = NOW()
+                WHERE project_id = %s AND sprint_id = %s
+            """
+            await database.execute_query(
+                update_query,
+                (request.backlog_prioritize, request.split_tasks, request.assign_tasks, user_email, now, project_id, sprint_id),
+                commit=True,
+                schema=tenant_name
+            )
+        else:
+            insert_query = """
+                INSERT INTO automation_approvals 
+                (project_id, sprint_id, backlog_prioritize, split_tasks, assign_tasks, approved_by, approved_at, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            """
+            await database.execute_query(
+                insert_query,
+                (project_id, sprint_id, request.backlog_prioritize or False, request.split_tasks or False, request.assign_tasks or False, user_email, now),
+                commit=True,
+                schema=tenant_name
+            )
+
+        return {
+            "success": True,
+            "message": "Automation approved successfully",
+            "data": {
+                "project_id": project_id,
+                "sprint_id": sprint_id,
+                "approved_by": user_email,
+                "approved_at": now
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error approving automation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

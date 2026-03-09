@@ -489,7 +489,7 @@ CREATE TABLE `transcripts` (
     `id` int NOT NULL AUTO_INCREMENT,
     `meeting_id` varchar(50) DEFAULT NULL COMMENT 'Reference to meetings.meeting_id',
     `title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Transcript title',
-    `category` enum('daily_standup','sprint_meeting','retrospective','sprint_planning','other') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Meeting type',
+    `category` enum('daily_standup','sprint_meeting','retrospective','sprint_planning','other','sprint_review') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Meeting type',
     `transcript_content` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Full transcript text',
     `transcript_date` date NOT NULL COMMENT 'Date of the meeting',
     `tags` json DEFAULT NULL COMMENT 'Tags for categorization',
@@ -585,3 +585,33 @@ CREATE TABLE `meetings` (
   CHECK (`end_time` > `start_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE `automation_approvals` (
+  `project_id` BIGINT NOT NULL,
+  `sprint_id` BIGINT NOT NULL,
+
+  `backlog_prioritize` BOOLEAN NOT NULL DEFAULT 0 COMMENT 'Approval for backlog prioritization automation',
+  `split_tasks` BOOLEAN NOT NULL DEFAULT 0 COMMENT 'Approval for automatic task splitting',
+  `assign_tasks` BOOLEAN NOT NULL DEFAULT 0 COMMENT 'Approval for automatic task assignment',
+
+  `approved_by` VARCHAR(255) DEFAULT NULL COMMENT 'Email of approver',
+  `approved_at` DATETIME DEFAULT NULL,
+
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  PRIMARY KEY (`project_id`, `sprint_id`),
+
+  KEY `idx_project` (`project_id`),
+  KEY `idx_sprint` (`sprint_id`),
+
+  CONSTRAINT `fk_auto_project`
+    FOREIGN KEY (`project_id`)
+    REFERENCES `projects` (`project_id`)
+    ON DELETE CASCADE,
+
+  CONSTRAINT `fk_auto_sprint`
+    FOREIGN KEY (`sprint_id`)
+    REFERENCES `sprint` (`sprint_id`)
+    ON DELETE CASCADE
+
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

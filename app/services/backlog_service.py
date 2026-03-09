@@ -539,3 +539,12 @@ class BacklogService:
     ) -> List[Dict[str, Any]]:
         """List tasks assigned to user"""
         return await self.backlog_repo.list_user_tasks(tenant_name, email)
+
+    async def update_backlog_item(
+        self,
+        tenant_name: str,
+        item_id: str,
+        updates: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Update a backlog item (task or subtask) by ID"""
+        return await self.backlog_repo.update_subtask(tenant_name, item_id, updates)
