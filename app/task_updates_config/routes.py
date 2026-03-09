@@ -264,20 +264,21 @@ async def get_model_status(
 @router.get(
     "/daily-blockers",
     summary="Get Analyzed Daily Blockers",
-    description="Get all blocked task updates with AI-powered suggestions and mentor roles"
+    description="Get all blocked task updates"
 )
 async def get_daily_blockers(
     project_id: Optional[int] = Query(None, description="Filter by project"),
+    include_ai: bool = Query(False, description="Whether to include AI analysis immediately"),
     current_user: Dict[str, Any] = Depends(get_current_user_from_token),
     service: DailyBlockerService = Depends(get_blocker_service)
 ):
-    """Get analyzed daily blockers"""
+    """Get daily blockers"""
     try:
         tenant_name = current_user.get("tenant_name")
         if not tenant_name:
             raise HTTPException(status_code=400, detail="Tenant name not found")
         
-        blockers = await service.get_daily_blockers(tenant_name, project_id)
+        blockers = await service.get_daily_blockers(tenant_name, project_id, include_ai)
         return {
             "success": True,
             "data": blockers
@@ -285,4 +286,33 @@ async def get_daily_blockers(
     
     except Exception as e:
         logger.error(f"Error fetching daily blockers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/daily-blockers/{blocker_id}/analyze",
+    summary="Analyze specific blocker",
+    description="Perform AI analysis for a specific blocker"
+)
+async def analyze_blocker(
+    blocker_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    service: DailyBlockerService = Depends(get_blocker_service)
+):
+    """Analyze a specific blocker"""
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(status_code=400, detail="Tenant name not found")
+        
+        analysis = await service.analyze_blocker(tenant_name, blocker_id)
+        return {
+            "success": True,
+            "data": analysis
+        }
+    
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error analyzing blocker: {e}")
         raise HTTPException(status_code=500, detail=str(e))
