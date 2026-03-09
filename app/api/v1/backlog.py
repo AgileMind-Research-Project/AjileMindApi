@@ -4,8 +4,8 @@ Backlog API Endpoints
 REST API for backlog management including file upload and Jira integration.
 """
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Form
-from typing import Dict, Any
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Form, Query
+from typing import Dict, Any, Optional
 from app.schemas.backlog_schemas import BulkUploadResponse, BacklogListResponse, BacklogItemUpdate, MergeBacklogItemsRequest, SubtaskCreateRequest
 from app.services.backlog_service import BacklogService
 from app.db.database import db, Database
@@ -145,19 +145,26 @@ async def upload_backlog_file(
     "/project/{project_id}",
     response_model=BacklogListResponse,
     summary="List Backlog Items",
-    description="Get all backlog items for a project"
+    description="Get all backlog items for a project, optionally filtered by sprint and status"
 )
 async def list_project_backlog(
     project_id: int,
+    sprint_id: Optional[int] = Query(None, description="Optional sprint ID to filter by"),
+    status: Optional[str] = Query(None, description="Optional status to filter by (e.g., 'done', 'in_progress')"),
     current_user: Dict[str, Any] = Depends(get_current_user_from_token),
     backlog_service: BacklogService = Depends(get_backlog_service)
 ) -> BacklogListResponse:
     """
     List all backlog items for a specific project.
     
+    Args:
+        project_id: The project ID to get backlog for
+        sprint_id: Optional sprint ID to filter items by specific sprint
+        status: Optional status to filter items by (e.g., 'done', 'in_progress')
+    
     Returns:
-    - List of backlog items with Jira issue keys
-    - Total count
+        - List of backlog items with Jira issue keys
+        - Total count
     """
     try:
         tenant_name = current_user.get("tenant_name")
@@ -167,7 +174,12 @@ async def list_project_backlog(
                 detail="Tenant name not found in token"
             )
         
-        items = await backlog_service.list_backlog(tenant_name, project_id)
+        if sprint_id is not None:
+            # Filter by sprint
+            items = await backlog_service.list_sprint_backlog(tenant_name, sprint_id, status)
+        else:
+            # Get all project backlog items
+            items = await backlog_service.list_backlog(tenant_name, project_id, status)
         
         return BacklogListResponse(
             success=True,

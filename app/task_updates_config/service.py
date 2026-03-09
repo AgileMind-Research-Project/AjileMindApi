@@ -68,27 +68,32 @@ class TaskUpdatesService:
                             # Create meeting record
                             insert_meeting = f"""
                                 INSERT INTO {tenant_name}.meetings 
-                                (meeting_id, project_id, title, date, start_time, end_time, status, category, meeting_transcript)
-                                VALUES (%s, %s, %s, %s, '09:00', '10:00', 'COMPLETED', 'DAILY_STANDUP', %s)
+                                (meeting_id, project_id, sprint_id, title, meeting_category, meeting_date, start_time, end_time, status, meeting_link)
+                                VALUES (%s, %s, 0, %s, 'Daily Standup', %s, '09:00', '10:00', 'COMPLETED', '')
                             """
                             await self.db.execute_query(insert_meeting, (
                                 meeting_id, 
                                 project_id, 
                                 transcript['title'], 
-                                transcript['transcript_date'], 
-                                transcript['transcript_content']
+                                transcript['transcript_date']
                             ), commit=True, schema=tenant_name)
                             logger.info(f"Synced transcript {transcript_id} to meetings table as {meeting_id}")
                     except Exception as sync_err:
                         logger.error(f"Failed to sync transcript to meeting: {sync_err}")
                         # Continue, maybe it exists or will fail downstream
             
-            # Get meeting
-            meeting = await self.meeting_service.get_meeting_by_meeting_id(tenant_name, meeting_id)
+            # Get meeting with transcript content
+            meeting_query = """
+                SELECT m.*, t.transcript_content
+                FROM meetings m
+                LEFT JOIN transcripts t ON t.meeting_id COLLATE utf8mb4_unicode_ci = m.meeting_id COLLATE utf8mb4_unicode_ci
+                WHERE m.meeting_id = %s
+            """
+            meeting = await self.db.execute_query(meeting_query, (meeting_id,), fetch_one=True, schema=tenant_name)
             if not meeting:
                 raise ValueError(f"Meeting {meeting_id} not found")
             
-            transcript = meeting.get('meeting_transcript')
+            transcript = meeting.get('transcript_content')
             if not transcript:
                 raise ValueError("Meeting has no transcript")
             

@@ -130,23 +130,33 @@ class BacklogRepository:
     async def list_backlog_by_project(
         self,
         tenant_name: str,
-        project_id: int
+        project_id: int,
+        status: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """List all backlog items for a project"""
         try:
+            # Base query
             query = """
                 SELECT 
                     id, project_id, sprint_id, summary, description, issue_type,
                     status, priority, assignee, tags, severity, parent_task_id,
                     created_at, updated_at
                 FROM project_backlog
-                WHERE project_id = %s
-                ORDER BY created_at DESC
+                WHERE project_id = %s AND issue_type != 'release'
             """
+            
+            params = [project_id]
+            
+            # Add status filter if provided
+            if status:
+                query += " AND status = %s"
+                params.append(status)
+            
+            query += " ORDER BY created_at DESC"
             
             results = await self.db.execute_query(
                 query,
-                (project_id,),
+                tuple(params),
                 fetch_all=True,
                 schema=tenant_name
             )
@@ -165,6 +175,135 @@ class BacklogRepository:
         except Exception as e:
             logger.error(f"Error listing backlog items: {str(e)}")
             raise
+
+    async def list_backlog_by_type(
+        self,
+        tenant_name: str,
+        project_id: int,
+        issue_type: str
+    ) -> List[Dict[str, Any]]:
+        """List backlog items filtered by type"""
+        try:
+            query = """
+                SELECT 
+                    id, project_id, sprint_id, summary, description, issue_type,
+                    status, priority, assignee, tags, severity, parent_task_id,
+                    created_at, updated_at, start_date, end_date
+                FROM project_backlog
+                WHERE project_id = %s AND issue_type = %s
+                ORDER BY created_at DESC
+            """
+            
+            results = await self.db.execute_query(
+                query,
+                (project_id, issue_type),
+                fetch_all=True,
+                schema=tenant_name
+            )
+            
+            if results:
+                for item in results:
+                    if item.get('tags'):
+                        try:
+                            item['tags'] = json.loads(item['tags'])
+                        except:
+                            item['tags'] = None
+                    # Format dates for JSON
+                    for d in ['created_at', 'updated_at', 'start_date', 'end_date']:
+                        if item.get(d):
+                            item[d] = str(item[d])
+
+            return results or []
+        except Exception as e:
+            logger.error(f"Error listing backlog items by type: {str(e)}")
+            raise
+
+    async def list_all_by_type(
+        self,
+        tenant_name: str,
+        issue_type: str
+    ) -> List[Dict[str, Any]]:
+        """List all backlog items of a given type across all projects"""
+        try:
+            query = """
+                SELECT 
+                    id, project_id, sprint_id, summary, description, issue_type,
+                    status, priority, assignee, tags, severity, parent_task_id,
+                    created_at, updated_at, start_date, end_date
+                FROM project_backlog
+                WHERE issue_type = %s
+                ORDER BY created_at DESC
+            """
+            results = await self.db.execute_query(
+                query,
+                (issue_type,),
+                fetch_all=True,
+                schema=tenant_name
+            )
+            if results:
+                for item in results:
+                    if item.get('tags'):
+                        try:
+                            item['tags'] = json.loads(item['tags'])
+                        except:
+                            item['tags'] = None
+                    for d in ['created_at', 'updated_at', 'start_date', 'end_date']:
+                        if item.get(d):
+                            item[d] = str(item[d])
+            return results or []
+        except Exception as e:
+            logger.error(f"Error listing all backlog items by type: {str(e)}")
+            raise
+
+    async def list_backlog_by_sprint(
+        self,
+        tenant_name: str,
+        sprint_id: int,
+        status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """List all backlog items for a sprint"""
+        try:
+            # Base query
+            query = """
+                SELECT 
+                    id, project_id, sprint_id, summary, description, issue_type,
+                    status, priority, assignee, tags, severity, parent_task_id,
+                    estimated_hours, story_points, is_jira,
+                    created_at, updated_at
+                FROM project_backlog
+                WHERE sprint_id = %s AND issue_type != 'release'
+            """
+            
+            params = [sprint_id]
+            
+            # Add status filter if provided
+            if status:
+                query += " AND status = %s"
+                params.append(status)
+            
+            query += " ORDER BY created_at ASC"
+            
+            results = await self.db.execute_query(
+                query,
+                tuple(params),
+                fetch_all=True,
+                schema=tenant_name
+            )
+            
+            # Deserialize tags for each item
+            if results:
+                for item in results:
+                    if item.get('tags'):
+                        try:
+                            item['tags'] = json.loads(item['tags'])
+                        except:
+                            item['tags'] = None
+            
+            return results or []
+            
+        except Exception as e:
+            logger.error(f"Error listing sprint backlog items: {str(e)}")
+            return []
     
     
     async def list_user_tasks(

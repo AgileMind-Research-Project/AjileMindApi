@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS `release_notes` (
     `title` VARCHAR(255) NOT NULL COMMENT 'Release title',
     `release_date` DATE NULL COMMENT 'Scheduled or actual release date',
     `release_type` ENUM('MAJOR', 'MINOR', 'PATCH', 'HOTFIX') DEFAULT 'MINOR' COMMENT 'Release classification',
+    `start_sprint` INT NULL COMMENT 'Starting sprint ID for this release range',
+    `end_sprint` INT NULL COMMENT 'Ending sprint ID for this release range',
     
     -- Content (JSON structure)
     `content` JSON NULL COMMENT 'Structured content: {features: [], bug_fixes: [], improvements: [], breaking_changes: [], known_issues: []}',

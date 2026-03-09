@@ -13,6 +13,33 @@ from app.core.logger import logger
 class ReleaseNoteService:
     def __init__(self, db: Database):
         self.db = db
+        from app.db.repositories.backlog_repository import BacklogRepository
+        self.backlog_repo = BacklogRepository(db)
+
+    async def get_latest_version(self, tenant_name: str, project_id: int) -> Optional[str]:
+        """Get the latest version number for a project from existing release notes"""
+        try:
+            query = f"SELECT version FROM `{tenant_name}`.release_notes WHERE project_id = %s ORDER BY created_at DESC LIMIT 1"
+            result = await self.db.execute_query(query, (project_id,), fetch_one=True)
+            return result['version'] if result else None
+        except Exception as e:
+            logger.error(f"Error fetching latest version for project {project_id}: {e}")
+            return None
+
+    async def get_backlog_releases(
+        self,
+        tenant_name: str,
+        project_id: int
+    ) -> List[Dict[str, Any]]:
+        """Get releases tracked in the backlog for a specific project"""
+        return await self.backlog_repo.list_backlog_by_type(tenant_name, project_id, 'release')
+
+    async def get_all_backlog_releases(
+        self,
+        tenant_name: str
+    ) -> List[Dict[str, Any]]:
+        """Get all release-type backlog items across all projects"""
+        return await self.backlog_repo.list_all_by_type(tenant_name, 'release')
 
     async def create_release_note(
         self,
@@ -27,8 +54,8 @@ class ReleaseNoteService:
             
             insert_query = f"""
                 INSERT INTO `{tenant_name}`.release_notes
-                (project_id, version, title, release_date, release_type, content, summary, created_by)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (project_id, version, title, release_date, release_type, start_sprint, end_sprint, content, summary, created_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             
             params = (
@@ -37,6 +64,8 @@ class ReleaseNoteService:
                 request.title,
                 request.release_date,
                 request.release_type.value,
+                request.start_sprint,
+                request.end_sprint,
                 content_json,
                 request.summary,
                 user_id
@@ -91,6 +120,7 @@ class ReleaseNoteService:
             # Fetch records
             query = f"""
                 SELECT id, project_id, version, title, release_date, release_type,
+                       start_sprint, end_sprint,
                        content, summary, status, created_by, created_at, updated_at,
                        published_at, published_by
                 FROM `{tenant_name}`.release_notes
@@ -131,6 +161,7 @@ class ReleaseNoteService:
         try:
             query = f"""
                 SELECT id, project_id, version, title, release_date, release_type,
+                       start_sprint, end_sprint,
                        content, summary, status, created_by, created_at, updated_at,
                        published_at, published_by
                 FROM `{tenant_name}`.release_notes
@@ -178,6 +209,14 @@ class ReleaseNoteService:
             if request.release_type is not None:
                 update_fields.append("release_type = %s")
                 params.append(request.release_type.value)
+            
+            if request.start_sprint is not None:
+                update_fields.append("start_sprint = %s")
+                params.append(request.start_sprint)
+                
+            if request.end_sprint is not None:
+                update_fields.append("end_sprint = %s")
+                params.append(request.end_sprint)
             
             if request.content is not None:
                 update_fields.append("content = %s")
@@ -280,44 +319,51 @@ class ReleaseNoteService:
     ) -> Dict[str, Any]:
         """Generate release note content using AI based on project data"""
         try:
-            # This is a placeholder - you'll need to integrate with your AI service
-            # For now, we'll return a template structure
-            
             logger.info(f"Generating AI release note for project {request.project_id}, version {request.version}")
             
-            # TODO: Query project tasks, sprints, backlog items
-            # TODO: Call AI service to analyze and generate content
+            # Import AI service
+            from app.services.ai_release_note_service import AIReleaseNoteService
             
-            # Placeholder response
-            generated_content = {
-                "features": [
-                    "New user authentication system",
-                    "Enhanced dashboard with real-time analytics",
-                    "Mobile responsive design improvements"
-                ],
-                "bug_fixes": [
-                    "Fixed login timeout issue",
-                    "Resolved data sync errors",
-                    "Corrected timezone display issues"
-                ],
-                "improvements": [
-                    "40% faster page load times",
-                    "Improved error handling and user feedback",
-                    "Enhanced accessibility features"
-                ],
-                "breaking_changes": [],
-                "known_issues": []
-            }
+            # Initialize AI service
+            ai_service = AIReleaseNoteService(self.db)
             
-            summary = f"This release includes major improvements to the user interface and performance optimizations."
+            # Extract sprint parameters from request
+            start_sprint = getattr(request, 'start_sprint', None)
+            end_sprint = getattr(request, 'end_sprint', None)
+            
+            # Generate AI content
+            ai_result = await ai_service.generate_release_note_content(
+                tenant_name=tenant_name,
+                project_id=request.project_id,
+                start_sprint=start_sprint,
+                end_sprint=end_sprint,
+                version=request.version
+            )
             
             return {
                 "success": True,
-                "content": generated_content,
-                "summary": summary,
-                "message": "Release note content generated successfully"
+                "content": ai_result["content"],
+                "summary": ai_result["summary"],
+                "release_type": ai_result.get("release_type", "MINOR"),
+                "suggested_version": ai_result.get("suggested_version", request.version),
+                "message": "Release note content generated successfully using AI"
             }
             
         except Exception as e:
             logger.error(f"Failed to generate AI release note: {e}")
-            raise
+            
+            # Fallback to basic template on AI failure
+            fallback_content = {
+                "features": [f"Release {request.version} for project {request.project_id}"],
+                "bug_fixes": [],
+                "improvements": [],
+                "breaking_changes": [],
+                "known_issues": ["AI generation temporarily unavailable"]
+            }
+            
+            return {
+                "success": True,
+                "content": fallback_content,
+                "summary": f"Release {request.version} - AI generation failed, manual review required.",
+                "message": "Release note template generated (AI service unavailable)"
+            }
