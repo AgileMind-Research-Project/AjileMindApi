@@ -24,11 +24,36 @@ class ReportStatus(str, Enum):
     PUBLISHED = "published"
 
 
-class DailyStandupReport(BaseModel):
-    """Daily Standup Report structure"""
-    yesterday_work: List[str] = Field(default_factory=list)
-    today_plan: List[str] = Field(default_factory=list)
+class PersonUpdate(BaseModel):
+    """A single person's update in a standup (legacy)"""
+    name: str
+    tasks: List[str] = Field(default_factory=list)
+
+
+class DeveloperUpdate(BaseModel):
+    """A single developer's full standup entry"""
+    name: str
+    role: Optional[str] = None
+    yesterday_tasks: List[str] = Field(default_factory=list)
+    today_tasks: List[str] = Field(default_factory=list)
     blockers: List[str] = Field(default_factory=list)
+
+
+class BlockerSummary(BaseModel):
+    """Summary of a shared blocker across multiple team members"""
+    title: str
+    description: str = ""
+    reported_by: List[str] = Field(default_factory=list)
+    impact: str = ""
+
+
+class DailyStandupReport(BaseModel):
+    """Daily Standup Report – developer-centric with per-person yesterday/today/blockers"""
+    team_updates: List[DeveloperUpdate] = Field(default_factory=list)
+    blockers_summary: List[BlockerSummary] = Field(default_factory=list)
+    # Legacy fields kept for backward compatibility with old reports
+    yesterday_work: Optional[List[PersonUpdate]] = None
+    today_plan: Optional[List[PersonUpdate]] = None
 
 
 class ActionItem(BaseModel):

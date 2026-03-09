@@ -187,7 +187,10 @@ class ReportExporter:
             story.append(Spacer(1, 0.2*inch))
             
             # Add report content based on type
-            if report_type == 'daily_standup':
+            # Template-based reports store _sections_order; use generic renderer for them
+            if '_sections_order' in report_data:
+                ReportExporter._add_template_content(story, report_data, styles)
+            elif report_type == 'daily_standup':
                 ReportExporter._add_daily_standup_content(story, report_data, styles)
             elif report_type == 'sprint_meeting':
                 ReportExporter._add_sprint_meeting_content(story, report_data, styles)
@@ -224,31 +227,170 @@ class ReportExporter:
             raise
     
     @staticmethod
+    def _add_template_content(story, data, styles):
+        """Generic PDF renderer for template-based reports using _sections_order metadata"""
+        sections_order = data.get('_sections_order', [])
+        sorted_sections = sorted(sections_order, key=lambda s: s.get('order', 0))
+
+        for section in sorted_sections:
+            key = section.get('key', '')
+            title = section.get('title', key.replace('_', ' ').title())
+            sec_type = section.get('type', 'paragraph')
+            value = data.get(key)
+
+            if value is None:
+                continue
+
+            story.append(Paragraph(f"{title}:", styles['Heading2']))
+            story.append(Spacer(1, 0.1 * inch))
+
+            if sec_type in ('bullet_list', 'numbered_list'):
+                items = value if isinstance(value, list) else [value]
+                for item in items:
+                    story.append(Paragraph(f"• {item}", styles['Normal']))
+
+            elif sec_type == 'table' and isinstance(value, list) and value:
+                # Build table from array of dicts or strings
+                if isinstance(value[0], dict):
+                    columns = list(value[0].keys())
+                    table_data = [[col.replace('_', ' ').title() for col in columns]]
+                    for row in value:
+                        table_data.append([str(row.get(col, '')) for col in columns])
+                else:
+                    table_data = [['#', 'Item']]
+                    for i, item in enumerate(value, 1):
+                        table_data.append([str(i), str(item)])
+
+                col_count = len(table_data[0])
+                available_width = 6.5 * inch
+                col_width = available_width / col_count
+                table = Table(table_data, colWidths=[col_width] * col_count)
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 9),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ]))
+                story.append(table)
+
+            else:
+                text = str(value) if not isinstance(value, list) else ', '.join(str(v) for v in value)
+                story.append(Paragraph(text, styles['Normal']))
+
+            story.append(Spacer(1, 0.2 * inch))
+
+    @staticmethod
     def _add_daily_standup_content(story, data, styles):
-        """Add daily standup content to PDF"""
-        # Yesterday's work
-        story.append(Paragraph("Yesterday's Work:", styles['Heading2']))
-        story.append(Spacer(1, 0.1*inch))
-        for item in (data.get('yesterday_work') or []):
-            story.append(Paragraph(f"• {item}", styles['Normal']))
-        story.append(Spacer(1, 0.2*inch))
-        
-        # Today's plan
-        story.append(Paragraph("Today's Plan:", styles['Heading2']))
-        story.append(Spacer(1, 0.1*inch))
-        for item in (data.get('today_plan') or []):
-            story.append(Paragraph(f"• {item}", styles['Normal']))
-        story.append(Spacer(1, 0.2*inch))
-        
-        # Blockers
-        story.append(Paragraph("Blockers & Issues:", styles['Heading2']))
-        story.append(Spacer(1, 0.1*inch))
-        blockers = data.get('blockers') or []
-        if blockers:
-            for item in blockers:
-                story.append(Paragraph(f"• {item}", styles['Normal']))
+        """Add daily standup content to PDF – developer-centric format with tables"""
+        team_updates = data.get('team_updates', [])
+
+        if team_updates:
+            # Create table for team updates
+            table_data = [['Developer', 'Yesterday', 'Today', 'Blockers']]
+
+            for dev in team_updates:
+                if not isinstance(dev, dict):
+                    continue
+                name = dev.get('name', 'Unknown')
+                role = dev.get('role', '')
+                developer_name = f"{name}" + (f"\n({role})" if role else "")
+
+                yesterday = dev.get('yesterday_tasks', [])
+                yesterday_text = '\n'.join([f"• {task}" for task in yesterday]) if yesterday else 'No tasks'
+
+                today = dev.get('today_tasks', [])
+                today_text = '\n'.join([f"• {task}" for task in today]) if today else 'No tasks'
+
+                blockers = dev.get('blockers', [])
+                blockers_text = '\n'.join([f"• {b}" for b in blockers]) if blockers else 'No blockers'
+
+                table_data.append([developer_name, yesterday_text, today_text, blockers_text])
+
+            if len(table_data) > 1:  # Only add table if there are data rows
+                table = Table(table_data, colWidths=[2*inch, 2.5*inch, 2.5*inch, 2.5*inch])
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 12),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 10),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ]))
+                story.append(table)
+                story.append(Spacer(1, 0.3*inch))
         else:
-            story.append(Paragraph("No blockers reported.", styles['Normal']))
+            # Legacy flat format fallback
+            story.append(Paragraph("Yesterday's Work:", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            for item in (data.get('yesterday_work') or []):
+                text = item if isinstance(item, str) else str(item)
+                story.append(Paragraph(f"• {text}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+
+            story.append(Paragraph("Today's Plan:", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            for item in (data.get('today_plan') or []):
+                text = item if isinstance(item, str) else str(item)
+                story.append(Paragraph(f"• {text}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+
+            story.append(Paragraph("Blockers & Issues:", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+            blockers = data.get('blockers') or []
+            if blockers:
+                for item in blockers:
+                    text = item if isinstance(item, str) else str(item)
+                    story.append(Paragraph(f"• {text}", styles['Normal']))
+            else:
+                story.append(Paragraph("No blockers reported.", styles['Normal']))
+
+        # Blockers summary table
+        blockers_summary = data.get('blockers_summary', [])
+        if blockers_summary:
+            story.append(Spacer(1, 0.15*inch))
+            story.append(Paragraph("Blockers Summary:", styles['Heading2']))
+            story.append(Spacer(1, 0.1*inch))
+
+            table_data = [['Title', 'Description', 'Reported By', 'Impact']]
+            for bs in blockers_summary:
+                if isinstance(bs, dict):
+                    title = bs.get('title', 'Untitled')
+                    desc = bs.get('description', '')
+                    reported = ', '.join(bs.get('reported_by', []))
+                    impact = bs.get('impact', '')
+                    table_data.append([title, desc, reported, impact])
+
+            if len(table_data) > 1:  # Only add table if there are data rows
+                table = Table(table_data, colWidths=[2*inch, 2.5*inch, 1.5*inch, 2*inch])
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 12),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 10),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ]))
+                story.append(table)
     
     @staticmethod
     def _add_sprint_meeting_content(story, data, styles):
@@ -278,19 +420,33 @@ class ReportExporter:
             story.append(Paragraph(f"• {item}", styles['Normal']))
         story.append(Spacer(1, 0.2*inch))
         
-        # Action items
+        # Action items as table
         story.append(Paragraph("Action Items:", styles['Heading2']))
         story.append(Spacer(1, 0.1*inch))
         action_items = data.get('action_items') or []
         if action_items:
+            table_data = [['Task', 'Assignee', 'Due Date']]
             for item in action_items:
+                task = item.get('task') or item.get('action') or 'Unknown Task'
                 assignee = item.get('assignee', 'Unassigned')
                 due_date = item.get('due_date', 'No deadline')
-                action = item.get('task') or item.get('action') or 'Unknown Task'
-                story.append(Paragraph(
-                    f"• {action} (Assignee: {assignee}, Due: {due_date})",
-                    styles['Normal']
-                ))
+                table_data.append([task, assignee, due_date])
+
+            table = Table(table_data, colWidths=[3*inch, 1.5*inch, 1.5*inch])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 10),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            story.append(table)
         else:
             story.append(Paragraph("No action items.", styles['Normal']))
     
@@ -318,19 +474,37 @@ class ReportExporter:
             story.append(Paragraph(f"• {item}", styles['Normal']))
         story.append(Spacer(1, 0.2*inch))
         
-        # Action points
+        # Action points as table
         story.append(Paragraph("Action Points:", styles['Heading2']))
         story.append(Spacer(1, 0.1*inch))
-        for item in (data.get('action_points') or []):
-             # Action points might be dicts (ActionItem) or strings depending on legacy...
-             # Schema says List[ActionItem]
-             if isinstance(item, dict):
-                 action = item.get('task') or item.get('action') or 'Unknown'
-                 assignee = item.get('assignee', '')
-                 txt = f"• {action}" + (f" ({assignee})" if assignee else "")
-                 story.append(Paragraph(txt, styles['Normal']))
-             else:
-                 story.append(Paragraph(f"• {item}", styles['Normal']))
+        action_points = data.get('action_points') or []
+        if action_points:
+            table_data = [['Action', 'Assignee']]
+            for item in action_points:
+                if isinstance(item, dict):
+                    action = item.get('task') or item.get('action') or 'Unknown'
+                    assignee = item.get('assignee', 'Unassigned')
+                    table_data.append([action, assignee])
+                else:
+                    table_data.append([str(item), 'Unassigned'])
+
+            table = Table(table_data, colWidths=[4*inch, 1.5*inch])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 10),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            story.append(table)
+        else:
+            story.append(Paragraph("No action points.", styles['Normal']))
     
     @staticmethod
     def export_to_docx(
@@ -402,7 +576,10 @@ class ReportExporter:
             title = doc.add_heading(f"{report_type.replace('_', ' ').title()} Report", 0)
             
             # Add report content based on type
-            if report_type == 'daily_standup':
+            # Template-based reports store _sections_order; use generic renderer for them
+            if '_sections_order' in report_data:
+                ReportExporter._add_template_content_docx(doc, report_data)
+            elif report_type == 'daily_standup':
                 ReportExporter._add_daily_standup_content_docx(doc, report_data)
             elif report_type == 'sprint_meeting':
                 ReportExporter._add_sprint_meeting_content_docx(doc, report_data)
@@ -457,23 +634,162 @@ class ReportExporter:
             raise
     
     @staticmethod
+    def _add_template_content_docx(doc, data):
+        """Generic DOCX renderer for template-based reports using _sections_order metadata"""
+        sections_order = data.get('_sections_order', [])
+        sorted_sections = sorted(sections_order, key=lambda s: s.get('order', 0))
+
+        for section in sorted_sections:
+            key = section.get('key', '')
+            title = section.get('title', key.replace('_', ' ').title())
+            sec_type = section.get('type', 'paragraph')
+            value = data.get(key)
+
+            if value is None:
+                continue
+
+            doc.add_heading(f"{title}:", level=2)
+
+            if sec_type in ('bullet_list', 'numbered_list'):
+                items = value if isinstance(value, list) else [value]
+                for item in items:
+                    doc.add_paragraph(str(item), style='List Bullet')
+
+            elif sec_type == 'table' and isinstance(value, list) and value:
+                # Build table from array of dicts or strings
+                if isinstance(value[0], dict):
+                    columns = list(value[0].keys())
+                    table = doc.add_table(rows=1, cols=len(columns))
+                    table.style = 'Table Grid'
+                    hdr_cells = table.rows[0].cells
+                    for i, col in enumerate(columns):
+                        hdr_cells[i].text = col.replace('_', ' ').title()
+                        for para in hdr_cells[i].paragraphs:
+                            for run in para.runs:
+                                run.bold = True
+                    for row in value:
+                        row_cells = table.add_row().cells
+                        for i, col in enumerate(columns):
+                            row_cells[i].text = str(row.get(col, ''))
+                else:
+                    table = doc.add_table(rows=1, cols=2)
+                    table.style = 'Table Grid'
+                    hdr_cells = table.rows[0].cells
+                    hdr_cells[0].text = '#'
+                    hdr_cells[1].text = 'Item'
+                    for para in hdr_cells[0].paragraphs:
+                        for run in para.runs:
+                            run.bold = True
+                    for para in hdr_cells[1].paragraphs:
+                        for run in para.runs:
+                            run.bold = True
+                    for i, item in enumerate(value, 1):
+                        row_cells = table.add_row().cells
+                        row_cells[0].text = str(i)
+                        row_cells[1].text = str(item)
+                doc.add_paragraph()
+
+            else:
+                text = str(value) if not isinstance(value, list) else ', '.join(str(v) for v in value)
+                doc.add_paragraph(text)
+
+    @staticmethod
     def _add_daily_standup_content_docx(doc, data):
-        """Add daily standup content to DOCX"""
-        doc.add_heading("Yesterday's Work:", level=2)
-        for item in (data.get('yesterday_work') or []):
-            doc.add_paragraph(item, style='List Bullet')
-        
-        doc.add_heading("Today's Plan:", level=2)
-        for item in (data.get('today_plan') or []):
-            doc.add_paragraph(item, style='List Bullet')
-        
-        doc.add_heading("Blockers & Issues:", level=2)
-        blockers = data.get('blockers') or []
-        if blockers:
-            for item in blockers:
-                doc.add_paragraph(item, style='List Bullet')
+        """Add daily standup content to DOCX – developer-centric format with tables"""
+        team_updates = data.get('team_updates', [])
+
+        if team_updates:
+            # Create table for team updates
+            table = doc.add_table(rows=1, cols=4)
+            table.style = 'Table Grid'
+
+            # Add header row
+            header_cells = table.rows[0].cells
+            header_cells[0].text = 'Developer'
+            header_cells[1].text = 'Yesterday'
+            header_cells[2].text = 'Today'
+            header_cells[3].text = 'Blockers'
+
+            # Make header bold
+            for cell in header_cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.bold = True
+
+            # Add data rows
+            for dev in team_updates:
+                if not isinstance(dev, dict):
+                    continue
+
+                row_cells = table.add_row().cells
+                name = dev.get('name', 'Unknown')
+                role = dev.get('role', '')
+                developer_name = f"{name}" + (f"\n({role})" if role else "")
+                row_cells[0].text = developer_name
+
+                yesterday = dev.get('yesterday_tasks', [])
+                yesterday_text = '\n'.join([f"• {task}" for task in yesterday]) if yesterday else 'No tasks'
+                row_cells[1].text = yesterday_text
+
+                today = dev.get('today_tasks', [])
+                today_text = '\n'.join([f"• {task}" for task in today]) if today else 'No tasks'
+                row_cells[2].text = today_text
+
+                blockers = dev.get('blockers', [])
+                blockers_text = '\n'.join([f"• {b}" for b in blockers]) if blockers else 'No blockers'
+                row_cells[3].text = blockers_text
+
+            doc.add_paragraph()  # Add spacing after table
         else:
-            doc.add_paragraph("No blockers reported.")
+            # Legacy fallback
+            doc.add_heading("Yesterday's Work:", level=2)
+            for item in (data.get('yesterday_work') or []):
+                text = item if isinstance(item, str) else str(item)
+                doc.add_paragraph(text, style='List Bullet')
+
+            doc.add_heading("Today's Plan:", level=2)
+            for item in (data.get('today_plan') or []):
+                text = item if isinstance(item, str) else str(item)
+                doc.add_paragraph(text, style='List Bullet')
+
+            doc.add_heading("Blockers & Issues:", level=2)
+            blockers = data.get('blockers') or []
+            if blockers:
+                for item in blockers:
+                    text = item if isinstance(item, str) else str(item)
+                    doc.add_paragraph(text, style='List Bullet')
+            else:
+                doc.add_paragraph("No blockers reported.")
+
+        # Blockers summary table
+        blockers_summary = data.get('blockers_summary', [])
+        if blockers_summary:
+            doc.add_heading("Blockers Summary:", level=2)
+
+            table = doc.add_table(rows=1, cols=4)
+            table.style = 'Table Grid'
+
+            # Add header row
+            header_cells = table.rows[0].cells
+            header_cells[0].text = 'Title'
+            header_cells[1].text = 'Description'
+            header_cells[2].text = 'Reported By'
+            header_cells[3].text = 'Impact'
+
+            # Make header bold
+            for cell in header_cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.bold = True
+
+            # Add data rows
+            for bs in blockers_summary:
+                if isinstance(bs, dict):
+                    row_cells = table.add_row().cells
+                    row_cells[0].text = bs.get('title', 'Untitled')
+                    row_cells[1].text = bs.get('description', '')
+                    row_cells[2].text = ', '.join(bs.get('reported_by', []))
+                    row_cells[3].text = bs.get('impact', '')
     
     @staticmethod
     def _add_sprint_meeting_content_docx(doc, data):
@@ -497,14 +813,29 @@ class ReportExporter:
         doc.add_heading("Action Items:", level=2)
         action_items = data.get('action_items') or []
         if action_items:
+            table = doc.add_table(rows=1, cols=3)
+            table.style = 'Table Grid'
+
+            # Add header row
+            header_cells = table.rows[0].cells
+            header_cells[0].text = 'Task'
+            header_cells[1].text = 'Assignee'
+            header_cells[2].text = 'Due Date'
+
+            # Make header bold
+            for cell in header_cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.bold = True
+
+            # Add data rows
             for item in action_items:
-                assignee = item.get('assignee', 'Unassigned')
-                due_date = item.get('due_date', 'No deadline')
-                action = item.get('task') or item.get('action') or 'Unknown'
-                doc.add_paragraph(
-                    f"{action} (Assignee: {assignee}, Due: {due_date})",
-                    style='List Bullet'
-                )
+                row_cells = table.add_row().cells
+                row_cells[0].text = item.get('task') or item.get('action') or 'Unknown Task'
+                row_cells[1].text = item.get('assignee', 'Unassigned')
+                row_cells[2].text = item.get('due_date', 'No deadline')
+
+            doc.add_paragraph()  # Add spacing after table
         else:
             doc.add_paragraph("No action items.")
     
@@ -524,14 +855,35 @@ class ReportExporter:
             doc.add_paragraph(item, style='List Bullet')
         
         doc.add_heading("Action Points:", level=2)
-        for item in (data.get('action_points') or []):
-            if isinstance(item, dict):
-                 action = item.get('task') or item.get('action') or 'Unknown'
-                 assignee = item.get('assignee', '')
-                 txt = f"{action}" + (f" ({assignee})" if assignee else "")
-                 doc.add_paragraph(txt, style='List Bullet')
-            else:
-                 doc.add_paragraph(item, style='List Bullet')
+        action_points = data.get('action_points') or []
+        if action_points:
+            table = doc.add_table(rows=1, cols=2)
+            table.style = 'Table Grid'
+
+            # Add header row
+            header_cells = table.rows[0].cells
+            header_cells[0].text = 'Action'
+            header_cells[1].text = 'Assignee'
+
+            # Make header bold
+            for cell in header_cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.bold = True
+
+            # Add data rows
+            for item in action_points:
+                row_cells = table.add_row().cells
+                if isinstance(item, dict):
+                    row_cells[0].text = item.get('task') or item.get('action') or 'Unknown'
+                    row_cells[1].text = item.get('assignee', 'Unassigned')
+                else:
+                    row_cells[0].text = str(item)
+                    row_cells[1].text = 'Unassigned'
+
+            doc.add_paragraph()  # Add spacing after table
+        else:
+            doc.add_paragraph("No action points.")
 
     @staticmethod
     def _add_brainstorming_content(story, data, styles):
@@ -565,23 +917,37 @@ class ReportExporter:
                 story.append(Paragraph(f"★ {item}", styles['Normal']))
             story.append(Spacer(1, 0.2*inch))
         
-        # All Ideas Generated
+        # All Ideas Generated as table
         if data.get('ideas_generated'):
             story.append(Paragraph("Ideas Generated:", styles['Heading2']))
             story.append(Spacer(1, 0.1*inch))
-            for item in data['ideas_generated']:
-                if isinstance(item, dict):
-                    idea = item.get('idea', '')
-                    proposed_by = item.get('proposed_by', '')
-                    category = item.get('category', '')
-                    txt = f"• {idea}"
-                    if proposed_by:
-                        txt += f" (by {proposed_by})"
-                    if category:
-                        txt += f" [{category}]"
-                    story.append(Paragraph(txt, styles['Normal']))
-                else:
-                    story.append(Paragraph(f"• {item}", styles['Normal']))
+            ideas = data['ideas_generated']
+            if ideas:
+                table_data = [['Idea', 'Proposed By', 'Category']]
+                for item in ideas:
+                    if isinstance(item, dict):
+                        idea = item.get('idea', '')
+                        proposed_by = item.get('proposed_by', '')
+                        category = item.get('category', '')
+                        table_data.append([idea, proposed_by, category])
+                    else:
+                        table_data.append([str(item), '', ''])
+
+                table = Table(table_data, colWidths=[3*inch, 1.5*inch, 1.5*inch])
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 12),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 10),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ]))
+                story.append(table)
             story.append(Spacer(1, 0.2*inch))
         
         # Key Themes
@@ -592,37 +958,70 @@ class ReportExporter:
                 story.append(Paragraph(f"• {item}", styles['Normal']))
             story.append(Spacer(1, 0.2*inch))
         
-        # Decisions Made
+        # Decisions Made as table
         if data.get('decisions_made'):
             story.append(Paragraph("Decisions Made:", styles['Heading2']))
             story.append(Spacer(1, 0.1*inch))
-            for item in data['decisions_made']:
-                story.append(Paragraph(f"✓ {item}", styles['Normal']))
+            decisions = data['decisions_made']
+            if decisions:
+                table_data = [['Decision', 'Details']]
+                for item in decisions:
+                    if isinstance(item, dict):
+                        decision = item.get('decision', '')
+                        details = item.get('details', '')
+                        table_data.append([decision, details])
+                    else:
+                        table_data.append([str(item), ''])
+
+                table = Table(table_data, colWidths=[3*inch, 3*inch])
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 12),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 10),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ]))
+                story.append(table)
             story.append(Spacer(1, 0.2*inch))
         
-        # Next Steps
+        # Next Steps as table
         if data.get('next_steps'):
             story.append(Paragraph("Next Steps:", styles['Heading2']))
             story.append(Spacer(1, 0.1*inch))
-            for item in data['next_steps']:
-                if isinstance(item, dict):
-                    task = item.get('task', '')
-                    assignee = item.get('assignee', '')
-                    due_date = item.get('due_date', '')
-                    priority = item.get('priority', '')
-                    txt = f"• {task}"
-                    details = []
-                    if assignee:
-                        details.append(f"Assignee: {assignee}")
-                    if due_date:
-                        details.append(f"Due: {due_date}")
-                    if priority:
-                        details.append(f"Priority: {priority}")
-                    if details:
-                        txt += f" ({', '.join(details)})"
-                    story.append(Paragraph(txt, styles['Normal']))
-                else:
-                    story.append(Paragraph(f"• {item}", styles['Normal']))
+            steps = data['next_steps']
+            if steps:
+                table_data = [['Task', 'Assignee', 'Due Date', 'Priority']]
+                for item in steps:
+                    if isinstance(item, dict):
+                        task = item.get('task', '')
+                        assignee = item.get('assignee', '')
+                        due_date = item.get('due_date', '')
+                        priority = item.get('priority', '')
+                        table_data.append([task, assignee, due_date, priority])
+                    else:
+                        table_data.append([str(item), '', '', ''])
+
+                table = Table(table_data, colWidths=[2.5*inch, 1.5*inch, 1.5*inch, 1*inch])
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 12),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 10),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ]))
+                story.append(table)
 
     @staticmethod
     def _add_brainstorming_content_docx(doc, data):
@@ -649,22 +1048,37 @@ class ReportExporter:
             for item in data['top_ideas']:
                 doc.add_paragraph(f"★ {item}", style='List Bullet')
         
-        # All Ideas Generated
+        # All Ideas Generated as table
         if data.get('ideas_generated'):
             doc.add_heading("Ideas Generated:", level=2)
-            for item in data['ideas_generated']:
-                if isinstance(item, dict):
-                    idea = item.get('idea', '')
-                    proposed_by = item.get('proposed_by', '')
-                    category = item.get('category', '')
-                    txt = idea
-                    if proposed_by:
-                        txt += f" (by {proposed_by})"
-                    if category:
-                        txt += f" [{category}]"
-                    doc.add_paragraph(txt, style='List Bullet')
-                else:
-                    doc.add_paragraph(item, style='List Bullet')
+            ideas = data['ideas_generated']
+            if ideas:
+                table = doc.add_table(rows=1, cols=3)
+                table.style = 'Table Grid'
+                
+                # Add header row
+                hdr_cells = table.rows[0].cells
+                hdr_cells[0].text = 'Idea'
+                hdr_cells[1].text = 'Proposed By'
+                hdr_cells[2].text = 'Category'
+                
+                # Make header bold
+                for cell in hdr_cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.bold = True
+                
+                # Add data rows
+                for item in ideas:
+                    row_cells = table.add_row().cells
+                    if isinstance(item, dict):
+                        row_cells[0].text = item.get('idea', '')
+                        row_cells[1].text = item.get('proposed_by', '')
+                        row_cells[2].text = item.get('category', '')
+                    else:
+                        row_cells[0].text = str(item)
+                        row_cells[1].text = ''
+                        row_cells[2].text = ''
         
         # Key Themes
         if data.get('key_themes'):
@@ -672,28 +1086,69 @@ class ReportExporter:
             for item in data['key_themes']:
                 doc.add_paragraph(item, style='List Bullet')
         
-        # Decisions Made
+        # Decisions Made as table
         if data.get('decisions_made'):
             doc.add_heading("Decisions Made:", level=2)
-            for item in data['decisions_made']:
-                doc.add_paragraph(item, style='List Bullet')
+            decisions = data['decisions_made']
+            if decisions:
+                table = doc.add_table(rows=1, cols=2)
+                table.style = 'Table Grid'
+                
+                # Add header row
+                hdr_cells = table.rows[0].cells
+                hdr_cells[0].text = 'Decision'
+                hdr_cells[1].text = 'Details'
+                
+                # Make header bold
+                for cell in hdr_cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.bold = True
+                
+                # Add data rows
+                for item in decisions:
+                    row_cells = table.add_row().cells
+                    if isinstance(item, dict):
+                        row_cells[0].text = item.get('decision', '')
+                        row_cells[1].text = item.get('details', '')
+                    else:
+                        row_cells[0].text = str(item)
+                        row_cells[1].text = ''
         
-        # Next Steps
+        # Next Steps as table
         if data.get('next_steps'):
             doc.add_heading("Next Steps:", level=2)
-            for item in data['next_steps']:
-                if isinstance(item, dict):
-                    task = item.get('task', '')
-                    assignee = item.get('assignee', '')
-                    due_date = item.get('due_date', '')
-                    txt = task
-                    if assignee:
-                        txt += f" (Assignee: {assignee})"
-                    if due_date:
-                        txt += f" [Due: {due_date}]"
-                    doc.add_paragraph(txt, style='List Bullet')
-                else:
-                    doc.add_paragraph(item, style='List Bullet')
+            steps = data['next_steps']
+            if steps:
+                table = doc.add_table(rows=1, cols=4)
+                table.style = 'Table Grid'
+                
+                # Add header row
+                hdr_cells = table.rows[0].cells
+                hdr_cells[0].text = 'Task'
+                hdr_cells[1].text = 'Assignee'
+                hdr_cells[2].text = 'Due Date'
+                hdr_cells[3].text = 'Priority'
+                
+                # Make header bold
+                for cell in hdr_cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.bold = True
+                
+                # Add data rows
+                for item in steps:
+                    row_cells = table.add_row().cells
+                    if isinstance(item, dict):
+                        row_cells[0].text = item.get('task', '')
+                        row_cells[1].text = item.get('assignee', '')
+                        row_cells[2].text = item.get('due_date', '')
+                        row_cells[3].text = item.get('priority', '')
+                    else:
+                        row_cells[0].text = str(item)
+                        row_cells[1].text = ''
+                        row_cells[2].text = ''
+                        row_cells[3].text = ''
 
 
 def export_report(

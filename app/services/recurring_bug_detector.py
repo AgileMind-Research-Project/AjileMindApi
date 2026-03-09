@@ -161,7 +161,35 @@ class RecurringBugDetector:
         """Extract recurring blockers from daily standup (potential bugs)"""
         bugs = []
         
-        # Check blockers section
+        # New format: team_updates[].blockers
+        team_updates = report_content.get('team_updates', [])
+        if isinstance(team_updates, list):
+            for update in team_updates:
+                if isinstance(update, dict):
+                    for blocker in (update.get('blockers') or []):
+                        if isinstance(blocker, str) and self._is_bug_related(blocker):
+                            is_recurring = self._is_recurring_indicator(blocker)
+                            bugs.append({
+                                'description': blocker,
+                                'source_type': 'daily_standup_blocker',
+                                'severity': 'high',
+                                'is_recurring_indicator': is_recurring
+                            })
+        
+        # New format: blockers_summary
+        for bs in (report_content.get('blockers_summary') or []):
+            if isinstance(bs, dict):
+                desc = bs.get('description') or bs.get('title', '')
+                if desc and self._is_bug_related(desc):
+                    is_recurring = self._is_recurring_indicator(desc)
+                    bugs.append({
+                        'description': desc,
+                        'source_type': 'daily_standup_blocker',
+                        'severity': 'high',
+                        'is_recurring_indicator': is_recurring
+                    })
+        
+        # Legacy format: standalone blockers list
         blockers = report_content.get('blockers', [])
         if isinstance(blockers, list):
             for blocker in blockers:
@@ -170,7 +198,7 @@ class RecurringBugDetector:
                     bugs.append({
                         'description': blocker,
                         'source_type': 'daily_standup_blocker',
-                        'severity': 'high',  # Blockers are high priority
+                        'severity': 'high',
                         'is_recurring_indicator': is_recurring
                     })
         

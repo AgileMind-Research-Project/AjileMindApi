@@ -180,7 +180,21 @@ class RecurringBugService:
                                         if result:
                                             bugs_stored += 1
                 
-                # Also check for standalone blockers field
+                # Extract from blockers_summary (new developer-centric format)
+                blockers_summary = report_content.get('blockers_summary', [])
+                if isinstance(blockers_summary, list):
+                    for bs in blockers_summary:
+                        if isinstance(bs, dict):
+                            desc = bs.get('description') or bs.get('title', '')
+                            if desc and desc.strip() and self._is_bug_related(desc):
+                                result = await self.store_bug(
+                                    tenant_schema, project_id, report_id, transcript_id,
+                                    desc.strip(), 'blockers_summary', meeting_date
+                                )
+                                if result:
+                                    bugs_stored += 1
+                
+                # Also check for standalone blockers field (legacy format)
                 standalone_blockers = report_content.get('blockers', [])
                 if isinstance(standalone_blockers, list):
                     for blocker in standalone_blockers:

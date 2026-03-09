@@ -17,6 +17,7 @@ class TranscriptCategory(str, Enum):
     SPRINT_PLANNING = "sprint_planning"
     RETROSPECTIVE = "retrospective"
     BRAINSTORMING = "brainstorming"
+    OTHER = "other"
 
 
 class ReportGeneratedStatus(str, Enum):
@@ -68,7 +69,9 @@ class TranscriptListItem(BaseModel):
     """Schema for transcript list item (includes content for preview)"""
     id: int
     title: str
-    category: TranscriptCategory
+    # Accept raw string here to be robust against legacy or unexpected DB values
+    # (we still use `TranscriptCategory` elsewhere for strict validation)
+    category: str
     transcript_content: Optional[str] = None
     transcript_date: date
     tags: Optional[List[str]] = None
