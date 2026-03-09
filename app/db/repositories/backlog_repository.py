@@ -101,7 +101,7 @@ class BacklogRepository:
         """Get a single backlog item by ID"""
         try:
             query = """
-                    id, project_id, sprint_id, summary, description, issue_type,
+                SELECT id, project_id, sprint_id, summary, description, issue_type,
                     status, priority, assignee, tags, severity,
                     created_at, updated_at
                 FROM project_backlog

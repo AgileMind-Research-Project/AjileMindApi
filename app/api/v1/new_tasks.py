@@ -60,7 +60,7 @@ async def list_new_tasks(
         
         service = NewTaskService(db)
         result = await service.list_tasks(
-            tenant_schema=current_user.get('tenant_schema'),
+            tenant_schema=current_user.get('tenant_name') or current_user.get('tenant_schema'),
             filters=filters
         )
         
@@ -82,7 +82,7 @@ async def get_new_task(
     """Get a specific new task by ID"""
     try:
         service = NewTaskService(db)
-        return await service.get_task(task_id, current_user.get('tenant_schema'))
+        return await service.get_task(task_id, current_user.get('tenant_name') or current_user.get('tenant_schema'))
     
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -101,7 +101,7 @@ async def update_new_task(
     """Update a new task"""
     try:
         service = NewTaskService(db)
-        return await service.update_task(task_id, task_data, current_user.get('tenant_schema'))
+        return await service.update_task(task_id, task_data, current_user.get('tenant_name') or current_user.get('tenant_schema'))
     
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -127,7 +127,7 @@ async def approve_new_task(
         service = NewTaskService(db)
         return await service.approve_task(
             task_id, 
-            current_user.get('tenant_schema'),
+            current_user.get('tenant_name') or current_user.get('tenant_schema'),
             project_id_override=request.project_id
         )
     
@@ -147,7 +147,7 @@ async def remove_new_task(
     """Remove/reject a new task"""
     try:
         service = NewTaskService(db)
-        return await service.remove_task(task_id, current_user.get('tenant_schema'))
+        return await service.remove_task(task_id, current_user.get('tenant_name') or current_user.get('tenant_schema'))
     
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -165,7 +165,7 @@ async def delete_new_task(
     """Delete a new task"""
     try:
         service = NewTaskService(db)
-        await service.delete_task(task_id, current_user.get('tenant_schema'))
+        await service.delete_task(task_id, current_user.get('tenant_name') or current_user.get('tenant_schema'))
         return {"message": "Task deleted successfully"}
     
     except ValueError as e:

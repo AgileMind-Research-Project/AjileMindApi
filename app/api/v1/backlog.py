@@ -8,8 +8,6 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status,
 from typing import Dict, Any
 from app.schemas.backlog_schemas import BulkUploadResponse, BacklogListResponse, BacklogItemUpdate, MergeBacklogItemsRequest, SubtaskCreateRequest
 from app.services.backlog_service import BacklogService
-from app.services.jira_backlog_service import JiraBacklogService
-from app.db.repositories.backlog_repository import BacklogRepository
 from app.db.database import db, Database
 from app.utils.jwt import get_current_user_from_token, get_secret
 from app.core.logger import logger
@@ -188,6 +186,157 @@ async def list_project_backlog(
 
 
 @router.get(
+    "/project/{project_id}/subtask",
+    summary="Get Project Subtasks",
+    description="Get all subtasks for a project grouped by their parent task name"
+)
+async def get_project_subtasks(
+    project_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    backlog_service: BacklogService = Depends(get_backlog_service)
+) -> Dict[str, Any]:
+    """
+    Retrieve all subtasks for a project, grouped by parent task.
+
+    Each group contains the parent task ID, the parent summary (name),
+    and the list of child subtask rows from the backlog table.
+
+    URL: GET /api/v1/backlog/project/{project_id}/subtask
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant name not found in token"
+            )
+
+        query = """
+            SELECT
+                pb.id,
+                pb.summary,
+                pb.description,
+                pb.issue_type,
+                pb.status,
+                pb.priority,
+                pb.severity,
+                pb.assignee,
+                pb.tags,
+                pb.estimated_hours,
+                pb.logged_hours,
+                pb.story_points,
+                pb.story_point_estimate,
+                pb.sprint_id,
+                pb.parent_task_id,
+                pb.start_date,
+                pb.end_date,
+                pb.created_at,
+                pb.updated_at,
+                parent.summary AS parent_summary
+            FROM project_backlog pb
+
+            LEFT JOIN project_backlog parent
+                ON pb.parent_task_id = parent.id
+
+            WHERE pb.project_id = %s
+            AND (
+                    pb.id IN (
+                        SELECT backlog_id
+                        FROM project_backlog_priority
+                        WHERE project_id = %s
+                        AND sprint_id IS NULL
+                    )
+                OR
+                    pb.parent_task_id IN (
+                        SELECT backlog_id
+                        FROM project_backlog_priority
+                        WHERE project_id = %s
+                        AND sprint_id IS NULL
+                    )
+            )
+
+            ORDER BY
+                COALESCE(pb.parent_task_id, pb.id),
+                pb.parent_task_id,
+                pb.id;
+        """
+
+        rows = await backlog_service.db.execute_query(
+            query,
+            (project_id, project_id, project_id),
+            fetch_all=True,
+            schema=tenant_name
+        )
+
+        if not rows:
+            return {
+                "success": True,
+                "message": "No subtasks found for this project",
+                "data": {
+                    "project_id": project_id,
+                    "total_subtasks": 0,
+                    "groups": []
+                }
+            }
+
+        # Group subtasks by parent task
+        groups: Dict[str, Any] = {}
+        for row in rows:
+            parent_id = row["parent_task_id"]
+            if parent_id not in groups:
+                groups[parent_id] = {
+                    "parent_task_id": parent_id,
+                    "parent_summary": row.get("parent_summary") or parent_id,
+                    "subtasks": []
+                }
+            groups[parent_id]["subtasks"].append({
+                "id": row["id"],
+                "summary": row["summary"],
+                "description": row.get("description"),
+                "issue_type": row["issue_type"],
+                "status": row["status"],
+                "priority": row.get("priority"),
+                "severity": row.get("severity"),
+                "assignee": row.get("assignee"),
+                "tags": row.get("tags"),
+                "estimated_hours": row.get("estimated_hours", 0),
+                "logged_hours": row.get("logged_hours", 0),
+                "story_points": row.get("story_points", 0),
+                "story_point_estimate": row.get("story_point_estimate", 0),
+                "sprint_id": row.get("sprint_id"),
+                "parent_task_id": parent_id,
+                "start_date": str(row["start_date"]) if row.get("start_date") else None,
+                "end_date": str(row["end_date"]) if row.get("end_date") else None,
+                "created_at": str(row["created_at"]) if row.get("created_at") else None,
+                "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
+            })
+
+        group_list = list(groups.values())
+        total_subtasks = sum(len(g["subtasks"]) for g in group_list)
+
+        logger.info(f"Retrieved {total_subtasks} subtasks in {len(group_list)} group(s) for project {project_id}")
+
+        return {
+            "success": True,
+            "message": f"Found {total_subtasks} subtask(s) in {len(group_list)} parent task(s)",
+            "data": {
+                "project_id": project_id,
+                "total_subtasks": total_subtasks,
+                "groups": group_list
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching subtasks for project {project_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch subtasks: {str(e)}"
+        )
+
+
+@router.get(
     "/{item_id}",
     summary="Get Backlog Item",
     description="Fetch a single backlog item by its ID (e.g. TAM-123)"
@@ -233,17 +382,14 @@ async def get_backlog_item(
     summary="Update Backlog Item",
     description="Update backlog item details (subtask or main task)"
 )
-async def list_sprint_backlog(
-    sprint_id: int,
+async def update_backlog_item(
+    item_id: str,
+    updates: BacklogItemUpdate,
     current_user: Dict[str, Any] = Depends(get_current_user_from_token),
     backlog_service: BacklogService = Depends(get_backlog_service)
-) -> BacklogListResponse:
+) -> Dict[str, Any]:
     """
-    List all backlog items for a specific sprint.
-    
-    Returns:
-    - List of backlog items for the sprint
-    - Total count
+    Update a backlog item.
     """
     try:
         tenant_name = current_user.get("tenant_name")
@@ -264,11 +410,11 @@ async def list_sprint_backlog(
             
         result = await backlog_service.update_backlog_item(tenant_name, item_id, update_data)
         
-        return BacklogListResponse(
-            success=True,
-            data=items,
-            total=len(items)
-        )
+        return {
+            "success": True,
+            "message": "Item updated successfully",
+            "data": result
+        }
         
     except HTTPException:
         raise

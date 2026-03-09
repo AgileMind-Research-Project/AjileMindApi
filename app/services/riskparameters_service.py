@@ -37,8 +37,9 @@ class RiskParametersService:
                 timeline_conflict, timeline_conflict_weight,
                 developer_availability, developer_availability_weight,
                 task_progress, task_progress_weight,
-                sprint_completion_level, sprint_completion_level_weight
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                sprint_completion_level, sprint_completion_level_weight,
+                project_budget, project_budget_weight
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """
 
         values = (
@@ -51,7 +52,8 @@ class RiskParametersService:
             params.timeline_conflict, params.timeline_conflict_weight,
             params.developer_availability, params.developer_availability_weight,
             params.task_progress, params.task_progress_weight,
-            params.sprint_completion_level, params.sprint_completion_level_weight
+            params.sprint_completion_level, params.sprint_completion_level_weight,
+            params.project_budget, params.project_budget_weight
         )
 
         # Use tenant database schema
@@ -109,7 +111,8 @@ class RiskParametersService:
                 timeline_conflict=%s, timeline_conflict_weight=%s,
                 developer_availability=%s, developer_availability_weight=%s,
                 task_progress=%s, task_progress_weight=%s,
-                sprint_completion_level=%s, sprint_completion_level_weight=%s
+                sprint_completion_level=%s, sprint_completion_level_weight=%s,
+                project_budget=%s, project_budget_weight=%s
             WHERE project_id=%s
         """
 
@@ -123,6 +126,7 @@ class RiskParametersService:
             params.developer_availability, params.developer_availability_weight,
             params.task_progress, params.task_progress_weight,
             params.sprint_completion_level, params.sprint_completion_level_weight,
+            params.project_budget, params.project_budget_weight,
             params.project_id
         )
 
