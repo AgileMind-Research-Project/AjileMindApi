@@ -9,6 +9,7 @@ from app.schemas.transcript import (
     TranscriptCreate, TranscriptUpdate, TranscriptResponse,
     TranscriptListItem, TranscriptListResponse, TranscriptFilterParams
 )
+from pydantic import ValidationError
 from app.core.logger import logger
 from typing import List, Optional, Dict, Any
 from datetime import date
@@ -211,17 +212,34 @@ class TranscriptService:
             transcripts = []
             for row in results or []:
                 tags = json.loads(row['tags']) if row.get('tags') else None
-                transcripts.append(TranscriptListItem(
-                    id=row['id'],
-                    title=row['title'],
-                    category=row['category'],
-                    transcript_date=row['transcript_date'],
-                    tags=tags,
-                    file_name=row.get('file_name'),
-                    project_id=row.get('project_id'),
-                    report_generated=row.get('report_generated', 'pending'),
-                    created_at=row['created_at']
-                ))
+                # Defensive: pydantic validation may fail if DB contains unexpected category values
+                try:
+                    item = TranscriptListItem(
+                        id=row['id'],
+                        title=row['title'],
+                        category=row['category'],
+                        transcript_date=row['transcript_date'],
+                        tags=tags,
+                        file_name=row.get('file_name'),
+                        project_id=row.get('project_id'),
+                        report_generated=row.get('report_generated', 'pending'),
+                        created_at=row['created_at']
+                    )
+                except ValidationError as ve:
+                    logger.warning(f"TranscriptListItem validation failed for id={row.get('id')}, coercing category to string: {ve}")
+                    # Coerce category to raw string and try again
+                    item = TranscriptListItem(
+                        id=row['id'],
+                        title=row['title'],
+                        category=str(row.get('category')) if row.get('category') is not None else None,
+                        transcript_date=row['transcript_date'],
+                        tags=tags,
+                        file_name=row.get('file_name'),
+                        project_id=row.get('project_id'),
+                        report_generated=row.get('report_generated', 'pending'),
+                        created_at=row['created_at']
+                    )
+                transcripts.append(item)
             
             return TranscriptListResponse(
                 transcripts=transcripts,

@@ -13,9 +13,11 @@ from app.services.llm_report_service import get_llm_report_service
 from app.services.transcript_service import TranscriptService
 from app.services.new_task_service import NewTaskService
 from app.services.recurring_bug_service import RecurringBugService
+from app.services.template_service import TemplateService
 from app.core.logger import logger
 from typing import List, Optional, Dict, Any
 import json
+import re
 from datetime import datetime, date
 
 
@@ -25,6 +27,60 @@ class ReportService:
     def __init__(self, db: Database):
         self.db = db
         self.llm_service = get_llm_report_service()
+    
+    async def _get_transcript_speakers(self, transcript_id: int, tenant_schema: str) -> List[str]:
+        """Extract speaker names from transcript content"""
+        try:
+            query = f"SELECT transcript_content FROM {tenant_schema}.transcripts WHERE id = %s"
+            result = await self.db.execute_query(query, (transcript_id,), fetch_one=True, schema=tenant_schema)
+            if result and result.get('transcript_content'):
+                speakers = re.findall(r'(?:^|\])\s*([^:\[\]\n]{2,30}):', result['transcript_content'], re.MULTILINE)
+                unique = []
+                seen = set()
+                for s in speakers:
+                    name = s.strip()
+                    if name and name.lower() not in seen and len(name) > 1:
+                        seen.add(name.lower())
+                        unique.append(name)
+                return unique
+        except Exception as e:
+            logger.warning(f"Failed to extract speakers from transcript {transcript_id}: {e}")
+        return []
+    
+    def _distribute_items_to_speakers(self, items: List[str], speakers: List[str]) -> List[Dict[str, Any]]:
+        """Distribute flat string items to speakers, or group under 'Team' if no speakers"""
+        if not speakers:
+            return [{'name': 'Team', 'tasks': items}]
+        
+        # Try to match items to speakers by name mention
+        speaker_tasks: Dict[str, List[str]] = {s: [] for s in speakers}
+        unmatched = []
+        
+        for item in items:
+            matched = False
+            for speaker in speakers:
+                if speaker.lower() in item.lower():
+                    speaker_tasks[speaker].append(item)
+                    matched = True
+                    break
+            if not matched:
+                unmatched.append(item)
+        
+        # If no items matched any speaker, just group all under each speaker evenly
+        has_matches = any(len(tasks) > 0 for tasks in speaker_tasks.values())
+        if not has_matches:
+            # Can't attribute - group under "Team" with all items
+            return [{'name': 'Team', 'tasks': items}]
+        
+        # Add unmatched to first speaker
+        if unmatched and speakers:
+            speaker_tasks[speakers[0]].extend(unmatched)
+        
+        result = []
+        for name, tasks in speaker_tasks.items():
+            if tasks:
+                result.append({'name': name, 'tasks': tasks})
+        return result if result else [{'name': 'Team', 'tasks': items}]
     
     async def generate_report(
         self,
@@ -73,14 +129,34 @@ class ReportService:
             # Generate report using LLM
             logger.info(f"Generating {report_type} report for transcript {request.transcript_id}")
             
-            report_data = self.llm_service.generate_report(
-                transcript=transcript.transcript_content,
-                report_type=report_type,
-                custom_prompt=request.custom_prompt if request.use_custom_prompt else None
-            )
+            # If a template is selected, use template-aware generation
+            template_sections = None
+            if request.template_id:
+                try:
+                    template_service = TemplateService(self.db)
+                    template = await template_service.get_template(request.template_id, tenant_schema)
+                    template_sections = template.sections
+                    logger.info(f"Using template {request.template_id} with {len(template_sections)} sections")
+                except Exception as tmpl_err:
+                    logger.warning(f"Failed to fetch template {request.template_id}, falling back to default: {tmpl_err}")
             
-            # Convert Pydantic model to dict
-            report_content = report_data.model_dump() if hasattr(report_data, 'model_dump') else report_data.dict()
+            if template_sections:
+                # Template-based generation
+                report_content = self.llm_service.generate_report_from_template(
+                    transcript=transcript.transcript_content,
+                    template_sections=template_sections,
+                    report_type=report_type,
+                    custom_prompt=request.custom_prompt if request.use_custom_prompt else None
+                )
+            else:
+                # Default generation by report type
+                report_data = self.llm_service.generate_report(
+                    transcript=transcript.transcript_content,
+                    report_type=report_type,
+                    custom_prompt=request.custom_prompt if request.use_custom_prompt else None
+                )
+                # Convert Pydantic model to dict
+                report_content = report_data.model_dump() if hasattr(report_data, 'model_dump') else report_data.dict()
             
             # Get project_id from transcript
             project_id = getattr(transcript, 'project_id', None)
@@ -204,6 +280,32 @@ class ReportService:
             
             # Parse report_content JSON
             report_content = json.loads(result['report_content']) if result.get('report_content') else {}
+            
+            # Migrate old daily standup formats to developer-centric format
+            if result['report_type'] == 'daily_standup' and 'team_updates' not in report_content:
+                # Old format has yesterday_work/today_plan/blockers as separate sections
+                if any(k in report_content for k in ['yesterday_work', 'today_plan', 'blockers']):
+                    speaker_names = await self._get_transcript_speakers(result['transcript_id'], tenant_schema)
+                    
+                    # First ensure items are person-grouped (not flat strings)
+                    for field in ['yesterday_work', 'today_plan', 'blockers']:
+                        items = report_content.get(field, [])
+                        if isinstance(items, list) and len(items) > 0 and isinstance(items[0], str):
+                            report_content[field] = self._distribute_items_to_speakers(items, speaker_names)
+                    
+                    # Convert to developer-centric team_updates
+                    person_map = {}
+                    for field, target in [('yesterday_work', 'yesterday_tasks'), ('today_plan', 'today_tasks'), ('blockers', 'blockers')]:
+                        for person in (report_content.get(field) or []):
+                            if isinstance(person, dict):
+                                name = person.get('name', 'Team')
+                                if name not in person_map:
+                                    person_map[name] = {'name': name, 'role': None, 'yesterday_tasks': [], 'today_tasks': [], 'blockers': []}
+                                person_map[name][target] = person.get('tasks', [])
+                    
+                    report_content['team_updates'] = list(person_map.values())
+                    if 'blockers_summary' not in report_content:
+                        report_content['blockers_summary'] = []
             
             return ReportResponse(
                 id=result['id'],
@@ -394,6 +496,20 @@ class ReportService:
             reports = []
             for row in results or []:
                 report_content = json.loads(row['report_content']) if row.get('report_content') else {}
+                # Migrate old daily standup flat-string format
+                if row['report_type'] == 'daily_standup':
+                    needs_migration = False
+                    for field in ['yesterday_work', 'today_plan', 'blockers']:
+                        items = report_content.get(field, [])
+                        if isinstance(items, list) and len(items) > 0 and isinstance(items[0], str):
+                            needs_migration = True
+                            break
+                    if needs_migration:
+                        speaker_names = await self._get_transcript_speakers(row['transcript_id'], tenant_schema)
+                        for field in ['yesterday_work', 'today_plan', 'blockers']:
+                            items = report_content.get(field, [])
+                            if isinstance(items, list) and len(items) > 0 and isinstance(items[0], str):
+                                report_content[field] = self._distribute_items_to_speakers(items, speaker_names)
                 reports.append(ReportResponse(
                     id=row['id'],
                     transcript_id=row['transcript_id'],
