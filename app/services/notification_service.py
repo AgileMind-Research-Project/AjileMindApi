@@ -72,15 +72,16 @@ class NotificationService:
         
         # 2. Persist Notification to DB
         try:
-            # Convert affected_components list to JSON string
+            # Convert lists to JSON strings
             import json
             affected_components_json = json.dumps(request.affected_components) if request.affected_components else json.dumps([])
+            target_emails_json = json.dumps(request.target_emails) if request.target_emails else json.dumps([])
             
             insert_query = f"""
                 INSERT INTO `{tenant_name}`.downtime_notifications 
-                (type, priority, affected_components, start_time, end_time, timezone, 
+                (type, priority, affected_components, target_emails, start_time, end_time, timezone, 
                  subject, message_body, audience, project_id, scheduled_at, status, created_by, sent_by_user_id, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             """
             
             # Map enum values to strings
@@ -89,6 +90,7 @@ class NotificationService:
                 request.type.value,
                 request.priority.value,
                 affected_components_json,
+                target_emails_json,
                 request.schedule.start_time.replace(tzinfo=None) if request.schedule.start_time else None,
                 request.schedule.end_time.replace(tzinfo=None) if request.schedule.end_time else None,
                 request.schedule.timezone,
@@ -128,7 +130,24 @@ class NotificationService:
         # 4. If Immediate: Fetch Recipients
         recipients = []
         
-        if request.audience == Audience.PROJECT_MEMBERS and request.project_id:
+        # Priority 1: Specific target emails if provided
+        if request.target_emails and len(request.target_emails) > 0:
+            # We need to build recipient objects from emails
+            if request.audience == Audience.PROJECT_MEMBERS and request.project_id:
+                # Get names from project members for better greeting
+                all_members = await self.get_project_members(tenant_name, request.project_id)
+                member_map = {m['email']: m for m in all_members}
+                for email in request.target_emails:
+                    if email in member_map:
+                        recipients.append(member_map[email])
+                    else:
+                        recipients.append({"email": email, "first_name": "User", "last_name": ""})
+            else:
+                # Just use emails directly
+                recipients = [{"email": email, "first_name": "User", "last_name": ""} for email in request.target_emails]
+            logger.info(f"Using {len(recipients)} specific target emails as recipients")
+            
+        elif request.audience == Audience.PROJECT_MEMBERS and request.project_id:
             all_members = await self.get_project_members(tenant_name, request.project_id)
             if request.target_roles and len(request.target_roles) > 0:
                 recipients = [m for m in all_members if m.get('role') in request.target_roles]
@@ -361,7 +380,30 @@ class NotificationService:
             
             # Fetch Recipients
             recipients = []
-            if audience_val == Audience.PROJECT_MEMBERS.value and project_id:
+            
+            # Priority 1: Specific target emails if stored in DB
+            target_emails = []
+            if row.get('target_emails'):
+                try:
+                    target_emails = json.loads(row['target_emails'])
+                    if isinstance(target_emails, str): target_emails = json.loads(target_emails)
+                except:
+                    target_emails = []
+
+            if target_emails and len(target_emails) > 0:
+                if audience_val == Audience.PROJECT_MEMBERS.value and project_id:
+                     all_members = await self.get_project_members(tenant_name, int(project_id))
+                     member_map = {m['email']: m for m in all_members}
+                     for email in target_emails:
+                         if email in member_map:
+                             recipients.append(member_map[email])
+                         else:
+                             recipients.append({"email": email, "first_name": "User", "last_name": ""})
+                else:
+                     recipients = [{"email": email, "first_name": "User", "last_name": ""} for email in target_emails]
+                logger.info(f"Scheduler: Using {len(recipients)} specific target emails for notification {notification_id}")
+                
+            elif audience_val == Audience.PROJECT_MEMBERS.value and project_id:
                 # We need to fetch project members. 
                 # Note: get_project_members expects project_id as int
                 all_members = await self.get_project_members(tenant_name, int(project_id))
