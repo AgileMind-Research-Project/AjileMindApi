@@ -12,6 +12,7 @@ from app.task_updates_config.models import (
     ExtractionResponse
 )
 from app.task_updates_config.service import TaskUpdatesService
+from app.services.daily_blocker_service import DailyBlockerService
 from app.core.logger import logger
 
 router = APIRouter()
@@ -20,6 +21,11 @@ router = APIRouter()
 async def get_service() -> TaskUpdatesService:
     """Dependency to get service instance"""
     return TaskUpdatesService(db)
+
+
+async def get_blocker_service() -> DailyBlockerService:
+    """Dependency to get blocker service instance"""
+    return DailyBlockerService(db)
 
 
 @router.post(
@@ -253,3 +259,30 @@ async def get_model_status(
             "status": "error",
             "error": str(e)
         }
+
+
+@router.get(
+    "/daily-blockers",
+    summary="Get Analyzed Daily Blockers",
+    description="Get all blocked task updates with AI-powered suggestions and mentor roles"
+)
+async def get_daily_blockers(
+    project_id: Optional[int] = Query(None, description="Filter by project"),
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    service: DailyBlockerService = Depends(get_blocker_service)
+):
+    """Get analyzed daily blockers"""
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(status_code=400, detail="Tenant name not found")
+        
+        blockers = await service.get_daily_blockers(tenant_name, project_id)
+        return {
+            "success": True,
+            "data": blockers
+        }
+    
+    except Exception as e:
+        logger.error(f"Error fetching daily blockers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
