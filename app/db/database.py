@@ -12,6 +12,14 @@ from app.core.logger import logger, log_database_query
 import time
 
 
+class QueryResult(int):
+    """Custom result object that behaves like an int (lastrowid) but has a rowcount attribute"""
+    def __new__(cls, lastrowid, rowcount):
+        obj = super(QueryResult, cls).__new__(cls, lastrowid or 0)
+        obj.lastrowid = lastrowid
+        obj.rowcount = rowcount
+        return obj
+
 class Database:
     """Database connection manager"""
     
@@ -101,7 +109,7 @@ class Database:
                     elif fetch_all:
                         result = await cursor.fetchall()
                     elif commit:
-                        result = cursor.lastrowid
+                        result = QueryResult(cursor.lastrowid, cursor.rowcount)
                     else:
                         result = cursor
                     
