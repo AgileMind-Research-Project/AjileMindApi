@@ -579,8 +579,7 @@ class NotificationService:
                 UPDATE `{tenant_name}`.downtime_notifications 
                 SET type = %s, priority = %s, affected_components = %s, target_emails = %s, 
                     start_time = %s, end_time = %s, timezone = %s, subject = %s, 
-                    message_body = %s, audience = %s, project_id = %s, scheduled_at = %s,
-                    updated_at = NOW()
+                    message_body = %s, audience = %s, project_id = %s, scheduled_at = %s
                 WHERE id = %s
             """
             
