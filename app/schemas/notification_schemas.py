@@ -41,6 +41,9 @@ class DowntimeNotificationRequest(BaseModel):
     content: Content
     scheduled_at: Optional[datetime] = None  # New field for scheduling send time
     sender_id: Optional[str] = None # Can be inferred from token
+    # Single-Row Broadcast Model
+    include_release_note: Optional[bool] = False
+    release_note_content: Optional[Content] = None
 
 class NotificationResponse(BaseModel):
     success: bool
