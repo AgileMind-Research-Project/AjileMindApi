@@ -330,12 +330,13 @@ CREATE TABLE IF NOT EXISTS `sprint` (
   `sprint_status` enum('Future','Active','Closed','On Hold','Cancelled') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT 'Future',
   `total_estimated_hours` int DEFAULT '0',
   `total_completed_hours` int DEFAULT '0',
-  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+ `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`sprint_id`),
   KEY `project_id` (`project_id`),
   CONSTRAINT `sprint_ibfk_1` FOREIGN KEY (`project_id`) REFERENCES `projects` (`project_id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 
 -- ============================================ project_backlog_priority TABLE
@@ -615,3 +616,31 @@ CREATE TABLE `automation_approvals` (
     ON DELETE CASCADE
 
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `bugs` (
+    `project_id` BIGINT NOT NULL,
+    `task_id` VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+    `sprint_id` BIGINT NOT NULL,
+
+    PRIMARY KEY (`project_id`, `task_id`, `sprint_id`),
+
+    CONSTRAINT `fk_bug_project`
+        FOREIGN KEY (`project_id`)
+        REFERENCES `projects`(`project_id`)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+
+    CONSTRAINT `fk_bug_task`
+        FOREIGN KEY (`task_id`)
+        REFERENCES `project_backlog`(`id`)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+
+    CONSTRAINT `fk_bug_sprint`
+        FOREIGN KEY (`sprint_id`)
+        REFERENCES `sprint`(`sprint_id`)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci;

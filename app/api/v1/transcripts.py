@@ -294,18 +294,43 @@ async def analyze_transcript(
         service = TranscriptService(db)
         tenant_schema = current_user.get('tenant_name') or current_user.get('tenant_schema')
         
-        # Fetch the transcript content
-        query = f"SELECT transcript_content FROM {tenant_schema}.transcripts WHERE id = %s"
+        # Fetch the transcript content and category
+        query = f"SELECT transcript_content, category FROM {tenant_schema}.transcripts WHERE id = %s"
         result = await db.execute_query(query, (transcript_id,), fetch_one=True, schema=tenant_schema)
         
         if not result or not result.get('transcript_content'):
             raise HTTPException(status_code=404, detail="Transcript not found")
         
-        content = result['transcript_content']
+        raw_content = result['transcript_content']
+        category = result.get('category')
+        
+        # Format the transcript for a better LLM prompt
+        # We can reconstruct the header based on available info
+        formatted_content = (
+            "================================================================================\n"
+            "MEETING TRANSCRIPT\n"
+            "==================\n\n"
+            f"Meeting: \"{category.replace('_', ' ').capitalize() if category else 'Meeting'}\"\n"
+            "================================================================================\n"
+            "CONVERSATION\n"
+            "============\n\n"
+            f"{raw_content}"
+        )
         
         from app.services.ai_service import get_ai_service
         ai_service = get_ai_service()
-        analysis = await ai_service.analyze_transcript(content)
+        analysis = await ai_service.analyze_transcript(formatted_content, category)
+
+        # Enhance results with Database Status for better comparison
+        if analysis.get('tasks'):
+            for task in analysis['tasks']:
+                tid = task.get('task_id')
+                if tid:
+                    # Fetch current DB status for the task
+                    status_query = f"SELECT status FROM {tenant_schema}.project_backlog WHERE id = %s"
+                    db_status = await db.execute_query(status_query, (tid,), fetch_one=True, schema=tenant_schema)
+                    task['database_status'] = db_status.get('status') if db_status else 'New / Not in DB'
+        
         return analysis
         
     except HTTPException:
