@@ -209,8 +209,34 @@ class NotificationService:
             request = self._row_to_request(row)
             recipients = await self._get_recipients(tenant_name, row)
             from app.services.email_service import email_service
+            
+            # Combine logic: If release note is also scheduled, send them together
+            if row.get('release_note_status') == 'SCHEDULED' and row.get('release_note_content'):
+                try:
+                    import json
+                    rn_data = json.loads(row['release_note_content'])
+                    # We inject the main downtime message as the 'summary' in the combined release note JSON
+                    # This allows the template to render both beautifully in one go
+                    combined_body = json.dumps({
+                        "summary": request.content.message_body, # The Downtime message
+                        "features": rn_data.get("features", []),
+                        "improvements": rn_data.get("improvements", []),
+                        "bug_fixes": rn_data.get("bug_fixes", []),
+                        "breaking_changes": rn_data.get("breaking_changes", []),
+                        "known_issues": rn_data.get("known_issues", [])
+                    })
+                    request.content.message_body = combined_body
+                except:
+                    pass # Fallback to separate or original content if parsing fails
+
             email_service.send_broadcast_template(request, recipients)
-            await self.db.execute_query(f"UPDATE `{tenant_name}`.downtime_notifications SET status='SENT', sent_at=NOW() WHERE id=%s", (row['id'],), commit=True)
+            
+            # Mark both as SENT to avoid double sending at end_time
+            await self.db.execute_query(
+                f"UPDATE `{tenant_name}`.downtime_notifications SET status='SENT', sent_at=NOW(), release_note_status='SENT', release_sent_at=NOW() WHERE id=%s", 
+                (row['id'],), 
+                commit=True
+            )
         except Exception as e:
             logger.error(f"Alert failed: {e}")
 
