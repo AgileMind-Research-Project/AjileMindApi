@@ -208,6 +208,115 @@ class EmailService:
         
         return self.send_email(email, subject, html_body)
 
+    def send_broadcast_template(
+        self,
+        request: Any,  # DowntimeNotificationRequest or dict
+        recipients: List[Dict[str, Any]]
+    ) -> int:
+        """
+        Send a themed broadcast email to multiple recipients.
+        
+        Args:
+            request: Notification request object (DowntimeNotificationRequest or similar)
+            recipients: List of recipient dictionaries with 'email' key
+            
+        Returns:
+            Number of successfully sent emails
+        """
+        try:
+            # Handle both object and dict
+            if hasattr(request, 'dict'):
+                req_dict = request.dict()
+            else:
+                req_dict = request
+            
+            # Extract common data
+            notif_type = req_dict.get('type', 'PLANNED_MAINTENANCE')
+            priority = req_dict.get('priority', 'MEDIUM')
+            subject = req_dict.get('content', {}).get('subject', 'System Notification')
+            message_body = req_dict.get('content', {}).get('message_body', '')
+            
+            # Formatting labels
+            type_label = notif_type.replace('_', ' ')
+            header_text = "Service Outage" if notif_type == "EMERGENCY_OUTAGE" else "New Features" if notif_type == "FEATURE_UPGRADE" else "System Maintenance"
+            
+            # Format times
+            start_time = req_dict.get('schedule', {}).get('start_time')
+            end_time = req_dict.get('schedule', {}).get('end_time')
+            
+            if isinstance(start_time, datetime):
+                start_time = start_time.strftime('%b %d, %Y - %I:%M %p')
+            if isinstance(end_time, datetime):
+                end_time = end_time.strftime('%b %d, %Y - %I:%M %p')
+            
+            # Format components as tags
+            components = req_dict.get('affected_components', [])
+            components_tags = "".join([f'<span class="component-tag">{c}</span>' for c in (components or [])])
+            
+            # Parse structured message body if it's JSON
+            message_content = message_body
+            import json
+            try:
+                structured = json.loads(message_body)
+                if isinstance(structured, dict):
+                    html_content = f'<p style="font-weight: 600; color: #111827; margin-bottom: 15px;">{structured.get("summary", "")}</p>'
+                    
+                    sections = [
+                        ('Features', 'features', 'color: #2563eb'),
+                        ('Improvements', 'improvements', 'color: #059669'),
+                        ('Bug Fixes', 'bug_fixes', 'color: #dc2626'),
+                        ('Breaking Changes', 'breaking_changes', 'color: #9333ea'),
+                        ('Known Issues', 'known_issues', 'color: #ea580c')
+                    ]
+                    
+                    for title, key, style in sections:
+                        items = structured.get(key, [])
+                        if items:
+                            html_content += f'<div style="font-size: 13px; font-weight: 700; text-transform: uppercase; margin: 20px 0 10px 0; {style}">{title}</div>'
+                            html_content += '<ul style="padding-left: 0; margin-top: 0;">'
+                            for item in items:
+                                # Determine bullet color based on section
+                                border_color = "#3b82f6" if key == 'features' else "#ef4444" if key == 'bug_fixes' else "#10b981" if key == 'improvements' else "#9ca3af"
+                                html_content += f'<li style="list-style: none; border-left: 3px solid {border_color}; padding-left: 12px; margin-bottom: 8px; font-size: 14px;">{item}</li>'
+                            html_content += '</ul>'
+                    
+                    message_content = html_content
+            except:
+                # If not JSON, use simple formatting for newlines
+                message_content = f'<p style="white-space: pre-wrap;">{message_body}</p>'
+            
+            # Prepare template variables
+            variables = {
+                'type': notif_type,
+                'type_label': type_label,
+                'header_text': header_text,
+                'priority': priority,
+                'subject': subject,
+                'message_content': message_content,
+                'start_time': start_time or 'N/A',
+                'end_time': end_time or 'N/A',
+                'components_tags': components_tags or 'All System Components',
+                'platform_url': settings.AGILEMIND_PLATFORM_URL
+            }
+            
+            # Render template
+            html_body = self._load_template('broadcast_notification.html', variables)
+            
+            # Broadcast to all
+            sent_count = 0
+            for recipient in recipients:
+                email = recipient.get('email')
+                if email:
+                    if self.send_email(email, subject, html_body):
+                        sent_count += 1
+            
+            logger.info(f"Broadcasted {notif_type} notification to {sent_count} recipients")
+            return sent_count
+            
+        except Exception as e:
+            logger.error(f"Error in send_broadcast_template: {e}")
+            return 0
+
 
 # Global email service instance
 email_service = EmailService()
