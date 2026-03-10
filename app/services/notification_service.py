@@ -209,7 +209,7 @@ class NotificationService:
             request = self._row_to_request(row)
             recipients = await self._get_recipients(tenant_name, row)
             from app.services.email_service import email_service
-            await email_service.send_broadcast_template(request, recipients)
+            email_service.send_broadcast_template(request, recipients)
             await self.db.execute_query(f"UPDATE `{tenant_name}`.downtime_notifications SET status='SENT', sent_at=NOW() WHERE id=%s", (row['id'],), commit=True)
         except Exception as e:
             logger.error(f"Alert failed: {e}")
@@ -221,7 +221,7 @@ class NotificationService:
             rn_req.content.message_body = row.get('release_note_content') or rn_req.content.message_body
             recipients = await self._get_recipients(tenant_name, row)
             from app.services.email_service import email_service
-            await email_service.send_broadcast_template(rn_req, recipients)
+            email_service.send_broadcast_template(rn_req, recipients)
             await self.db.execute_query(f"UPDATE `{tenant_name}`.downtime_notifications SET release_note_status='SENT', release_sent_at=NOW() WHERE id=%s", (row['id'],), commit=True)
         except Exception as e:
             logger.error(f"RN failed: {e}")
