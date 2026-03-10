@@ -12,14 +12,21 @@ class NotificationService:
         self.db = db
         self.colombo_tz = pytz.timezone('Asia/Colombo')
 
-    def _to_utc_naive(self, dt: datetime) -> datetime:
-        """Convert a datetime (potentially naive) to UTC naive for DB storage"""
+    def _to_db_naive(self, dt: datetime) -> datetime:
+        """Ensure datetime is naive and representing Colombo time for DB storage"""
         if dt is None:
             return None
-        if dt.tzinfo is None:
-            # Assume naive datetimes are in Colombo time
-            dt = self.colombo_tz.localize(dt)
-        return dt.astimezone(pytz.UTC).replace(tzinfo=None)
+        
+        # If the datetime has timezone info, convert it to Colombo first
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(self.colombo_tz)
+        
+        # Strip timezone to store as naive (which the user prefers)
+        return dt.replace(tzinfo=None)
+    
+    def get_colombo_now(self) -> datetime:
+        """Get current Colombo time as a naive datetime"""
+        return datetime.now(self.colombo_tz).replace(tzinfo=None)
 
     async def get_project_members(self, tenant_name: str, project_id: int) -> List[Dict[str, Any]]:
         """
@@ -102,14 +109,14 @@ class NotificationService:
                 request.priority.value if hasattr(request.priority, 'value') else request.priority,
                 affected_components_json,
                 target_emails_json,
-                self._to_utc_naive(request.schedule.start_time),
-                self._to_utc_naive(request.schedule.end_time),
+                self._to_db_naive(request.schedule.start_time),
+                self._to_db_naive(request.schedule.end_time),
                 request.schedule.timezone,
                 request.content.subject,
                 request.content.message_body,
                 request.audience.value if hasattr(request.audience, 'value') else request.audience,
                 request.project_id if request.project_id else None,
-                self._to_utc_naive(request.scheduled_at),
+                self._to_db_naive(request.scheduled_at),
                 status,
                 sender_email,
                 sender_id
@@ -457,9 +464,9 @@ class NotificationService:
                     if not check: continue
 
                     # 3. Fetch Due Notifications
-                    # status='SCHEDULED' AND scheduled_at <= NOW()
+                    # status='SCHEDULED' AND scheduled_at <= NOW() (in Colombo time)
                     query = f"SELECT * FROM `{tenant_name}`.downtime_notifications WHERE status='SCHEDULED' AND scheduled_at <= %s"
-                    rows = await self.db.execute_query(query, (datetime.utcnow(),), fetch_all=True)
+                    rows = await self.db.execute_query(query, (self.get_colombo_now(),), fetch_all=True)
 
                     if rows:
                         logger.info(f"Scheduler: Found {len(rows)} due notifications in tenant '{tenant_name}'")
@@ -692,14 +699,14 @@ class NotificationService:
                 request.priority.value if hasattr(request.priority, 'value') else request.priority,
                 affected_components_json,
                 target_emails_json,
-                self._to_utc_naive(request.schedule.start_time),
-                self._to_utc_naive(request.schedule.end_time),
+                self._to_db_naive(request.schedule.start_time),
+                self._to_db_naive(request.schedule.end_time),
                 request.schedule.timezone,
                 request.content.subject,
                 request.content.message_body,
                 request.audience.value if hasattr(request.audience, 'value') else request.audience,
                 request.project_id if request.project_id else None,
-                self._to_utc_naive(request.scheduled_at),
+                self._to_db_naive(request.scheduled_at),
                 notification_id
             )
             
