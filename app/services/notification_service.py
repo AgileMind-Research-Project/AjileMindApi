@@ -67,8 +67,19 @@ class NotificationService:
             return []
 
     async def send_downtime_notification(self, tenant_name: str, request: DowntimeNotificationRequest, sender_email: str, sender_id: str = None):
+        # 0. Validate Time Sequence
+        start_time = self._to_db_naive(request.schedule.start_time)
+        end_time = self._to_db_naive(request.schedule.end_time)
+        scheduled_at = self._to_db_naive(request.scheduled_at)
+
+        if scheduled_at and start_time and scheduled_at >= start_time:
+            return {"success": False, "message": "Schedule Send Time must be earlier than the maintenance Start Time."}
+        
+        if start_time and end_time and start_time >= end_time:
+            return {"success": False, "message": "Start Time must be earlier than the Estimated End Time."}
+
         # 1. Determine Status & Timing
-        scheduled_time = self._to_db_naive(request.scheduled_at)
+        scheduled_time = scheduled_at
         is_scheduled = bool(scheduled_time)
         status = "SCHEDULED" if is_scheduled else "SENT"
         
@@ -124,6 +135,17 @@ class NotificationService:
             raise
 
     async def update_downtime_notification(self, tenant_name: str, notification_id: int, request: DowntimeNotificationRequest):
+        # 0. Validate Time Sequence
+        start_time = self._to_db_naive(request.schedule.start_time)
+        end_time = self._to_db_naive(request.schedule.end_time)
+        scheduled_at = self._to_db_naive(request.scheduled_at)
+
+        if scheduled_at and start_time and scheduled_at >= start_time:
+            return {"success": False, "message": "Schedule Send Time must be earlier than the maintenance Start Time."}
+        
+        if start_time and end_time and start_time >= end_time:
+            return {"success": False, "message": "Start Time must be earlier than the Estimated End Time."}
+
         try:
             affected_components_json = json.dumps(request.affected_components) if request.affected_components else "[]"
             target_emails_json = json.dumps(request.target_emails) if request.target_emails else "[]"
