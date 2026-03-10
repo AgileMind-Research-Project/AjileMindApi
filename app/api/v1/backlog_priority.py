@@ -414,11 +414,12 @@ async def add_to_priority_list(
         
         next_rank = (rank_result["max_rank"] if rank_result else 0) + 1
         
-        # Insert into priority table
+        # Insert into priority table (upsert to handle duplicates)
         insert_query = """
             INSERT INTO project_backlog_priority 
             (project_id, backlog_id, `rank`, sprint_id, created_at, updated_at)
             VALUES (%s, %s, %s, NULL, NOW(), NOW())
+            ON DUPLICATE KEY UPDATE updated_at = NOW()
         """
         
         result = await database.execute_query(
@@ -428,22 +429,16 @@ async def add_to_priority_list(
             schema=tenant_name
         )
         
-        if result:
-            logger.info(f"Added item {backlog_id} to priority list with rank {next_rank}")
-            return {
-                "success": True,
-                "message": "Item added to priority list",
-                "data": {
-                    "project_id": project_id,
-                    "backlog_id": backlog_id,
-                    "rank": next_rank
-                }
+        logger.info(f"Added item {backlog_id} to priority list with rank {next_rank}")
+        return {
+            "success": True,
+            "message": "Item added to priority list",
+            "data": {
+                "project_id": project_id,
+                "backlog_id": backlog_id,
+                "rank": next_rank
             }
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to add item to priority list"
-            )
+        }
         
     except HTTPException:
         raise
@@ -547,44 +542,38 @@ async def remove_from_priority_list(
             WHERE project_id = %s AND backlog_id = %s
         """
         
-        result = await database.execute_query(
+        await database.execute_query(
             delete_query,
             (project_id, backlog_id),
             commit=True,
             schema=tenant_name
         )
         
-        if result:
-            # 3. Update ranks for remaining items
-            reorder_query = """
-                UPDATE project_backlog_priority
-                SET `rank` = `rank` - 1
-                WHERE project_id = %s AND `rank` > %s
-            """
-            
-            await database.execute_query(
-                reorder_query,
-                (project_id, deleted_rank),
-                commit=True,
-                schema=tenant_name
-            )
-            
-            logger.info(f"Removed item {backlog_id} (rank {deleted_rank}) and re-ordered remaining items")
-            
-            return {
-                "success": True,
-                "message": "Item removed from priority list",
-                "data": {
-                    "project_id": project_id,
-                    "backlog_id": backlog_id,
-                    "previous_rank": deleted_rank
-                }
+        # 3. Update ranks for remaining items
+        reorder_query = """
+            UPDATE project_backlog_priority
+            SET `rank` = `rank` - 1
+            WHERE project_id = %s AND `rank` > %s
+        """
+        
+        await database.execute_query(
+            reorder_query,
+            (project_id, deleted_rank),
+            commit=True,
+            schema=tenant_name
+        )
+        
+        logger.info(f"Removed item {backlog_id} (rank {deleted_rank}) and re-ordered remaining items")
+        
+        return {
+            "success": True,
+            "message": "Item removed from priority list",
+            "data": {
+                "project_id": project_id,
+                "backlog_id": backlog_id,
+                "previous_rank": deleted_rank
             }
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to remove item from priority list"
-            )
+        }
         
     except HTTPException:
         raise

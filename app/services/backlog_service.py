@@ -220,6 +220,129 @@ class BacklogService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to process file: {str(e)}"
             )
+
+    async def create_bugs_from_file(
+        self,
+        tenant_name: str,
+        project_id: int,
+        project_key: str,
+        sprint_id: int,
+        file: UploadFile,
+        jira_url: str,
+        jira_email: str,
+        jira_api_token: str
+    ) -> BulkUploadResponse:
+        """
+        Process uploaded file to create bug items in Jira and local DB, and add them to bugs table.
+        """
+        try:
+            # Parse file
+            file_items = await self.parse_excel_file(file)
+            
+            if not file_items:
+                return BulkUploadResponse(
+                    success=False,
+                    message="No valid items found in file",
+                    items_processed=0,
+                    items_created=0,
+                    errors=["File contains no valid backlog items"]
+                )
+            
+            # Convert to BacklogItemCreate objects, enforce 'bug' type and sprint
+            backlog_items = []
+            validation_errors = []
+            
+            for idx, item in enumerate(file_items):
+                try:
+                    # Enforce Bug issue type and specific sprint
+                    item.issue_type = 'bug'
+                    item.sprint_id = sprint_id
+                    
+                    backlog_item = item.to_create_request(project_id)
+                    backlog_items.append(backlog_item)
+                except Exception as e:
+                    validation_errors.append(f"Row {idx + 2}: {str(e)}")
+            
+            if not backlog_items:
+                return BulkUploadResponse(
+                    success=False,
+                    message="No valid items after validation",
+                    items_processed=len(file_items),
+                    items_created=0,
+                    errors=validation_errors
+                )
+            
+            # Create Jira service
+            jira_service = JiraBacklogService(jira_url, jira_email, jira_api_token)
+            
+            # Create issues in Jira
+            jira_result = jira_service.bulk_create_issues(project_key, backlog_items)
+            
+            # Store successfully created items in database
+            jira_issues_created = []
+            db_errors = []
+            
+            for jira_issue in jira_result["created"]:
+                issue_key = jira_issue["issue_key"]
+                
+                # Find corresponding backlog item
+                backlog_item = next(
+                    (item for item in backlog_items if item.summary == jira_issue["summary"]),
+                    None
+                )
+                
+                if not backlog_item:
+                    continue
+                
+                try:
+                    # Save to project_backlog
+                    await self.backlog_repo.create_backlog_item(
+                        tenant_name=tenant_name,
+                        item_id=issue_key,
+                        project_id=project_id,
+                        summary=backlog_item.summary,
+                        description=backlog_item.description,
+                        issue_type=backlog_item.issue_type.value,
+                        status="todo",
+                        priority=backlog_item.priority.value if backlog_item.priority else None,
+                        assignee=backlog_item.assignee,
+                        tags=backlog_item.tags,
+                        severity=backlog_item.severity,
+                        sprint_id=sprint_id
+                    )
+                    
+                    # Save into bugs table
+                    await self.backlog_repo.create_bug_record(
+                        tenant_name=tenant_name,
+                        project_id=project_id,
+                        task_id=issue_key,
+                        sprint_id=sprint_id
+                    )
+                    
+                    jira_issues_created.append(issue_key)
+                except Exception as e:
+                    db_errors.append(f"Failed to store {issue_key}: {str(e)}")
+            
+            # Combine all errors
+            all_errors = validation_errors + jira_result["errors"] + db_errors
+            
+            return BulkUploadResponse(
+                success=len(jira_issues_created) > 0,
+                message=f"Created {len(jira_issues_created)} bugs",
+                items_processed=len(file_items),
+                items_created=len(jira_issues_created),
+                jira_issues_created=jira_issues_created,
+                errors=all_errors if all_errors else None
+            )
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error in create_bugs_from_file: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to process file: {str(e)}"
+            )
     
     async def list_backlog(
         self,
