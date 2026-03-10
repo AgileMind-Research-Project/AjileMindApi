@@ -556,3 +556,69 @@ class NotificationService:
             
         except Exception as e:
             logger.error(f"Failed to process scheduled notification {row.get('id')}: {e}")
+
+    async def update_downtime_notification(self, tenant_name: str, notification_id: int, request: DowntimeNotificationRequest):
+        """Update a scheduled downtime notification"""
+        try:
+            # Check if exists and is scheduled
+            check_query = f"SELECT status FROM `{tenant_name}`.downtime_notifications WHERE id = %s"
+            existing = await self.db.execute_query(check_query, (notification_id,), fetch_one=True)
+            
+            if not existing:
+                return {"success": False, "message": "Notification not found"}
+            
+            if existing['status'] != 'SCHEDULED':
+                return {"success": False, "message": "Only scheduled notifications can be updated"}
+
+            # Update notification
+            affected_components_json = json.dumps(request.affected_components) if request.affected_components else json.dumps([])
+            target_emails_json = json.dumps(request.target_emails) if request.target_emails else json.dumps([])
+            scheduled_time = request.scheduled_at.replace(tzinfo=None) if request.scheduled_at else None
+
+            update_query = f"""
+                UPDATE `{tenant_name}`.downtime_notifications 
+                SET type = %s, priority = %s, affected_components = %s, target_emails = %s, 
+                    start_time = %s, end_time = %s, timezone = %s, subject = %s, 
+                    message_body = %s, audience = %s, project_id = %s, scheduled_at = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+            """
+            
+            params = (
+                request.type.value if hasattr(request.type, 'value') else request.type,
+                request.priority.value if hasattr(request.priority, 'value') else request.priority,
+                affected_components_json,
+                target_emails_json,
+                request.schedule.start_time.replace(tzinfo=None) if request.schedule.start_time else None,
+                request.schedule.end_time.replace(tzinfo=None) if request.schedule.end_time else None,
+                request.schedule.timezone,
+                request.content.subject,
+                request.content.message_body,
+                request.audience.value if hasattr(request.audience, 'value') else request.audience,
+                request.project_id if request.project_id else None,
+                scheduled_time,
+                notification_id
+            )
+            
+            await self.db.execute_query(update_query, params, commit=True)
+            
+            return {"success": True, "message": "Notification updated successfully"}
+            
+        except Exception as e:
+            logger.error(f"Error updating notification: {e}")
+            raise
+
+    async def delete_downtime_notification(self, tenant_name: str, notification_id: int):
+        """Delete a downtime notification record"""
+        try:
+            query = f"DELETE FROM `{tenant_name}`.downtime_notifications WHERE id = %s"
+            result = await self.db.execute_query(query, (notification_id,), commit=True)
+            
+            if result.rowcount == 0:
+                return {"success": False, "message": "Notification not found"}
+                
+            return {"success": True, "message": "Notification deleted successfully"}
+            
+        except Exception as e:
+            logger.error(f"Error deleting notification: {e}")
+            raise

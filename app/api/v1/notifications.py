@@ -425,3 +425,67 @@ async def list_downtime_notifications(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put(
+    "/downtime/{notification_id}",
+    summary="Update Downtime Notification",
+    description="Update a scheduled downtime notification"
+)
+async def update_downtime_notification(
+    notification_id: int,
+    request: DowntimeNotificationRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    service: NotificationService = Depends(get_notification_service)
+):
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(status_code=400, detail="Tenant name not found")
+            
+        result = await service.update_downtime_notification(
+            tenant_name=tenant_name,
+            notification_id=notification_id,
+            request=request
+        )
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["message"])
+            
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete(
+    "/downtime/{notification_id}",
+    summary="Delete Downtime Notification",
+    description="Delete a downtime notification record"
+)
+async def delete_downtime_notification(
+    notification_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token),
+    service: NotificationService = Depends(get_notification_service)
+):
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(status_code=400, detail="Tenant name not found")
+            
+        result = await service.delete_downtime_notification(
+            tenant_name=tenant_name,
+            notification_id=notification_id
+        )
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["message"])
+            
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
