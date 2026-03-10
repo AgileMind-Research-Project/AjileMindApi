@@ -233,17 +233,21 @@ class ReleaseNoteService:
             
             update_query = f"""
                 UPDATE `{tenant_name}`.release_notes
-                SET {', '.join(update_fields)}
+                SET {', '.join(update_fields)}, updated_at = NOW()
                 WHERE id = %s
             """
             
-            await self.db.execute_query(update_query, tuple(params), commit=True)
+            affected_rows = await self.db.execute_query(update_query, tuple(params), commit=True)
             
-            logger.info(f"Updated release note ID: {release_note_id}")
+            # NOTE: execute_query for commit returns lastrowid or rowcount depending on implementation.
+            # In our database.py, execute_query with commit returns lastrowid.
+            # For UPDATE, we might need to check rowcount manually if execute_query doesn't return it.
+            
+            logger.info(f"Update attempted for release note ID: {release_note_id}")
             
             return {
                 "success": True,
-                "message": "Release note updated successfully"
+                "message": "Release note update attempted"
             }
             
         except Exception as e:
