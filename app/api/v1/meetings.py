@@ -33,7 +33,8 @@ from app.schemas.meeting_schemas import (
     TranscriptResponse,
     AIAnalysisResponse,
     TaskSyncRequest,
-    LeaveSyncRequest
+    LeaveSyncRequest,
+    BugSyncRequest
 )
 from app.services.ai_service import get_ai_service
 from app.services.jira_service import JiraService
@@ -843,13 +844,14 @@ async def analyze_meeting_tasks(
 
     # ── Step 1: Try MySQL transcript first (uploaded / structured) ─────────
     content: str = ""
+    category: Optional[str] = None
     real_id = meeting_id.replace("redis_", "") if meeting_id.startswith("redis_") else meeting_id
 
     if tenant_name:
         try:
             from app.db.database import db as _db
             db_query = """
-                SELECT t.transcript_content AS content
+                SELECT t.transcript_content AS content, t.category
                 FROM   transcripts t
                 WHERE  t.meeting_id = %s
                 LIMIT  1
@@ -857,9 +859,10 @@ async def analyze_meeting_tasks(
             db_row = await _db.execute_query(db_query, (real_id,), schema=tenant_name, fetch_one=True)
             if db_row and db_row.get("content"):
                 content = db_row["content"]
+                category = db_row.get("category")
                 logger.info(
                     f"[Analyze] Using MySQL transcript for {real_id} "
-                    f"(len={len(content)}, has_TAM={'TAM-' in content.upper()})"
+                    f"(len={len(content)}, category={category})"
                 )
         except Exception as _e:
             logger.warning(f"[Analyze] MySQL transcript lookup failed: {_e}")
@@ -874,16 +877,22 @@ async def analyze_meeting_tasks(
                 detail="Transcript not found for this meeting"
             )
         content = transcript["content"]
+        # Redis transcripts don't usually have a category attached in the same way, 
+        # but the meeting might have one. 
+        meeting = meeting_service.get_meeting(meeting_id)
+        if meeting:
+             category = meeting.get("category")
+
         logger.info(
             f"[Analyze] Using Redis/fallback transcript for {real_id} "
-            f"(len={len(content)}, has_TAM={'TAM-' in content.upper()})"
+            f"(len={len(content)}, category={category})"
         )
 
     if not content:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transcript not found for this meeting")
 
-    logger.info(f"[Analyze] Starting AI analysis | meeting={meeting_id} | len={len(content)}")
-    analysis = await ai_service.analyze_transcript(content)
+    logger.info(f"[Analyze] Starting AI analysis | meeting={meeting_id} | category={category}")
+    analysis = await ai_service.analyze_transcript(content, category=category)
     return analysis
 
 
@@ -971,6 +980,103 @@ async def sync_extracted_tasks(
         except Exception as e:
             logger.error(f"Failed to sync task {task.summary}: {e}")
             results.append({"task": task.summary, "status": "failed", "error": str(e)})
+
+    return {"success": True, "results": results}
+
+
+@router.post("/{meeting_id}/sync-review-tasks", response_model=dict)
+async def sync_review_tasks(
+    meeting_id: str,
+    request: TaskSyncRequest,
+    current_user: dict = Depends(get_current_user_from_token),
+    db = Depends(get_db)
+):
+    """
+    Sprint Review task sync:
+    - Tasks with meeting_status='Completed'  → set Jira status to 'Done' + DB status='done'
+    - Tasks with any other meeting_status    → leave Jira/DB status unchanged, just record review outcome
+    Does NOT start/close a sprint (that is handled separately by the close endpoint).
+    """
+    tenant_name = current_user.get('tenant_name')
+    jira_service = JiraService(db)
+    results = []
+
+    for task in request.tasks:
+        if not task.task_id:
+            continue
+        try:
+            is_completed = (task.meeting_status or '').strip().lower() == 'completed'
+
+            if is_completed:
+                # Transition Jira issue to Done via REST
+                try:
+                    credentials = await jira_service.get_credentials(tenant_name)
+                    if credentials:
+                        import aiohttp, base64
+                        from app.utils.secrets import get_secret
+                        jira_url = credentials["jira_url"]
+                        email = credentials["email"]
+                        secret_name = (
+                            f"tenant_{tenant_name}_jira_api_token_"
+                            f"{jira_url.replace('https://','').replace('/','_')}"
+                        )
+                        secret_result = get_secret(secret_name)
+                        if secret_result.get("success"):
+                            api_token = secret_result.get("secret_value")
+                            auth_b64 = base64.b64encode(f"{email}:{api_token}".encode("ascii")).decode("ascii")
+                            headers = {
+                                "Authorization": f"Basic {auth_b64}",
+                                "Content-Type": "application/json",
+                                "Accept": "application/json",
+                            }
+                            # Step 1: Get available transitions
+                            async with aiohttp.ClientSession() as session:
+                                async with session.get(
+                                    f"{jira_url}/rest/api/3/issue/{task.task_id}/transitions",
+                                    headers=headers,
+                                    timeout=aiohttp.ClientTimeout(total=10)
+                                ) as tresp:
+                                    if tresp.status == 200:
+                                        tdata = await tresp.json()
+                                        transitions = tdata.get("transitions", [])
+                                        # Find 'Done' transition
+                                        done_id = None
+                                        for t in transitions:
+                                            tname = (t.get("name") or "").lower()
+                                            if tname in ["done", "closed", "complete", "resolved"]:
+                                                done_id = t["id"]
+                                                break
+                                        if done_id:
+                                            async with session.post(
+                                                f"{jira_url}/rest/api/3/issue/{task.task_id}/transitions",
+                                                headers=headers,
+                                                json={"transition": {"id": done_id}},
+                                                timeout=aiohttp.ClientTimeout(total=10)
+                                            ) as presp:
+                                                if presp.status not in [200, 204]:
+                                                    logger.warning(f"Jira transition {task.task_id} HTTP {presp.status}")
+                except Exception as jira_err:
+                    logger.warning(f"Jira transition non-fatal: {jira_err}")
+
+                # Update DB status to 'done'
+                try:
+                    await db.execute_query(
+                        "UPDATE project_backlog SET status = 'done', updated_at = NOW() WHERE id = %s",
+                        (task.task_id,),
+                        schema=tenant_name,
+                        commit=True
+                    )
+                except Exception as db_err:
+                    logger.warning(f"DB status update non-fatal: {db_err}")
+
+            results.append({
+                "task_id": task.task_id,
+                "meeting_status": task.meeting_status,
+                "action": "set_done" if is_completed else "kept_status"
+            })
+        except Exception as e:
+            logger.error(f"Failed to sync review task {task.task_id}: {e}")
+            results.append({"task_id": task.task_id, "status": "failed", "error": str(e)})
 
     return {"success": True, "results": results}
 
@@ -1067,3 +1173,72 @@ async def analyze_meeting_emotion(
     emotion_result = await ai_service.analyze_emotion(content)
 
     return {"success": True, "data": emotion_result}
+@router.post("/{meeting_id}/sync-bugs", response_model=dict)
+async def sync_extracted_bugs(
+    meeting_id: str,
+    request: BugSyncRequest,
+    current_user: dict = Depends(get_current_user_from_token),
+    db = Depends(get_db)
+):
+    """
+    Sync AI-extracted bugs to Jira and Database
+    """
+    tenant_name = current_user.get('tenant_name')
+    jira_service = JiraService(db)
+    backlog_service = BacklogService(db)
+    
+    # Get project key
+    from app.db.repositories.project_repository import ProjectRepository
+    project_repo = ProjectRepository(db)
+    project = await project_repo.get_project_by_id(tenant_name, request.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    project_key = project.get('key')
+    results = []
+    
+    for bug in request.bugs:
+        try:
+            # 1. Create in Jira
+            created_jira = await jira_service.create_issue(
+                tenant_name=tenant_name,
+                project_key=project_key,
+                summary=f"BUG: {bug.title}",
+                description=f"Reporter: {bug.reporter}\nSeverity: {bug.severity}\n\n{bug.description}",
+                issue_type="Bug",
+                priority=bug.severity if bug.severity in ["High", "Medium", "Low"] else "Medium",
+                assignee_email=None, 
+                labels=["ai-extracted", "sprint-review"]
+            )
+            jira_key = created_jira.get('issue_key')
+
+            # 2. Create in Database Backlog
+            await backlog_service.backlog_repo.create_backlog_item(
+                tenant_name=tenant_name,
+                item_id=jira_key,
+                project_id=request.project_id,
+                summary=f"BUG: {bug.title}",
+                description=bug.description,
+                issue_type="bug",
+                status="todo",
+                priority=bug.severity.lower() if bug.severity else "medium",
+                assignee=None,
+                tags=["ai-extracted", "sprint-review"],
+                severity=bug.severity,
+                parent_task_id=None
+            )
+            
+            # 3. Assign to sprint if provided
+            if request.sprint_id and jira_key:
+                await backlog_service.backlog_repo.update_backlog_item(
+                    tenant_name=tenant_name,
+                    item_id=jira_key,
+                    sprint_id=request.sprint_id
+                )
+
+            results.append({"title": bug.title, "status": "synced", "jira_key": jira_key})
+        except Exception as e:
+            logger.error(f"Failed to sync bug {bug.title}: {e}")
+            results.append({"title": bug.title, "status": "failed", "reason": str(e)})
+
+    return {"results": results, "count": len(results)}

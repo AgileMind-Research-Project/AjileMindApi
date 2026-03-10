@@ -156,6 +156,13 @@ class ExtractedTask(BaseModel):
     effort: Optional[float] = None
     assignee: Optional[str] = None
     tags: Optional[List[str]] = None
+    meeting_status: Optional[str] = None
+
+class ExtractedBug(BaseModel):
+    title: str
+    reporter: Optional[str] = None
+    severity: Optional[str] = "Medium"
+    description: Optional[str] = None
 
 class ExtractedLeave(BaseModel):
     developer_name: str
@@ -167,6 +174,7 @@ class ExtractedLeave(BaseModel):
 class AIAnalysisResponse(BaseModel):
     tasks: List[ExtractedTask] = []
     leave_info: List[ExtractedLeave] = []
+    bugs: List[ExtractedBug] = []
 
 class TaskSyncRequest(BaseModel):
     tasks: List[ExtractedTask]
@@ -177,3 +185,8 @@ class LeaveSyncRequest(BaseModel):
     leaves: List[ExtractedLeave]
     project_id: int
     sprint_id: int
+
+class BugSyncRequest(BaseModel):
+    bugs: List[ExtractedBug]
+    project_id: int
+    sprint_id: Optional[int] = None

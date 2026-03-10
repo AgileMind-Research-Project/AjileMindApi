@@ -29,7 +29,8 @@ class BacklogRepository:
         assignee: Optional[str],
         tags: Optional[List[str]],
         severity: Optional[str],
-        parent_task_id: Optional[str] = None
+        parent_task_id: Optional[str] = None,
+        sprint_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Create a backlog item in the database.
@@ -58,11 +59,10 @@ class BacklogRepository:
             query = """
                 INSERT INTO project_backlog (
                     id, project_id, summary, description, issue_type,
-                    status, priority, assignee, tags, severity, parent_task_id,
+                    status, priority, assignee, tags, severity, parent_task_id, sprint_id,
                     created_at, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                 ON DUPLICATE KEY UPDATE
                     summary = VALUES(summary),
                     description = VALUES(description),
@@ -73,13 +73,14 @@ class BacklogRepository:
                     tags = VALUES(tags),
                     severity = VALUES(severity),
                     parent_task_id = VALUES(parent_task_id),
+                    sprint_id = VALUES(sprint_id),
                     updated_at = NOW()
             """
             
             await self.db.execute_query(
                 query,
                 (item_id, project_id, summary, description, issue_type,
-                 status, priority, assignee, tags_json, severity, parent_task_id),
+                 status, priority, assignee, tags_json, severity, parent_task_id, sprint_id),
                 commit=True,
                 schema=tenant_name
             )
@@ -724,4 +725,42 @@ class BacklogRepository:
             # and autocommit is False, and we rolled back, the data is safe.
             # The next user of the connection should ideally reset session vars, but 
             # usually pools reset them or we assume default.
+            raise
+
+    async def create_bug_record(
+        self,
+        tenant_name: str,
+        project_id: int,
+        task_id: str,
+        sprint_id: int
+    ) -> bool:
+        """
+        Create a bug record in the bugs table.
+        
+        Args:
+            tenant_name: Tenant database name
+            project_id: Project ID
+            task_id: Jira issue key for the bug
+            sprint_id: Sprint ID
+            
+        Returns:
+            True if created
+        """
+        try:
+            query = """
+                INSERT IGNORE INTO bugs (project_id, task_id, sprint_id)
+                VALUES (%s, %s, %s)
+            """
+            
+            await self.db.execute_query(
+                query,
+                (project_id, task_id, sprint_id),
+                commit=True,
+                schema=tenant_name
+            )
+            
+            logger.info(f"Bug record created: {task_id} in {tenant_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Error creating bug record: {str(e)}")
             raise

@@ -54,13 +54,13 @@ class AIService:
     # ─────────────────────────────────────────────────────────────────────────
     # PUBLIC — main entry point called by the meetings endpoint
     # ─────────────────────────────────────────────────────────────────────────
-    async def analyze_transcript(self, transcript_content: str) -> Dict[str, Any]:
+    async def analyze_transcript(self, transcript_content: str, category: Optional[str] = None) -> Dict[str, Any]:
         """
         Always uses Ollama LLM — handles any transcript format without assumptions.
         Falls back to regex parsers if LLM fails/times out, then OpenAI as last resort.
         All results are deduplicated before returning.
         """
-        empty = {"tasks": [], "leave_info": []}
+        empty = {"tasks": [], "leave_info": [], "bugs": []}
         tc = transcript_content or ""
 
         has_task_ids = bool(re.search(r"\b[A-Z]{1,10}-\d+\b", tc))
@@ -80,14 +80,15 @@ class AIService:
 
         # ── Step 1: Always try LLM first ─────────────────────────────────────
         logger.info("[STEP 1] Sending to Ollama LLM ...")
-        prompt = self._build_llm_prompt(tc)
+        prompt = self._build_llm_prompt(tc, category)
         result = await self._call_ollama(prompt)
-        if result and (result.get("tasks") or result.get("leave_info")):
+        if result and (result.get("tasks") or result.get("leave_info") or result.get("bugs")):
             result = self._deduplicate(result)
             logger.info(
                 f"[RESULT] ✓ Source=OLLAMA_LLM | "
                 f"tasks={len(result.get('tasks', []))} | "
-                f"leaves={len(result.get('leave_info', []))}"
+                f"leaves={len(result.get('leave_info', []))} | "
+                f"bugs={len(result.get('bugs', []))}"
             )
             logger.info("=" * 70)
             return result
@@ -140,20 +141,18 @@ class AIService:
         )
         if not openai_ok:
             logger.error(
-                "[STEP 3] No valid OpenAI key configured. "
-                "Fix: set OPENAI_API_KEY in .env OR ensure `ollama serve` is running."
+                "[STEP 3] No valid OpenAI key configured."
             )
-            logger.info("[RESULT] ✗ Source=NONE | tasks=0 | leaves=0")
-            logger.info("=" * 70)
             return empty
 
         result = await self._call_openai(prompt)
-        if result and (result.get("tasks") or result.get("leave_info")):
+        if result and (result.get("tasks") or result.get("leave_info") or result.get("bugs")):
             result = self._deduplicate(result)
             logger.info(
                 f"[RESULT] ✓ Source=OPENAI_FALLBACK | "
                 f"tasks={len(result.get('tasks', []))} | "
-                f"leaves={len(result.get('leave_info', []))}"
+                f"leaves={len(result.get('leave_info', []))} | "
+                f"bugs={len(result.get('bugs', []))}"
             )
         else:
             logger.error("[RESULT] ✗ Source=NONE | All methods failed.")
@@ -189,13 +188,23 @@ class AIService:
                 unique_leaves.append(l)
         dup_leaves = len(result.get("leave_info", [])) - len(unique_leaves)
 
-        if dup_tasks or dup_leaves:
+        # Bugs — deduplicate by (title, reporter, severity)
+        seen_bugs: set = set()
+        unique_bugs = []
+        for b in result.get("bugs", []):
+            key = (b.get("title", "").lower().strip(), b.get("reporter", "").lower(), b.get("severity", "Medium"))
+            if key not in seen_bugs:
+                seen_bugs.add(key)
+                unique_bugs.append(b)
+        dup_bugs = len(result.get("bugs", [])) - len(unique_bugs)
+
+        if dup_tasks or dup_leaves or dup_bugs:
             logger.warning(
-                f"[Dedup] Removed {dup_tasks} duplicate task(s) and "
-                f"{dup_leaves} duplicate leave entry/entries."
+                f"[Dedup] Removed {dup_tasks} task(s), "
+                f"{dup_leaves} leave(s), and {dup_bugs} bug(s)."
             )
 
-        return {"tasks": unique_tasks, "leave_info": unique_leaves}
+        return {"tasks": unique_tasks, "leave_info": unique_leaves, "bugs": unique_bugs}
         """
         Extract only the lines relevant to TAM task assignments and leave info.
         For each line containing a TAM-XXX ID, include 4 lines before and 6 lines
@@ -763,12 +772,32 @@ class AIService:
     # ─────────────────────────────────────────────────────────────────────────
     # LLM PROMPT — works for any transcript type (structured or free-form)
     # ─────────────────────────────────────────────────────────────────────────
-    def _build_llm_prompt(self, transcript: str) -> str:
+    def _build_llm_prompt(self, transcript: str, category: Optional[str] = None) -> str:
         # Detect any Jira-style task ID: one-or-more uppercase letters + dash + digits
         # e.g. TAM-198, SA-1212, PROJ-42, BACKEND-5
         has_task_ids = bool(re.search(r"\b[A-Z]{1,10}-\d+\b", transcript))
 
-        if has_task_ids:
+        cat_check = (category or "").lower().replace(" ", "_").strip()
+        is_sprint_review = cat_check in ["sprint_review", "sprint_meeting"]
+
+        if is_sprint_review:
+            task_rules = (
+                "MEETING TYPE: SPRINT REVIEW\n"
+                "In this meeting, developers present their work on specific tasks (by ID). The team discusses if the task is finished.\n\n"
+                "YOUR MISSION:\n"
+                "1. Find EVERY task ID mentioned (format: TAM-XXX, PROJ-XXX, etc).\n"
+                "2. For each task, extract: \n"
+                "   - task_id: The ID found in the text.\n"
+                "   - summary: A short title for the task.\n"
+                "   - assignee: The developer who worked on/is presenting the task.\n"
+                "   - meeting_status: Crucial! Categorize as 'Completed', 'Partially Complete', 'Incomplete', or 'Moved to Next Sprint' based on the conversation.\n"
+                "   - description: 1 sentence describing what was done or why it's not finished.\n"
+                "   - effort: Always 0. Do NOT track or invent time/effort hours for Sprint Reviews.\n"
+                "3. ACCURACY RULE: Only extract task IDs and information that are EXPLICITLY confirmed in the transcript. DO NOT invent IDs. DO NOT guess effort.\n"
+                "4. Only extract task assignments and 'bugs'. Leave info is NOT needed for this meeting type.\n"
+                "5. Output format: A single JSON object with 'tasks' and 'bugs' arrays.\n\n"
+            )
+        elif has_task_ids:
             task_rules = (
                 "HOW ASSIGNMENTS WORK IN THIS TRANSCRIPT:\n"
                 "- One person ASKS another: 'can you handle XYZ-123?'\n"
@@ -803,34 +832,51 @@ class AIService:
                 "  → task_id=TASK-1, assignee=John, effort=2\n\n"
             )
 
-        leave_rules = (
-            "LEAVE RULES:\n"
-            "- Extract every mention of leave, absence, day off, or holiday.\n"
-            "- developer_name: EXACTLY the email or name of the speaker who said they are on leave.\n"
-            "  DO NOT use example names. Use only real names/emails from the transcript.\n"
-            "- leave_date: format YYYY-MM-DD.\n"
-            "  If a date RANGE is given (e.g. March 10 to March 13), create ONE entry PER DAY.\n"
-            "  If a SINGLE date is given (e.g. March 11), create exactly ONE entry for that day.\n"
-            "- leave_hours: 8 for full day (default). Use 4 only if 'half day' is explicitly stated.\n"
-            "- leave_type: 'Full Day' (default). Use 'Half Day' only if explicitly stated.\n"
-            "- reason: 'On leave'.\n\n"
-            "IMPORTANT: Do NOT copy any names or dates from the examples below into your answer.\n"
-            "  Only extract leave information that actually appears in the TRANSCRIPT section.\n\n"
-        )
+        if is_sprint_review:
+            # Sprint review doesn't need leave info, but needs bug extraction
+            extra_rules = (
+                "BUG RULES:\n"
+                "- Find any bugs, issues, or defects mentioned that were DISCOVERED during the review.\n"
+                "- title: Short name of the bug.\n"
+                "- reporter: Who found it or is speaking about it.\n"
+                "- severity: 'High', 'Medium', or 'Low' (guess based on tone if not stated).\n"
+                "- description: 1 sentence about the bug behavior.\n\n"
+            )
+            output_format = (
+                "OUTPUT FORMAT (JSON only, no markdown, no explanation):\n"
+                '{"tasks":[{"task_id":"PROJ-1","summary":"...","description":"...","assignee":"real_person@domain.com","effort":0,"meeting_status":"Completed"}],'
+                '"bugs":[{"title":"...","reporter":"...","severity":"Medium","description":"..."}]}\n\n'
+                "DO NOT include 'leave_info' in the output.\n\n"
+            )
+        else:
+            extra_rules = (
+                "LEAVE RULES:\n"
+                "- Extract every mention of leave, absence, day off, or holiday.\n"
+                "- developer_name: EXACTLY the email or name of the speaker who said they are on leave.\n"
+                "  DO NOT use example names. Use only real names/emails from the transcript.\n"
+                "- leave_date: format YYYY-MM-DD.\n"
+                "  If a date RANGE is given (e.g. March 10 to March 13), create ONE entry PER DAY.\n"
+                "  If a SINGLE date is given (e.g. March 11), create exactly ONE entry for that day.\n"
+                "- leave_hours: 8 for full day (default). Use 4 only if 'half day' is explicitly stated.\n"
+                "- leave_type: 'Full Day' (default). Use 'Half Day' only if explicitly stated.\n"
+                "- reason: 'On leave'.\n\n"
+                "IMPORTANT: Do NOT copy any names or dates from the examples below into your answer.\n"
+                "  Only extract leave information that actually appears in the TRANSCRIPT section.\n\n"
+            )
+            output_format = (
+                "OUTPUT FORMAT (JSON only, no markdown, no explanation):\n"
+                '{"tasks":[{"task_id":"PROJ-1","summary":"...","description":"...","assignee":"real_person@domain.com","effort":8}],'
+                '"leave_info":[{"developer_name":"real_person@domain.com","leave_date":"YYYY-MM-DD",'
+                '"leave_hours":8,"leave_type":"Full Day","reason":"On leave"}]}\n\n'
+                "REMINDER: Replace real_person@domain.com and YYYY-MM-DD with ACTUAL values from the transcript.\n\n"
+            )
 
-        output_format = (
-            "OUTPUT FORMAT (JSON only, no markdown, no explanation):\n"
-            '{"tasks":[{"task_id":"PROJ-1","assignee":"real_person@domain.com","effort":8}],'
-            '"leave_info":[{"developer_name":"real_person@domain.com","leave_date":"YYYY-MM-DD",'
-            '"leave_hours":8,"leave_type":"Full Day","reason":"On leave"}]}\n\n'
-            "REMINDER: Replace real_person@domain.com and YYYY-MM-DD with ACTUAL values from the transcript.\n\n"
-        )
-
+        role = "sprint review" if is_sprint_review else "sprint planning"
         return (
-            "You are an Agile sprint planning assistant. "
-            "Extract ALL task assignments AND leave information from the meeting transcript below.\n\n"
+            f"You are an Agile {role} assistant. "
+            f"Extract ALL task assignments AND {'bug' if is_sprint_review else 'leave'} information from the meeting transcript below.\n\n"
             + task_rules
-            + leave_rules
+            + extra_rules
             + output_format
             + f"TRANSCRIPT:\n{transcript}\n\n"
             "Now output the JSON:"
