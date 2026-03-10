@@ -671,6 +671,86 @@ async def start_sprint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/{project_id}/sprints/{sprint_id}/close", response_model=Dict[str, Any])
+async def close_sprint(
+    project_id: int,
+    sprint_id: int,
+    db: Database = Depends(get_database),
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token)
+):
+    """
+    Close a sprint end-to-end (called after Sprint Review sync):
+      1. Closes the sprint in Jira (state = 'closed') via PUT /rest/agile/1.0/sprint/{id}.
+      2. Updates the DB sprint row: status='Closed'.
+    Returns: { "success": true, "data": <updated_sprint_row>, "jira_closed": bool }
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(status_code=400, detail="Tenant not found in token")
+
+        from app.db.repositories.sprint_repository import SprintRepository
+        from app.services.jira_service import JiraService
+
+        sprint_repo = SprintRepository(db)
+        sprint_row = await sprint_repo.get_sprint_by_id(tenant_name, sprint_id)
+        if not sprint_row:
+            raise HTTPException(status_code=404, detail=f"Sprint {sprint_id} not found")
+
+        sprint_name = sprint_row.get("sprint_name", f"Sprint {sprint_id}")
+        jira_svc = JiraService(db)
+        jira_closed = False
+
+        try:
+            credentials = await jira_svc.get_credentials(tenant_name)
+            if credentials:
+                import aiohttp, base64
+                from app.utils.secrets import get_secret
+                jira_url = credentials["jira_url"]
+                email = credentials["email"]
+                secret_name = (
+                    f"tenant_{tenant_name}_jira_api_token_"
+                    f"{jira_url.replace('https://','').replace('/','_')}"
+                )
+                secret_result = get_secret(secret_name)
+                if secret_result.get("success"):
+                    api_token = secret_result.get("secret_value")
+                    auth_b64 = base64.b64encode(f"{email}:{api_token}".encode("ascii")).decode("ascii")
+                    headers = {
+                        "Authorization": f"Basic {auth_b64}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    }
+                    payload = {
+                        "id": sprint_id,
+                        "name": sprint_name,
+                        "state": "closed",
+                    }
+                    async with aiohttp.ClientSession() as session:
+                        async with session.put(
+                            f"{jira_url}/rest/agile/1.0/sprint/{sprint_id}",
+                            headers=headers,
+                            json=payload,
+                            timeout=aiohttp.ClientTimeout(total=15)
+                        ) as resp:
+                            jira_closed = resp.status == 200
+                            if not jira_closed:
+                                body_txt = await resp.text()
+                                logger.warning(f"Jira close sprint {sprint_id} HTTP {resp.status}: {body_txt}")
+        except Exception as jira_err:
+            logger.warning(f"Jira close sprint non-fatal error: {jira_err}")
+
+        # Update DB status to Closed (enum: Future, Active, Closed, On Hold, Cancelled)
+        updated = await sprint_repo.update_sprint_status(tenant_name, sprint_id, "Closed")
+        logger.info(f"Sprint {sprint_id} closed: project={project_id}, jira_closed={jira_closed}")
+        return {"success": True, "data": updated, "jira_closed": jira_closed}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error closing sprint {sprint_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get(
     "/{project_id}/users",
     response_model=StandardResponse,
