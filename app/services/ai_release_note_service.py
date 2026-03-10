@@ -329,7 +329,7 @@ Example 3 (Improvement):
 ### INSTRUCTIONS
 1. Transform technical summaries into professional, user-friendly descriptions.
 2. Focus on business value and user benefits.
-3. Use past tense (e.g., "Added", "Fixed", "Improved", "Optimized").
+3. Focus on clear, concise descriptions of the changes.
 4. Detect the Release Type:
    - MAJOR: Significant new features or breaking changes.
    - MINOR: New features or significant improvements.
@@ -419,39 +419,15 @@ Return ONLY valid JSON, no additional explanatory text."""
             
             # Create user-friendly descriptions
             if item_type in ['story', 'feature', 'epic']:
-                # Transform technical summary to user-friendly feature description
-                if 'implement' in summary.lower():
-                    desc = summary.replace('Implement', 'Added').replace('implement', 'Added')
-                elif 'create' in summary.lower():
-                    desc = summary.replace('Create', 'Introduced').replace('create', 'Introduced')
-                elif 'add' in summary.lower():
-                    desc = summary
-                else:
-                    desc = f"Added {summary}"
+                desc = summary
                 content['features'].append(desc.strip())
                 
             elif item_type in ['bug', 'defect']:
-                # Transform to fix description
-                if 'fix' in summary.lower():
-                    desc = summary
-                elif 'resolve' in summary.lower():
-                    desc = summary
-                elif 'issue' in summary.lower() or 'problem' in summary.lower():
-                    desc = f"Resolved {summary}"
-                else:
-                    desc = f"Fixed {summary}"
+                desc = summary
                 content['bug_fixes'].append(desc.strip())
                 
             elif item_type in ['improvement', 'enhancement', 'change']:
-                # Transform to improvement description
-                if 'improve' in summary.lower() or 'enhance' in summary.lower():
-                    desc = summary
-                elif 'optimize' in summary.lower():
-                    desc = summary
-                elif 'update' in summary.lower():
-                    desc = summary.replace('Update', 'Updated').replace('update', 'Updated')
-                else:
-                    desc = f"Improved {summary}"
+                desc = summary
                 content['improvements'].append(desc.strip())
         
         # Generate meaningful summary
