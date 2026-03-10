@@ -1,6 +1,7 @@
 from typing import List, Dict, Any
 from datetime import datetime
 import json
+import pytz
 from app.schemas.notification_schemas import DowntimeNotificationRequest, Audience
 from app.db.database import Database
 from app.core.logger import logger
@@ -9,6 +10,16 @@ from app.core.config import settings
 class NotificationService:
     def __init__(self, db: Database):
         self.db = db
+        self.colombo_tz = pytz.timezone('Asia/Colombo')
+
+    def _to_utc_naive(self, dt: datetime) -> datetime:
+        """Convert a datetime (potentially naive) to UTC naive for DB storage"""
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            # Assume naive datetimes are in Colombo time
+            dt = self.colombo_tz.localize(dt)
+        return dt.astimezone(pytz.UTC).replace(tzinfo=None)
 
     async def get_project_members(self, tenant_name: str, project_id: int) -> List[Dict[str, Any]]:
         """
@@ -87,18 +98,18 @@ class NotificationService:
             # Map enum values to strings
             # If project_id is None, store as NULL (None in Python)
             params = (
-                request.type.value,
-                request.priority.value,
+                request.type.value if hasattr(request.type, 'value') else request.type,
+                request.priority.value if hasattr(request.priority, 'value') else request.priority,
                 affected_components_json,
                 target_emails_json,
-                request.schedule.start_time.replace(tzinfo=None) if request.schedule.start_time else None,
-                request.schedule.end_time.replace(tzinfo=None) if request.schedule.end_time else None,
+                self._to_utc_naive(request.schedule.start_time),
+                self._to_utc_naive(request.schedule.end_time),
                 request.schedule.timezone,
                 request.content.subject,
                 request.content.message_body,
-                request.audience.value,
+                request.audience.value if hasattr(request.audience, 'value') else request.audience,
                 request.project_id if request.project_id else None,
-                scheduled_time,
+                self._to_utc_naive(request.scheduled_at),
                 status,
                 sender_email,
                 sender_id
@@ -573,7 +584,6 @@ class NotificationService:
             # Update notification
             affected_components_json = json.dumps(request.affected_components) if request.affected_components else json.dumps([])
             target_emails_json = json.dumps(request.target_emails) if request.target_emails else json.dumps([])
-            scheduled_time = request.scheduled_at.replace(tzinfo=None) if request.scheduled_at else None
 
             update_query = f"""
                 UPDATE `{tenant_name}`.downtime_notifications 
@@ -588,14 +598,14 @@ class NotificationService:
                 request.priority.value if hasattr(request.priority, 'value') else request.priority,
                 affected_components_json,
                 target_emails_json,
-                request.schedule.start_time.replace(tzinfo=None) if request.schedule.start_time else None,
-                request.schedule.end_time.replace(tzinfo=None) if request.schedule.end_time else None,
+                self._to_utc_naive(request.schedule.start_time),
+                self._to_utc_naive(request.schedule.end_time),
                 request.schedule.timezone,
                 request.content.subject,
                 request.content.message_body,
                 request.audience.value if hasattr(request.audience, 'value') else request.audience,
                 request.project_id if request.project_id else None,
-                scheduled_time,
+                self._to_utc_naive(request.scheduled_at),
                 notification_id
             )
             
