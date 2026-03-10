@@ -8,6 +8,7 @@ import smtplib
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from datetime import datetime
 from typing import List, Optional, Dict, Any
 from app.core.config import settings
 from app.core.logger import logger
@@ -244,9 +245,9 @@ class EmailService:
             start_time = req_dict.get('schedule', {}).get('start_time')
             end_time = req_dict.get('schedule', {}).get('end_time')
             
-            if isinstance(start_time, datetime):
+            if start_time and isinstance(start_time, datetime):
                 start_time = start_time.strftime('%b %d, %Y - %I:%M %p')
-            if isinstance(end_time, datetime):
+            if end_time and isinstance(end_time, datetime):
                 end_time = end_time.strftime('%b %d, %Y - %I:%M %p')
             
             # Format components as tags
