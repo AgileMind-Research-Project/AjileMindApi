@@ -210,30 +210,12 @@ class NotificationService:
             recipients = await self._get_recipients(tenant_name, row)
             from app.services.email_service import email_service
             
-            # Combine logic: If release note is also scheduled, send them together
-            if row.get('release_note_status') == 'SCHEDULED' and row.get('release_note_content'):
-                try:
-                    import json
-                    rn_data = json.loads(row['release_note_content'])
-                    # We inject the main downtime message as the 'summary' in the combined release note JSON
-                    # This allows the template to render both beautifully in one go
-                    combined_body = json.dumps({
-                        "summary": request.content.message_body, # The Downtime message
-                        "features": rn_data.get("features", []),
-                        "improvements": rn_data.get("improvements", []),
-                        "bug_fixes": rn_data.get("bug_fixes", []),
-                        "breaking_changes": rn_data.get("breaking_changes", []),
-                        "known_issues": rn_data.get("known_issues", [])
-                    })
-                    request.content.message_body = combined_body
-                except:
-                    pass # Fallback to separate or original content if parsing fails
-
+            # Reverted combined logic: Only send the primary downtime alert here
             email_service.send_broadcast_template(request, recipients)
             
-            # Mark both as SENT to avoid double sending at end_time
+            # Only update downtime status, leave release_note_status as SCHEDULED
             await self.db.execute_query(
-                f"UPDATE `{tenant_name}`.downtime_notifications SET status='SENT', sent_at=NOW(), release_note_status='SENT', release_sent_at=NOW() WHERE id=%s", 
+                f"UPDATE `{tenant_name}`.downtime_notifications SET status='SENT', sent_at=NOW() WHERE id=%s", 
                 (row['id'],), 
                 commit=True
             )
@@ -244,11 +226,56 @@ class NotificationService:
         try:
             rn_req = self._row_to_request(row)
             rn_req.type = "FEATURE_UPGRADE"
-            rn_req.content.message_body = row.get('release_note_content') or rn_req.content.message_body
+            
+            project_id = row.get('project_id')
+            
+            # Use provided content by default
+            content_to_send = row.get('release_note_content') or rn_req.content.message_body
+            subject_to_send = rn_req.content.subject or "Release Note"
+
+            # THEMED LOOKUP: If we have a project_id, try to fetch the LATEST PUBLISHED Official Note
+            if project_id:
+                try:
+                    official_note = await self.db.execute_query(
+                        f"SELECT * FROM `{tenant_name}`.release_notes WHERE project_id=%s AND status='PUBLISHED' ORDER BY id DESC LIMIT 1",
+                        (project_id,),
+                        fetch_one=True
+                    )
+                    if official_note:
+                        # Convert official content (summary + structured content) to email format
+                        summary = official_note.get('summary', '')
+                        details = official_note.get('content') # This is the JSON block
+                        
+                        if isinstance(details, str):
+                            try: details = json.loads(details)
+                            except: pass
+                            
+                        # Format as unified structured body for the template
+                        if isinstance(details, dict):
+                            details['summary'] = summary or details.get('summary', '')
+                            content_to_send = json.dumps(details)
+                        else:
+                            content_to_send = summary or content_to_send
+                        
+                        # Update subject to include version and title
+                        version = official_note.get('version', '1.0.0')
+                        title = official_note.get('title', 'System Update')
+                        subject_to_send = f"OFFICIAL RELEASE: v{version} - {title}"
+                except Exception as e:
+                    logger.warning(f"Failed to fetch official note for project {project_id}: {e}")
+
+            rn_req.content.subject = subject_to_send
+            rn_req.content.message_body = content_to_send
+            
             recipients = await self._get_recipients(tenant_name, row)
             from app.services.email_service import email_service
             email_service.send_broadcast_template(rn_req, recipients)
-            await self.db.execute_query(f"UPDATE `{tenant_name}`.downtime_notifications SET release_note_status='SENT', release_sent_at=NOW() WHERE id=%s", (row['id'],), commit=True)
+            
+            await self.db.execute_query(
+                f"UPDATE `{tenant_name}`.downtime_notifications SET release_note_status='SENT', release_sent_at=NOW() WHERE id=%s", 
+                (row['id'],), 
+                commit=True
+            )
         except Exception as e:
             logger.error(f"RN failed: {e}")
 
