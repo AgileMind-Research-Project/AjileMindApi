@@ -14,7 +14,7 @@ from app.utils.jwt import get_current_user_from_token
 from pydantic import BaseModel, Field
 
 
-from app.schemas.notification_schemas import DowntimeNotificationRequest, NotificationResponse
+from app.schemas.notification_schemas import DowntimeNotificationRequest, NotificationResponse as SchemaNotificationResponse
 from app.services.notification_service import NotificationService
 
 router = APIRouter()
@@ -33,8 +33,8 @@ class CreateNotificationRequest(BaseModel):
     notification_type: str = Field(default="INFO", pattern="^(INFO|WARNING|SUCCESS|ERROR)$")
 
 
-class NotificationResponse(BaseModel):
-    """Response model for a notification"""
+class NotificationItemSchema(BaseModel):
+    """Schema for a single notification item"""
     id: int
     header: str
     description: str
@@ -360,7 +360,7 @@ def get_notification_service(database: Database = Depends(lambda: db)) -> Notifi
 
 @router.post(
     "/downtime",
-    response_model=NotificationResponse,
+    response_model=SchemaNotificationResponse,
     status_code=status.HTTP_200_OK,
     summary="Send Downtime Notification",
     description="Send a downtime or maintenance notification to users"
@@ -386,7 +386,7 @@ async def send_downtime_notification(
             sender_id=current_user.get("user_id")
         )
         
-        return NotificationResponse(
+        return SchemaNotificationResponse(
             success=True,
             message=f"Downtime notification sent successfully ({result.get('sent_count')} recipients)",
             data=result
