@@ -190,89 +190,183 @@ class NotificationService:
         
         display_type = request.type.value.replace('_', ' ').title()
         
-        if request.type == "EMERGENCY_OUTAGE" or request.priority == "HIGH":
-            header_bg = "#DC2626" # Red
-            accent_color = "#FEF2F2"
-            border_color = "#FECACA"
-            text_color = "#991B1B"
-            icon = "🚨"
-        elif request.type == "FEATURE_UPGRADE":
-            header_bg = "#16A34A" # Green
-            accent_color = "#F0FDF4"
-            border_color = "#BBF7D0"
-            text_color = "#166534"
-            icon = "🚀"
-        elif request.type == "PLANNED_MAINTENANCE":
-             header_bg = "#F59E0B" # Amber
-             accent_color = "#FFFBEB"
-             border_color = "#FDE68A"
-             text_color = "#92400E"
-             icon = "🛠️"
-
-        email_body = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #f4f4f5; }}
-                .container {{ max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e4e4e7; }}
-                .header {{ background-color: {header_bg}; color: #ffffff; padding: 20px; text-align: center; }}
-                .header h1 {{ margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.5px; }}
-                .header .icon {{ font-size: 32px; display: block; margin-bottom: 8px; }}
-                .content {{ padding: 30px; color: #374151; line-height: 1.6; font-size: 15px; }}
-                .meta-badge {{ display: inline-block; padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: 600; background-color: {accent_color}; color: {text_color}; border: 1px solid {border_color}; margin-bottom: 20px; }}
-                .message-box {{ margin-bottom: 25px; white-space: pre-wrap; }}
-                .details-box {{ background-color: {accent_color}; border: 1px solid {border_color}; border-radius: 6px; padding: 16px; font-size: 13px; }}
-                .detail-row {{ display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px dashed {border_color}; padding-bottom: 8px; }}
-                .detail-row:last-child {{ border-bottom: none; margin-bottom: 0; padding-bottom: 0; }}
-                .label {{ font-weight: 600; color: #6b7280; width: 30%; }}
-                .value {{ font-weight: 500; color: #111827; width: 70%; }}
-                .footer {{ background-color: #f8fafc; padding: 15px; text-align: center; color: #9ca3af; font-size: 12px; border-top: 1px solid #e2e8f0; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <div class="icon">{icon}</div>
-                    <h1>{request.content.subject}</h1>
-                </div>
-                <div class="content">
-                    <div class="meta-badge">
-                        {display_type} • {request.priority.value} Priority
-                    </div>
+        if request.type == "FEATURE_UPGRADE":
+            # Premium Official Release Report Template
+            features_html = ""
+            improvements_html = ""
+            fixes_html = ""
+            summary_info = ""
+            
+            # Try to parse structured content if body is JSON or has markers
+            try:
+                content_data = None
+                if request.content.message_body.strip().startswith('{'):
+                    content_data = json.loads(request.content.message_body)
+                
+                if content_data and isinstance(content_data, dict):
+                    # Features
+                    if content_data.get('features'):
+                        items = "".join([f'<div style="display:flex; gap:15px; margin-bottom:12px;"><span style="color:#cbd5e1; font-weight:900; font-size:12px;">{i+1:02d}</span><p style="margin:0; font-size:14px; font-weight:600; color:#0f172a;">{item}</p></div>' for i, item in enumerate(content_data['features'])])
+                        features_html = f'<section style="margin-top:30px; border-top:1px solid #f1f5f9; padding-top:15px;"><h3 style="font-size:10px; font-weight:800; color:#64748b; margin-bottom:15px;">03. NEW FEATURES</h3>{items}</section>'
                     
-                    <div class="message-box">
-                        <p><strong>Dear {request.audience.value.replace('_', ' ').title().replace('All Users', 'User')},</strong></p>
-                        <p>{request.content.message_body}</p>
+                    # Improvements
+                    if content_data.get('improvements'):
+                        items = "".join([f'<div style="background:#f8fafc; border:1px solid #f1f5f9; padding:12px; border-radius:4px; margin-bottom:8px; font-size:13px; color:#475569;">{item}</div>' for item in content_data['improvements']])
+                        improvements_html = f'<section style="margin-top:30px; border-top:1px solid #f1f5f9; padding-top:15px;"><h3 style="font-size:10px; font-weight:800; color:#64748b; margin-bottom:15px;">04. ENHANCEMENTS</h3>{items}</section>'
+                    
+                    # Fixes
+                    if content_data.get('bug_fixes'):
+                        items = "".join([f'<div style="display:flex; align-items:center; gap:10px; padding:8px; margin-bottom:4px;"><div style="width:4px; height:4px; background:#f59e0b; border-radius:50%;"></div><p style="margin:0; font-size:13px; font-weight:500; color:#64748b;">{item}</p></div>' for item in content_data['bug_fixes']])
+                        fixes_html = f'<section style="margin-top:30px; border-top:1px solid #f1f5f9; padding-top:15px;"><h3 style="font-size:10px; font-weight:800; color:#64748b; margin-bottom:15px;">05. FIXED BUGS</h3>{items}</section>'
+                    
+                    summary_info = content_data.get('summary', request.content.message_body if not content_data else "")
+                else:
+                    summary_info = request.content.message_body
+            except:
+                summary_info = request.content.message_body
+
+            email_body = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+                    body {{ font-family: 'Inter', -apple-system, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; color: #0f172a; }}
+                    .doc-container {{ max-width: 650px; margin: 30px auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 4px; box-shadow: 0 10px 40px rgba(0,0,0,0.05); overflow: hidden; }}
+                    .top-stripe {{ height: 4px; background-color: #0f172a; }}
+                    .header-p {{ padding: 40px 40px 20px 40px; }}
+                    .label-sm {{ font-size: 10px; font-weight: 800; color: #1e293b; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }}
+                    .title-h1 {{ font-size: 32px; font-weight: 800; tracking-tight: -0.025em; margin: 0 0 25px 0; line-height: 1.1; }}
+                    .meta-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 8px; margin-bottom: 30px; }}
+                    .meta-cell {{ padding: 15px; border-right: 1px solid #e2e8f0; }}
+                    .meta-cell:last-child {{ border-right: none; }}
+                    .meta-label {{ font-size: 9px; font-weight: 800; color: #64748b; text-transform: uppercase; margin-bottom: 4px; display: block; }}
+                    .meta-value {{ font-size: 13px; font-weight: 700; color: #0f172a; }}
+                    .summary-box {{ border-left: 2px solid #0f172a; padding-left: 24px; margin-bottom: 30px; }}
+                    .summary-p {{ font-size: 16px; font-weight: 500; color: #475569; font-style: italic; line-height: 1.5; }}
+                    .main-content {{ padding: 0 40px 40px 40px; }}
+                    .footer-p {{ background-color: #0f172a; padding: 30px 40px; color: #ffffff; }}
+                    .footer-brand {{ display: flex; align-items: center; gap: 12px; margin-bottom: 15px; }}
+                    .brand-box {{ width: 24px; height: 24px; border: 1.5px solid #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 14px; transform: rotate(-2deg); }}
+                    .footer-note {{ font-size: 9px; color: #94a3b8; line-height: 1.6; max-width: 350px; opacity: 0.7; }}
+                </style>
+            </head>
+            <body>
+                <div class="doc-container">
+                    <div class="top-stripe"></div>
+                    <div class="header-p">
+                        <div class="label-sm"><span style="width:20px; height:2px; background:#1e293b; display:inline-block;"></span> RELEASE DOCUMENTATION</div>
+                        <h1 class="title-h1">{request.content.subject}</h1>
+                        
+                        <div class="meta-grid">
+                            <div class="meta-cell">
+                                <span class="meta-label">ID Reference</span>
+                                <span class="meta-value">RN-PROTOCOL-{datetime.now().strftime('%y%m')}</span>
+                            </div>
+                            <div class="meta-cell">
+                                <span class="meta-label">Version</span>
+                                <span class="meta-value">System Sync</span>
+                            </div>
+                            <div class="meta-cell">
+                                <span class="meta-label">Type</span>
+                                <span class="meta-value">Security Verified</span>
+                            </div>
+                        </div>
+
+                        {f'<div class="summary-box"><p class="summary-p">"{summary_info}"</p></div>' if summary_info else ''}
                     </div>
 
-                    <div class="details-box">
-                        <div class="detail-row">
-                            <span class="label">📅 Start:</span>
-                            <span class="value">{request.schedule.start_time.strftime('%Y-%m-%d %H:%M') if hasattr(request.schedule.start_time, 'strftime') else request.schedule.start_time}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="label">⏳ End:</span>
-                            <span class="value">{request.schedule.end_time.strftime('%Y-%m-%d %H:%M') if hasattr(request.schedule.end_time, 'strftime') else request.schedule.end_time}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="label">📉 Impact:</span>
-                            <span class="value">{', '.join(request.affected_components)}</span>
-                        </div>
-                         <div class="detail-row">
-                            <span class="label">🌍 Timezone:</span>
-                            <span class="value">{request.schedule.timezone}</span>
+                    <div class="main-content">
+                        {features_html}
+                        {improvements_html}
+                        {fixes_html}
+                        
+                        <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:20px; border-radius:4px; margin-top:40px;">
+                            <h4 style="font-size:10px; font-weight:800; color:#64748b; margin:0 0 10px 0;">07. SUPPORT ENQUIRIES</h4>
+                            <p style="font-size:13px; color:#475569; margin-bottom:15px;">For deeper insights or support requests, please contact the product synthesis group.</p>
+                            <a href="mailto:support@ajilemind.com" style="background:#0f172a; color:#ffffff; padding:10px 20px; border-radius:4px; font-size:11px; font-weight:700; text-decoration:none; display:inline-block;">Email Support</a>
                         </div>
                     </div>
+
+                    <div class="footer-p">
+                        <div class="footer-brand">
+                            <div class="brand-box">A</div>
+                            <div style="line-height:1">
+                                <div style="font-size:11px; font-weight:800;">AgileMind Enterprise</div>
+                                <div style="font-size:9px; color:#94a3b8; font-weight:500;">Intelligence Synthesis Group</div>
+                            </div>
+                        </div>
+                        <p class="footer-note">This document is electronically verified and authorized for public distribution. Any unauthorized modification of the synthesis content is strictly prohibited by AI security protocols.</p>
+                    </div>
                 </div>
-                <div class="footer">
-                    &copy; {datetime.now().year} AgileMind Platform. All rights reserved.<br/>
-                    This is an automated system notification.
+            </body>
+            </html>
+            """
+        else:
+            email_body = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #f4f4f5; }}
+                    .container {{ max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e4e4e7; }}
+                    .header {{ background-color: {header_bg}; color: #ffffff; padding: 20px; text-align: center; }}
+                    .header h1 {{ margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.5px; }}
+                    .header .icon {{ font-size: 32px; display: block; margin-bottom: 8px; }}
+                    .content {{ padding: 30px; color: #374151; line-height: 1.6; font-size: 15px; }}
+                    .meta-badge {{ display: inline-block; padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: 600; background-color: {accent_color}; color: {text_color}; border: 1px solid {border_color}; margin-bottom: 20px; }}
+                    .message-box {{ margin-bottom: 25px; white-space: pre-wrap; }}
+                    .details-box {{ background-color: {accent_color}; border: 1px solid {border_color}; border-radius: 6px; padding: 16px; font-size: 13px; }}
+                    .detail-row {{ display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px dashed {border_color}; padding-bottom: 8px; }}
+                    .detail-row:last-child {{ border-bottom: none; margin-bottom: 0; padding-bottom: 0; }}
+                    .label {{ font-weight: 600; color: #6b7280; width: 30%; }}
+                    .value {{ font-weight: 500; color: #111827; width: 70%; }}
+                    .footer {{ background-color: #f8fafc; padding: 15px; text-align: center; color: #9ca3af; font-size: 12px; border-top: 1px solid #e2e8f0; }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <div class="icon">{icon}</div>
+                        <h1>{request.content.subject}</h1>
+                    </div>
+                    <div class="content">
+                        <div class="meta-badge">
+                            {display_type} • {request.priority.value} Priority
+                        </div>
+                        
+                        <div class="message-box">
+                            <p><strong>Dear {request.audience.value.replace('_', ' ').title().replace('All Users', 'User')},</strong></p>
+                            <p>{request.content.message_body}</p>
+                        </div>
+    
+                        <div class="details-box">
+                            <div class="detail-row">
+                                <span class="label">📅 Start:</span>
+                                <span class="value">{request.schedule.start_time.strftime('%Y-%m-%d %H:%M') if hasattr(request.schedule.start_time, 'strftime') else request.schedule.start_time}</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="label">⏳ End:</span>
+                                <span class="value">{request.schedule.end_time.strftime('%Y-%m-%d %H:%M') if hasattr(request.schedule.end_time, 'strftime') else request.schedule.end_time}</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="label">📉 Impact:</span>
+                                <span class="value">{', '.join(request.affected_components)}</span>
+                            </div>
+                             <div class="detail-row">
+                                <span class="label">🌍 Timezone:</span>
+                                <span class="value">{request.schedule.timezone}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="footer">
+                        &copy; {datetime.now().year} AgileMind Platform. All rights reserved.<br/>
+                        This is an automated system notification.
+                    </div>
                 </div>
-            </div>
-        </body>
-        </html>
-        """
+            </body>
+            </html>
+            """
         
         for recipient in recipients:
             email = recipient.get('email')
