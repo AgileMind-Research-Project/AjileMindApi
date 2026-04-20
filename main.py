@@ -48,6 +48,8 @@ from app.services.scheduler import start_scheduler
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events"""
+    scheduler = None
+
     # Run configuration tests on startup
     run_config_test()
     
@@ -77,9 +79,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"❌ Failed to start scheduler: {e}\n")
     # Start Meeting Link Scheduler
-    from app.services.meeting_scheduler_service import get_meeting_scheduler_service
-    scheduler = get_meeting_scheduler_service()
-    await scheduler.start()
+    try:
+        from app.services.meeting_scheduler_service import get_meeting_scheduler_service
+        scheduler = get_meeting_scheduler_service()
+        await scheduler.start()
+        print("✅ Meeting Scheduler started successfully\n")
+    except Exception as e:
+        print(f"⚠️  Meeting Scheduler initialization warning: {e}\n")
     
     yield
     
@@ -91,9 +97,9 @@ async def lifespan(app: FastAPI):
 
     # Stop Scheduler
     try:
-        scheduler = get_meeting_scheduler_service()
-        await scheduler.stop()
-    except:
+        if scheduler is not None:
+            await scheduler.stop()
+    except Exception:
         pass
 
     print("🔌 Closing database connections...")
