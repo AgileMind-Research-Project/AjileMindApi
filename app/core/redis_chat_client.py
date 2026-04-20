@@ -5,12 +5,15 @@ Provides Redis connection management and helper methods for chat operations.
 Includes tenant isolation for multi-tenant chat system.
 """
 
+import os
 import redis
 import json
 import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from uuid import uuid4
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +23,11 @@ class RedisChatClient:
     
     def __init__(
         self,
-        host: str = 'redis-12930.crce182.ap-south-1-1.ec2.cloud.redislabs.com',
-        port: int = 12930,
-        password: str = 'psPSNesjowZCqBOyeuoLPhy6ql4a29t9',
-        username: str = 'default',
-        db: int = 0,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        password: Optional[str] = None,
+        username: Optional[str] = None,
+        db: Optional[int] = None,
         decode_responses: bool = True
     ):
         """
@@ -38,18 +41,27 @@ class RedisChatClient:
             db: Redis database number
             decode_responses: Auto-decode responses to strings
         """
+        host = host if host is not None else settings.REDIS_HOST
+        port = port if port is not None else settings.REDIS_PORT
+        db = db if db is not None else settings.REDIS_DB
+        password = password if password is not None else settings.REDIS_PASSWORD
+        username = username if username is not None else os.getenv("REDIS_USERNAME")
+
         try:
-            self.client = redis.Redis(
-                host=host,
-                port=port,
-                password=password,
-                username=username,
-                db=db,
-                decode_responses=decode_responses,
-                socket_connect_timeout=5,
-                socket_keepalive=True,
-                max_connections=50
-            )
+            redis_kwargs = {
+                "host": host,
+                "port": port,
+                "password": password or None,
+                "db": db,
+                "decode_responses": decode_responses,
+                "socket_connect_timeout": 5,
+                "socket_keepalive": True,
+                "max_connections": settings.REDIS_MAX_CONNECTIONS,
+            }
+            if username:
+                redis_kwargs["username"] = username
+
+            self.client = redis.Redis(**redis_kwargs)
             
             # Test connection
             self.client.ping()

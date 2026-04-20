@@ -206,6 +206,7 @@ Each component has its own README.md:
 - [AI/ML Components](./app/ai/README.md)
 - [External Integrations](./app/integrations/README.md)
 - [Background Tasks](./app/tasks/README.md)
+- [Orchestration Logic API](./ORCHESTRATION_LOGIC_API.md)
 
 ## API Endpoints Overview
 
