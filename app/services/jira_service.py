@@ -1262,3 +1262,281 @@ class JiraService:
                             status_code=post_resp.status,
                             detail=f"Failed to transition issue: {error_text}"
                         )
+
+    # -------------------------------------------------------------------------
+    # Issue Type Management
+    # -------------------------------------------------------------------------
+
+    async def create_issue_type(
+        self,
+        tenant_name: str,
+        name: str,
+        description: str = "",
+        issue_type: str = "standard",   # "standard" | "subtask"
+        hierarchy_level: int = 0        # 0=Story/Task level, -1=Subtask, 1=Epic
+    ) -> Dict[str, Any]:
+        """
+        Create a new issue type in Jira Cloud.
+
+        Calls:
+            POST /rest/api/3/issuetype
+            Body: { name, description, type, hierarchyLevel }
+
+        Args:
+            tenant_name:     Tenant schema name (to look up credentials)
+            name:            Issue type name  (e.g. "Bug", "Feature Request")
+            description:     Short description shown in Jira UI
+            issue_type:      "standard" (default) or "subtask"
+            hierarchy_level: 0 = standard task level (default)
+                             1 = Epic level
+                            -1 = Subtask level
+
+        Returns:
+            Dict with id, name, description, subtask, hierarchyLevel, iconUrl
+
+        Raises:
+            HTTPException 400 if a type with that name already exists,
+            HTTPException 500 on credential or network errors.
+        """
+        credentials = await self.get_credentials(tenant_name)
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Jira integration not configured. Please connect Jira first."
+            )
+
+        jira_url = credentials["jira_url"]
+        email    = credentials["email"]
+
+        secret_name = (
+            f"tenant_{tenant_name}_jira_api_token_"
+            f"{jira_url.replace('https://','').replace('/','_')}"
+        )
+        secret_result = get_secret(secret_name)
+        if not secret_result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve Jira API token from secure storage"
+            )
+        api_token = secret_result.get("secret_value")
+
+        auth_b64 = base64.b64encode(f"{email}:{api_token}".encode("ascii")).decode("ascii")
+        headers = {
+            "Authorization": f"Basic {auth_b64}",
+            "Accept":        "application/json",
+            "Content-Type":  "application/json",
+        }
+
+        payload = {
+            "name":           name,
+            "description":    description,
+            "type":           issue_type,          # "standard" | "subtask"
+            "hierarchyLevel": hierarchy_level,
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{jira_url}/rest/api/3/issuetype",
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    body = await resp.json()
+                    if resp.status in [200, 201]:
+                        logger.info(f"Created Jira issue type '{name}' (id={body.get('id')})")
+                        return {
+                            "id":             body.get("id"),
+                            "name":           body.get("name"),
+                            "description":    body.get("description"),
+                            "subtask":        body.get("subtask"),
+                            "hierarchyLevel": body.get("hierarchyLevel"),
+                            "iconUrl":        body.get("iconUrl"),
+                        }
+                    else:
+                        errors = body.get("errorMessages", []) or [str(body)]
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Failed to create issue type '{name}': {'; '.join(errors)}"
+                        )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error(f"Error creating Jira issue type '{name}': {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create issue type: {exc}"
+            )
+
+    # -------------------------------------------------------------------------
+    # Custom Field Management
+    # -------------------------------------------------------------------------
+
+    # Severity numeric weights used by Backlog_prioritize.py
+    SEVERITY_WEIGHT_MAP: Dict[str, int] = {
+        "blocker":  5,
+        "critical": 4,
+        "major":    3,
+        "minor":    2,
+        "trivial":  1,
+    }
+
+    async def create_severity_custom_field(
+        self,
+        tenant_name: str,
+        field_name: str = "Severity",
+        field_description: str = "Issue severity: blocker > critical > major > minor > trivial"
+    ) -> Dict[str, Any]:
+        """
+        Create a 'Severity' Select List (single choice) custom field in Jira Cloud
+        with options: Blocker(5), Critical(4), Major(3), Minor(2), Trivial(1).
+
+        Workflow
+        --------
+        1. POST /rest/api/3/field              → creates the custom field
+        2. GET  /rest/api/3/field/{id}/context → fetches its default context id
+        3. POST /rest/api/3/field/{id}/context/{ctxId}/option
+                                               → adds all five severity options
+
+        Args:
+            tenant_name:       Tenant schema name (to look up credentials)
+            field_name:        Display name for the custom field (default "Severity")
+            field_description: Help text shown in Jira UI
+
+        Returns:
+            Dict with:
+                field_id   – e.g. "customfield_10165"
+                field_name – display name
+                context_id – default context id
+                options    – list of created option dicts {id, value, disabled}
+
+        Raises:
+            HTTPException on credential errors or Jira API failures.
+        """
+        credentials = await self.get_credentials(tenant_name)
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Jira integration not configured. Please connect Jira first."
+            )
+
+        jira_url = credentials["jira_url"]
+        email    = credentials["email"]
+
+        secret_name = (
+            f"tenant_{tenant_name}_jira_api_token_"
+            f"{jira_url.replace('https://','').replace('/','_')}"
+        )
+        secret_result = get_secret(secret_name)
+        if not secret_result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve Jira API token from secure storage"
+            )
+        api_token = secret_result.get("secret_value")
+
+        auth_b64 = base64.b64encode(f"{email}:{api_token}".encode("ascii")).decode("ascii")
+        headers = {
+            "Authorization": f"Basic {auth_b64}",
+            "Accept":        "application/json",
+            "Content-Type":  "application/json",
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+
+                # ----------------------------------------------------------
+                # Step 1: Create the custom field (Select List – single choice)
+                # ----------------------------------------------------------
+                field_payload = {
+                    "name":        field_name,
+                    "description": field_description,
+                    "type":        "com.atlassian.jira.plugin.system.customfieldtypes:select",
+                    "searcherKey": "com.atlassian.jira.plugin.system.customfieldtypes:multiselectsearcher",
+                }
+
+                async with session.post(
+                    f"{jira_url}/rest/api/3/field",
+                    headers=headers,
+                    json=field_payload,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    body = await resp.json()
+                    if resp.status not in [200, 201]:
+                        errors = body.get("errorMessages", []) or [str(body)]
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Failed to create custom field: {'; '.join(errors)}"
+                        )
+                    field_id   = body.get("id")    # e.g. "customfield_10165"
+                    field_name = body.get("name")
+                    logger.info(f"Created custom field '{field_name}' → {field_id}")
+
+                # ----------------------------------------------------------
+                # Step 2: Get the default context id for this field
+                # ----------------------------------------------------------
+                async with session.get(
+                    f"{jira_url}/rest/api/3/field/{field_id}/context",
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    ctx_body = await resp.json()
+                    if resp.status != 200:
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"Failed to fetch field context: {ctx_body}"
+                        )
+                    contexts   = ctx_body.get("values", [])
+                    context_id = contexts[0].get("id") if contexts else None
+                    if not context_id:
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="No context found for the newly created field."
+                        )
+                    logger.info(f"Field context id for '{field_id}': {context_id}")
+
+                # ----------------------------------------------------------
+                # Step 3: Add severity options (ordered by weight descending)
+                # ----------------------------------------------------------
+                options_payload = {
+                    "options": [
+                        {"value": label.capitalize(), "disabled": False}
+                        for label in ["blocker", "critical", "major", "minor", "trivial"]
+                    ]
+                }
+
+                async with session.post(
+                    f"{jira_url}/rest/api/3/field/{field_id}/context/{context_id}/option",
+                    headers=headers,
+                    json=options_payload,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    opt_body = await resp.json()
+                    if resp.status not in [200, 201]:
+                        errors = opt_body.get("errorMessages", []) or [str(opt_body)]
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Failed to create field options: {'; '.join(errors)}"
+                        )
+                    created_options = opt_body.get("options", [])
+                    logger.info(
+                        f"Created {len(created_options)} options for field '{field_id}'"
+                    )
+
+            return {
+                "field_id":    field_id,
+                "field_name":  field_name,
+                "context_id":  context_id,
+                "options":     created_options,
+                # Convenience: weight map for use in Backlog_prioritize.py
+                "weight_map":  self.SEVERITY_WEIGHT_MAP,
+            }
+
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error(f"Error creating severity custom field: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create custom field: {exc}"
+            )

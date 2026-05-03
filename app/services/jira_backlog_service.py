@@ -12,7 +12,7 @@ from app.schemas.backlog_schemas import BacklogItemCreate
 
 
 # Jira custom field ID for severity (configure per tenant if needed)
-SEVERITY_FIELD_ID = "customfield_10165"
+SEVERITY_FIELD_ID = "customfield_10041"
 
 
 class JiraBacklogService:
@@ -33,7 +33,21 @@ class JiraBacklogService:
             password=api_token,
             cloud=True
         )
-        logger.info(f"Jira client initialized for {jira_url}")
+        self.severity_field_id = SEVERITY_FIELD_ID
+        self._discover_severity_field()
+        logger.info(f"Jira client initialized for {jira_url}. Severity Field ID: {self.severity_field_id}")
+
+    def _discover_severity_field(self):
+        """Try to find the Severity field ID dynamically if it differs from hardcoded default"""
+        try:
+            fields = self.jira_client.get_all_fields()
+            for field in fields:
+                if field.get('name') == 'Severity':
+                    self.severity_field_id = field.get('id')
+                    logger.info(f"Dynamically discovered Severity field ID: {self.severity_field_id}")
+                    return
+        except Exception as e:
+            logger.warning(f"Could not discover Severity field dynamically: {e}. Using default {SEVERITY_FIELD_ID}")
     
     def create_issue(
         self,
@@ -97,9 +111,9 @@ class JiraBacklogService:
             
             # Add severity for bugs (capitalize first letter for Jira)
             if backlog_item.issue_type.value == "bug" and backlog_item.severity:
-                # Jira expects severity value in an array format: [{"value": "Critical"}]
+                # Jira Select List (single choice) expects {"value": "Critical"}
                 severity_formatted = backlog_item.severity.capitalize()
-                fields[SEVERITY_FIELD_ID] = [{"value": severity_formatted}]
+                fields[self.severity_field_id] = {"value": severity_formatted}
             
             logger.info(f"Creating Jira issue: {backlog_item.summary}")
             
