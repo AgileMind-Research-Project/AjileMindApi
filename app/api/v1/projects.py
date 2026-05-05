@@ -626,6 +626,26 @@ async def start_sprint(
             raise HTTPException(status_code=404, detail=f"Sprint {sprint_id} not found")
         sprint_name = sprint_row.get("sprint_name", f"Sprint {sprint_id}")
 
+        # ── 3b. Sync prioritized items to Jira first (creates missing issues & subtasks) ──
+        # This ensures that local item IDs like "AFV-262-SUB-1" are created in Jira
+        # and the database is updated with the actual Jira keys before we try to add them to the sprint
+        from app.services.backlog_service import BacklogService
+        try:
+            backlog_service = BacklogService(db)
+            project_key = project.get("key")  # Jira project key (e.g. "AFV")
+            
+            logger.info(f"Syncing prioritized items to Jira for project {project_id} before sprint start")
+            sync_result = await backlog_service.sync_priority_items_to_jira(
+                tenant_name=tenant_name,
+                project_id=project_id,
+                project_key=project_key,
+                jira_service=JiraService(db)
+            )
+            logger.info(f"Sync completed: {sync_result.get('synced_count', 0)} items synced")
+        except Exception as sync_err:
+            # Non-fatal: sync errors should not prevent sprint start
+            logger.warning(f"Non-fatal: Could not sync prioritized items to Jira: {sync_err}")
+
         # ── 4. Add issues to the Jira sprint ───────────────────────────────────
         task_ids: list = body.get("task_ids", []) or []
         jira_svc = JiraService(db)

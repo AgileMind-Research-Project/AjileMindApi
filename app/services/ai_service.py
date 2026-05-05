@@ -297,9 +297,9 @@ class AIService:
             "january":1,"february":2,"march":3,"april":4,"may":5,"june":6,
             "july":7,"august":8,"september":9,"october":10,"november":11,"december":12,
         }
-        # Range: "on leave from March 10 to March 11, 2026"
+        # Range: "on leave from March 10 to March 11, 2026" or "leave from 10 to 12 March"
         leave_range_re = re.compile(
-            r"(?:on\s+leave|leave)\s+from\s+(\w+)\s+(\d{1,2})\s+to\s+(?:\w+\s+)?(\d{1,2})(?:,?\s*(\d{4}))?",
+            r"(?:on\s+leave|leave)\s+from\s+(?:(\w+)\s+)?(\d{1,2})\s+to\s+(?:(\w+)\s+)?(\d{1,2})(?:,?\s*(\d{4}))?",
             re.IGNORECASE,
         )
         # Single day: "on leave March 11, 2026" or "on leave on March 11"
@@ -377,24 +377,29 @@ class AIService:
                     })
                 continue
 
-            # Leave — try range first, then single day
-            lr = leave_range_re.search(line)
-            if lr and speaker:
-                mon_num   = month_map.get(lr.group(1).lower(), 3)
-                start_day = int(lr.group(2))
-                end_day   = int(lr.group(3))
-                year      = int(lr.group(4)) if lr.group(4) else 2026
-                for day in range(start_day, end_day + 1):
-                    leaves.append({
-                        "developer_name": speaker,
-                        "leave_date":     f"{year}-{mon_num:02d}-{day:02d}",
-                        "leave_hours":    8,
-                        "leave_type":     "Full Day",
-                        "reason":         "On leave",
-                    })
-            else:
-                ls = leave_single_re.search(line)
-                if ls and speaker:
+            # Leave — check for multiple matches per line
+            for lr in leave_range_re.finditer(line):
+                if speaker:
+                    m1 = lr.group(1)
+                    d1 = int(lr.group(2))
+                    m2 = lr.group(3)
+                    d2 = int(lr.group(4))
+                    year = int(lr.group(5)) if lr.group(5) else 2026
+                    
+                    mon_num = month_map.get((m1 or m2 or "").lower(), 3)
+                    # Simple within-month range (handles 10 to 11)
+                    if d1 <= d2:
+                        for day in range(d1, d2 + 1):
+                            leaves.append({
+                                "developer_name": speaker,
+                                "leave_date":     f"{year}-{mon_num:02d}-{day:02d}",
+                                "leave_hours":    8,
+                                "leave_type":     "Full Day",
+                                "reason":         "On leave",
+                            })
+            
+            for ls in leave_single_re.finditer(line):
+                if speaker:
                     mon_num = month_map.get(ls.group(1).lower(), 3)
                     day     = int(ls.group(2))
                     year    = int(ls.group(3)) if ls.group(3) else 2026
@@ -493,34 +498,36 @@ class AIService:
         for bi, (speaker, block_lines) in enumerate(blocks):
             block_text = " ".join(block_lines)
 
-            # Leave detection — try range first, then single day
-            lr = leave_range_re.search(block_text)
-            if lr:
-                mon_num   = month_map.get(lr.group(1).lower(), 3)
-                start_day = int(lr.group(2))
-                end_day   = int(lr.group(3))
-                year      = int(lr.group(4)) if lr.group(4) else 2026
-                for day in range(start_day, end_day + 1):
-                    leaves.append({
-                        "developer_name": speaker,
-                        "leave_date":     f"{year}-{mon_num:02d}-{day:02d}",
-                        "leave_hours":    8,
-                        "leave_type":     "Full Day",
-                        "reason":         "On leave",
-                    })
-            else:
-                ls = leave_single_re.search(block_text)
-                if ls:
-                    mon_num = month_map.get(ls.group(1).lower(), 3)
-                    day     = int(ls.group(2))
-                    year    = int(ls.group(3)) if ls.group(3) else 2026
-                    leaves.append({
-                        "developer_name": speaker,
-                        "leave_date":     f"{year}-{mon_num:02d}-{day:02d}",
-                        "leave_hours":    8,
-                        "leave_type":     "Full Day",
-                        "reason":         "On leave",
-                    })
+            # Leave detection — check for multiple matches per block
+            for lr in leave_range_re.finditer(block_text):
+                m1 = lr.group(1)
+                d1 = int(lr.group(2))
+                m2 = lr.group(3)
+                d2 = int(lr.group(4))
+                year = int(lr.group(5)) if lr.group(5) else 2026
+                
+                mon_num = month_map.get((m1 or m2 or "").lower(), 3)
+                if d1 <= d2:
+                    for day in range(d1, d2 + 1):
+                        leaves.append({
+                            "developer_name": speaker,
+                            "leave_date":     f"{year}-{mon_num:02d}-{day:02d}",
+                            "leave_hours":    8,
+                            "leave_type":     "Full Day",
+                            "reason":         "On leave",
+                        })
+            
+            for ls in leave_single_re.finditer(block_text):
+                mon_num = month_map.get(ls.group(1).lower(), 3)
+                day     = int(ls.group(2))
+                year    = int(ls.group(3)) if ls.group(3) else 2026
+                leaves.append({
+                    "developer_name": speaker,
+                    "leave_date":     f"{year}-{mon_num:02d}-{day:02d}",
+                    "leave_hours":    8,
+                    "leave_type":     "Full Day",
+                    "reason":         "On leave",
+                })
 
             all_ids = expand_ids(block_text)
             if not all_ids:
@@ -778,7 +785,7 @@ class AIService:
         has_task_ids = bool(re.search(r"\b[A-Z]{1,10}-\d+\b", transcript))
 
         cat_check = (category or "").lower().replace(" ", "_").strip()
-        is_sprint_review = cat_check in ["sprint_review", "sprint_meeting"]
+        is_sprint_review = cat_check == "sprint_review"
 
         if is_sprint_review:
             task_rules = (
@@ -866,9 +873,11 @@ class AIService:
             output_format = (
                 "OUTPUT FORMAT (JSON only, no markdown, no explanation):\n"
                 '{"tasks":[{"task_id":"PROJ-1","summary":"...","description":"...","assignee":"real_person@domain.com","effort":8}],'
-                '"leave_info":[{"developer_name":"real_person@domain.com","leave_date":"YYYY-MM-DD",'
-                '"leave_hours":8,"leave_type":"Full Day","reason":"On leave"}]}\n\n'
-                "REMINDER: Replace real_person@domain.com and YYYY-MM-DD with ACTUAL values from the transcript.\n\n"
+                '"leave_info":['
+                '{"developer_name":"real_person@domain.com","leave_date":"2026-03-10","leave_hours":8,"leave_type":"Full Day","reason":"On leave"},'
+                '{"developer_name":"real_person@domain.com","leave_date":"2026-03-11","leave_hours":8,"leave_type":"Full Day","reason":"On leave"}'
+                "]}\n\n"
+                "REMINDER: If a range like 'March 10 to 11' is mentioned, you MUST output TWO separate entries in the 'leave_info' array.\n\n"
             )
 
         role = "sprint review" if is_sprint_review else "sprint planning"

@@ -947,39 +947,14 @@ class MeetingService:
     
     async def get_transcript(self, meeting_id: str, tenant_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
-        Get meeting transcript (Redis or MySQL)
+        Get meeting transcript (Prioritize MySQL, fallback to Redis)
         """
         try:
-            # 1. Try Redis first
             real_m_id = meeting_id
             if real_m_id.startswith("redis_"):
                 real_m_id = real_m_id.replace("redis_", "")
 
-            transcript_key = self._meeting_transcript_key(real_m_id)
-            transcript = self.redis.get_hash(transcript_key)
-            
-            if transcript:
-                logger.info(f"Found transcript for {real_m_id} in Redis")
-                
-                # Enrich with ID from MySQL if missing
-                if not transcript.get('id') and tenant_name:
-                    try:
-                        id_query = "SELECT id FROM `transcripts` WHERE meeting_id = %s LIMIT 1"
-                        id_res = await db.execute_query(id_query, (real_m_id,), schema=tenant_name, fetch_one=True)
-                        if id_res:
-                            transcript['id'] = id_res['id']
-                            # Update Redis cache with the ID
-                            self.redis.set_hash(transcript_key, transcript)
-                            logger.info(f"Enriched Redis transcript with MySQL ID {transcript['id']}")
-                    except Exception as e:
-                        logger.debug(f"Could not enrich Redis transcript with ID: {e}")
-
-                # Format dates for frontend
-                if transcript.get('stored_at'):
-                    transcript['stored_at'] = str(transcript['stored_at'])
-                return transcript
-
-            # 2. Try MySQL if tenant is known
+            # 1. Try MySQL first if tenant is known (Primary source of truth)
             if tenant_name:
                 logger.info(f"Searching transcript for {real_m_id} in MySQL (Tenant: {tenant_name})")
                 
@@ -1042,6 +1017,32 @@ class MeetingService:
                         'participant_count': len(participants)
                     }
                     return db_res
+
+            # 2. Fallback to Redis if not in MySQL or tenant unknown
+            transcript_key = self._meeting_transcript_key(real_m_id)
+            transcript = self.redis.get_hash(transcript_key)
+            
+            if transcript:
+                logger.info(f"Found transcript for {real_m_id} in Redis (Fallback)")
+                
+                # Enrich with ID from MySQL if missing (though we already checked above, 
+                # this handles cases where tenant_name was missing but we still want to try Redis)
+                if not transcript.get('id') and tenant_name:
+                    try:
+                        id_query = "SELECT id FROM `transcripts` WHERE meeting_id = %s LIMIT 1"
+                        id_res = await db.execute_query(id_query, (real_m_id,), schema=tenant_name, fetch_one=True)
+                        if id_res:
+                            transcript['id'] = id_res['id']
+                            # Update Redis cache with the ID
+                            self.redis.set_hash(transcript_key, transcript)
+                            logger.info(f"Enriched Redis transcript with MySQL ID {transcript['id']}")
+                    except Exception as e:
+                        logger.debug(f"Could not enrich Redis transcript with ID: {e}")
+
+                # Format dates for frontend
+                if transcript.get('stored_at'):
+                    transcript['stored_at'] = str(transcript['stored_at'])
+                return transcript
 
             return None
         except Exception as e:
