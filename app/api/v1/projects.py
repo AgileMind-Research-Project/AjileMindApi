@@ -9,9 +9,11 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from typing import Dict, Any, List
 
 from app.db.database import db, Database
+from app.db.repositories.project_repository import ProjectRepository
 from app.core.logger import logger
-from app.utils.jwt import get_current_user_from_token
+from app.utils.jwt import get_current_user_from_token, get_secret
 from app.services.project_service import ProjectService
+from app.services.sprint_service import SprintService
 from app.services.delay_calculation_service import DelayCalculationService
 from app.schemas.project_schemas import (
     CreateProjectRequest,
@@ -569,6 +571,53 @@ async def update_sprint_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/{project_id}/sprints/prepare", response_model=Dict[str, Any])
+async def prepare_next_sprint(
+    project_id: int,
+    db: Database = Depends(get_database),
+    current_user: Dict[str, Any] = Depends(get_current_user_from_token)
+):
+    """
+    Automatically identify the next future sprint for a project or create one in Jira.
+    Synchronizes the sprint to the local database and returns its details.
+    """
+    try:
+        tenant_name = current_user.get("tenant_name")
+        if not tenant_name:
+            raise HTTPException(status_code=400, detail="Tenant name not found in token")
+
+        # 1. Get project to find board_id
+        project_repo = ProjectRepository(db)
+        project = await project_repo.get_project_by_id(tenant_name, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+        board_id = project.get("board_id")
+        if not board_id:
+            logger.warning(f"Project {project_id} has no board_id - cannot prepare sprint.")
+            raise HTTPException(
+                status_code=400,
+                detail="This project does not have a linked Jira Board ID. Please set the Board ID in project settings before syncing."
+            )
+
+        # 2. Use SprintService to handle logic
+        sprint_service = SprintService(db)
+        next_sprint = await sprint_service.prepare_next_sprint(
+            tenant_name=tenant_name,
+            project_id=project_id,
+            board_id=board_id
+        )
+
+        return {
+            "success": True,
+            "message": "Next sprint identified and synchronized successfully.",
+            "data": next_sprint
+        }
+    except Exception as e:
+        logger.error(f"Error preparing next sprint for project {project_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/{project_id}/sprints/{sprint_id}/start", response_model=Dict[str, Any])
 async def start_sprint(
     project_id: int,
@@ -605,12 +654,36 @@ async def start_sprint(
 
         sprint_size_weeks = project.get("sprint_size")
         if not sprint_size_weeks or int(sprint_size_weeks) <= 0:
-            raise HTTPException(
-                status_code=422,
-                detail="Project sprint_size is not set or invalid. Set it before starting a sprint."
-            )
-        sprint_size_weeks = int(sprint_size_weeks)
+            logger.warning(f"Project {project_id} sprint_size is missing. Defaulting to 2 weeks.")
+            sprint_size_weeks = 2
+        else:
+            sprint_size_weeks = int(sprint_size_weeks)
         board_id = project.get("board_id")
+
+        # ── 1b. Auto-fix missing board_id ──────────────────────────────────────
+        jira_svc = JiraService(db)
+        if not board_id:
+            logger.info(f"Project {project_id} is missing board_id. Attempting to fetch from Jira...")
+            try:
+                credentials = await jira_svc.get_credentials(tenant_name)
+                if credentials:
+                    jira_url = credentials["jira_url"]
+                    secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
+                    secret_result = get_secret(secret_name)
+                    if secret_result.get("success"):
+                        fetched_board_id = await jira_svc.get_board_id(
+                            jira_url=jira_url,
+                            email=credentials["email"],
+                            api_token=secret_result.get("secret_value"),
+                            project_key=project.get("key")
+                        )
+                        if fetched_board_id:
+                            board_id = fetched_board_id
+                            # Update the database so we don't have to fetch it again
+                            await project_repo.update_project_board_id(tenant_name, project_id, board_id)
+                            logger.info(f"Successfully auto-recovered board_id {board_id} for project {project_id}")
+            except Exception as e:
+                logger.warning(f"Failed to auto-recover board_id for project {project_id}: {e}")
 
         # ── 2. Compute dates ────────────────────────────────────────────────────
         today = dt.date.today()
@@ -657,33 +730,69 @@ async def start_sprint(
                     tenant_name, sprint_id, task_ids
                 )
 
-            # ── 5. Activate the sprint in Jira ─────────────────────────────────
+            # 5. Activate the sprint in Jira
+            jira_error_details = None
             if board_id:
-                jira_started = await jira_svc.start_jira_sprint(
-                    tenant_name=tenant_name,
-                    sprint_id=sprint_id,
-                    sprint_name=sprint_name,
-                    board_id=board_id,
-                    start_date=jira_start,
-                    end_date=jira_end,
-                )
+                try:
+                    jira_started = await jira_svc.start_jira_sprint(
+                        tenant_name=tenant_name,
+                        sprint_id=sprint_id,
+                        sprint_name=sprint_name,
+                        board_id=board_id,
+                        start_date=jira_start,
+                        end_date=jira_end,
+                    )
+                    if not jira_started:
+                        jira_error_details = "Jira API refused to start the sprint (check for overlapping active sprints)."
+                except Exception as jira_err:
+                    jira_error_details = str(jira_err)
+                    logger.error(f"Jira sprint start error: {jira_err}")
             else:
-                logger.warning(
-                    f"Project {project_id} has no board_id — skipping Jira sprint activation."
-                )
-        except Exception as jira_err:
-            # Jira errors are non-fatal; still update the DB
-            logger.warning(f"Jira sprint start non-fatal error: {jira_err}")
+                jira_error_details = "Project has no linked board_id."
+                logger.warning(f"Project {project_id} has no board_id - skipping Jira activation.")
 
-        # ── 6. Update DB sprint row ─────────────────────────────────────────────
-        updated = await sprint_repo.start_sprint(tenant_name, sprint_id, sprint_size_weeks)
+            # 6. Update DB sprint row
+            updated_row = sprint_row
+            if jira_started:
+                updated_row = await sprint_repo.start_sprint(tenant_name, sprint_id, sprint_size_weeks)
+                logger.info(f"Sprint {sprint_id} started successfully in Jira and DB.")
 
-        logger.info(
-            f"Sprint {sprint_id} started: project={project_id}, "
-            f"sprint_size={sprint_size_weeks}w, start={today}, end={end_date_obj}, "
-            f"jira_started={jira_started}, issues_added={issues_added}"
-        )
-        return {"success": True, "data": updated, "jira_started": jira_started}
+                # ── 7. Auto-Prepare the NEXT sprint ──────
+                try:
+                    sprint_service = SprintService(db)
+                    logger.info(f"Auto-preparing the next future sprint for project {project_id}...")
+                    next_sprint_data = await sprint_service.prepare_next_sprint(
+                        tenant_name=tenant_name,
+                        project_id=project_id,
+                        board_id=board_id
+                    )
+                    if next_sprint_data:
+                        logger.info(f"Next sprint prepared: {next_sprint_data.get('name')} (ID: {next_sprint_data.get('id')})")
+                except Exception as next_err:
+                    # Non-fatal: don't fail the current start if prepare fails
+                    logger.warning(f"Could not auto-prepare next sprint: {next_err}")
+            else:
+                logger.warning(f"Sprint {sprint_id} NOT started in DB because Jira failed: {jira_error_details}")
+
+            return {
+                "success": jira_started,
+                "jira_started": jira_started,
+                "issues_added": issues_added,
+                "jira_error": jira_error_details,
+                "data": updated_row,
+                "next_sprint": next_sprint_data if 'next_sprint_data' in locals() else None
+            }
+        except Exception as e:
+            logger.error(f"Error in sprint issues/activation phase: {str(e)}")
+            # Fallback to current sprint row if activation fails
+            updated_row = sprint_row
+            return {
+                "success": False,
+                "jira_started": False,
+                "issues_added": issues_added,
+                "jira_error": str(e),
+                "data": updated_row
+            }
     except HTTPException:
         raise
     except Exception as e:
@@ -725,7 +834,7 @@ async def close_sprint(
             credentials = await jira_svc.get_credentials(tenant_name)
             if credentials:
                 import aiohttp, base64
-                from app.utils.secrets import get_secret
+                from app.utils.jwt import get_secret
                 jira_url = credentials["jira_url"]
                 email = credentials["email"]
                 secret_name = (

@@ -205,6 +205,8 @@ class AIService:
             )
 
         return {"tasks": unique_tasks, "leave_info": unique_leaves, "bugs": unique_bugs}
+
+    def _compress_transcript(self, transcript: str) -> str:
         """
         Extract only the lines relevant to TAM task assignments and leave info.
         For each line containing a TAM-XXX ID, include 4 lines before and 6 lines
@@ -611,6 +613,8 @@ class AIService:
                     })
 
         return {"tasks": tasks, "leave_info": leaves}
+
+    def _make_description(self, summary: str) -> str:
         """Generate a clean one-sentence description from a task summary."""
         s = summary.strip()
         w = s.lower()

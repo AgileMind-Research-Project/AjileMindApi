@@ -227,3 +227,45 @@ class SprintRepository:
         except Exception as e:
             logger.error(f"Error updating sprint status for sprint {sprint_id}: {e}")
             raise
+
+    async def log_sprint_event(
+        self,
+        tenant_name: str,
+        project_id: int,
+        event_type: str,
+        message: str,
+        sprint_id: Optional[int] = None,
+        details: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Record a sprint-related event in the activity logs.
+        """
+        try:
+            import json
+            
+            # Ensure table exists (minimal check, ideally handled by migrations)
+            create_table_query = """
+                CREATE TABLE IF NOT EXISTS `sprint_activity_logs` (
+                    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    `project_id` BIGINT NOT NULL,
+                    `sprint_id` BIGINT,
+                    `event_type` VARCHAR(50) NOT NULL,
+                    `message` TEXT,
+                    `details` JSON,
+                    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            """
+            await self.db.execute_query(create_table_query, commit=True, schema=tenant_name)
+
+            query = """
+                INSERT INTO sprint_activity_logs (project_id, sprint_id, event_type, message, details)
+                VALUES (%s, %s, %s, %s, %s)
+            """
+            await self.db.execute_query(
+                query,
+                (project_id, sprint_id, event_type, message, json.dumps(details) if details else None),
+                commit=True,
+                schema=tenant_name
+            )
+        except Exception as e:
+            logger.error(f"Error logging sprint event: {e}")

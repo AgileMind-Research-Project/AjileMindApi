@@ -1114,6 +1114,104 @@ class JiraService:
             logger.error(f"Error starting Jira sprint {sprint_id}: {exc}")
             return False
 
+    async def get_jira_sprints_by_board(
+        self,
+        jira_url: str,
+        email: str,
+        api_token: str,
+        board_id: int,
+        state: str = "future,active"
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch sprints for a specific board from Jira Agile API.
+        
+        Args:
+            state: Filter by state (comma-separated: e.g. "future,active,closed")
+        """
+        auth_b64 = base64.b64encode(f"{email}:{api_token}".encode("ascii")).decode("ascii")
+        headers = {
+            "Authorization": f"Basic {auth_b64}",
+            "Accept": "application/json",
+        }
+        params = {"state": state}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{jira_url}/rest/agile/1.0/board/{board_id}/sprint",
+                headers=headers,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("values", [])
+                else:
+                    body = await resp.text()
+                    logger.error(f"Failed to fetch Jira sprints for board {board_id} (HTTP {resp.status}): {body}")
+                    return []
+
+    async def create_jira_sprint(
+        self,
+        tenant_name: str,
+        board_id: int,
+        sprint_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Create a new sprint in Jira Cloud for a specific board.
+        
+        Args:
+            tenant_name: Tenant name to resolve credentials
+            board_id: The Jira board ID the sprint belongs to
+            sprint_name: Name of the new sprint (e.g. "Sprint 1")
+            
+        Returns:
+            The created sprint object (dict with id, name, self, etc.) or None if failed.
+        """
+        credentials = await self.get_credentials(tenant_name)
+        if not credentials:
+            return None
+
+        jira_url = credentials["jira_url"]
+        email = credentials["email"]
+        secret_name = f"tenant_{tenant_name}_jira_api_token_{jira_url.replace('https://','').replace('/','_')}"
+        secret_result = get_secret(secret_name)
+        
+        if not secret_result.get("success"):
+            return None
+            
+        api_token = secret_result.get("secret_value")
+        auth_b64 = base64.b64encode(f"{email}:{api_token}".encode("ascii")).decode("ascii")
+        headers = {
+            "Authorization": f"Basic {auth_b64}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        
+        payload = {
+            "name": sprint_name,
+            "originBoardId": board_id
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{jira_url}/rest/agile/1.0/sprint",
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status in [200, 201]:
+                        data = await resp.json()
+                        logger.info(f"Created new Jira sprint '{sprint_name}' (ID: {data.get('id')})")
+                        return data
+                    else:
+                        body = await resp.text()
+                        logger.error(f"Failed to create Jira sprint (HTTP {resp.status}): {body}")
+                        return None
+        except Exception as e:
+            logger.error(f"Error creating Jira sprint: {str(e)}")
+            return None
+
     async def get_issue_status(self, tenant_name: str, issue_key: str) -> Dict[str, Any]:
         """
         Get current status of a Jira issue.

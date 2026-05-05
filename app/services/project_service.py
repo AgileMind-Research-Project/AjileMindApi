@@ -12,6 +12,7 @@ from app.db.database import Database
 from app.db.repositories.project_repository import ProjectRepository
 from app.db.repositories.sprint_repository import SprintRepository
 from app.services.jira_service import JiraService
+from app.services.sprint_service import SprintService
 from app.core.logger import logger
 
 
@@ -23,6 +24,7 @@ class ProjectService:
         self.project_repo = ProjectRepository(db)
         self.sprint_repo = SprintRepository(db)
         self.jira_service = JiraService(db)
+        self.sprint_service = SprintService(db)
         from app.services.redis_chat_service import get_redis_chat_service
         self.chat_service = get_redis_chat_service()
     
@@ -158,153 +160,18 @@ class ProjectService:
             
             logger.info(f"Project saved to database successfully: {db_project}")
             
-            # Step 4: Create the first sprint (Sprint 1)
-            # The sprint table uses sprint_id (bigint, no AUTO_INCREMENT) as PK.
-            # sprint_id IS the Jira sprint ID, so we MUST fetch it from Jira first.
-            # We always attempt this for software projects (when board_id exists).
-            # sprint_size only affects the sprint end_date; default to 2 weeks if not given.
+            # Step 4: Create/Identify the first sprint
+            # We use the SprintService to ensure a future sprint exists in both Jira and DB.
             if board_id:
                 try:
-                    effective_sprint_size = sprint_size if sprint_size else 2
-                    sprint_end_date = start_date + timedelta(weeks=effective_sprint_size)
-
-                    # Step 4a: Resolve Jira credentials for the Agile API call
-                    jira_sprint_id   = None
-                    sprint_1_in_jira = None   # will hold the full sprint dict from Jira
-                    try:
-                        credentials = await self.jira_service.get_credentials(tenant_name)
-                        if credentials:
-                            from app.utils.jwt import get_secret
-                            import asyncio
-                            jira_url = credentials["jira_url"]
-                            email    = credentials["email"]
-                            secret_name = (
-                                f"tenant_{tenant_name}_jira_api_token_"
-                                f"{jira_url.replace('https://','').replace('/','_')}"
-                            )
-                            secret_result = get_secret(secret_name)
-                            api_token = (
-                                secret_result.get("secret_value")
-                                if secret_result.get("success") else None
-                            )
-
-                            if api_token:
-                                # Retry loop: Jira provisions Sprint 1 asynchronously,
-                                # so it may not appear immediately after project creation.
-                                max_sprint_retries = 4
-                                sprint_retry_wait  = 3.0  # seconds
-
-                                for sprint_attempt in range(1, max_sprint_retries + 1):
-                                    jira_sprints = await self.jira_service.get_jira_sprints_by_board(
-                                        jira_url=jira_url,
-                                        email=email,
-                                        api_token=api_token,
-                                        board_id=board_id,
-                                        state="future,active,closed"
-                                    )
-
-                                    if jira_sprints:
-                                        # 1st priority: exact name match "Sprint 1"
-                                        sprint_1_in_jira = next(
-                                            (s for s in jira_sprints if s.get("name") == "Sprint 1"),
-                                            None
-                                        )
-                                        # 2nd priority: take the first sprint on the board
-                                        if not sprint_1_in_jira:
-                                            sprint_1_in_jira = jira_sprints[0]
-                                            logger.warning(
-                                                f"'Sprint 1' not found by name on board {board_id}. "
-                                                f"Using first sprint: {sprint_1_in_jira.get('name')} "
-                                                f"(id={sprint_1_in_jira.get('id')})"
-                                            )
-
-                                        jira_sprint_id = sprint_1_in_jira["id"]
-                                        logger.info(
-                                            f"Fetched Jira sprint ID={jira_sprint_id} "
-                                            f"('{sprint_1_in_jira.get('name')}') "
-                                            f"on board {board_id} "
-                                            f"(attempt {sprint_attempt}/{max_sprint_retries})"
-                                        )
-                                        break  # success – exit retry loop
-                                    else:
-                                        # Jira hasn't provisioned the sprint yet
-                                        logger.warning(
-                                            f"No sprints found on board {board_id} yet "
-                                            f"(attempt {sprint_attempt}/{max_sprint_retries}). "
-                                            f"Waiting {sprint_retry_wait}s..."
-                                        )
-                                        if sprint_attempt < max_sprint_retries:
-                                            await asyncio.sleep(sprint_retry_wait)
-
-                                if not jira_sprint_id:
-                                    logger.error(
-                                        f"Sprint not found on board {board_id} after "
-                                        f"{max_sprint_retries} attempts. "
-                                        f"Local sprint will be skipped."
-                                    )
-                    except Exception as jira_sprint_err:
-                        logger.error(
-                            f"Could not fetch Jira sprint ID for project "
-                            f"{project_id}: {jira_sprint_err}"
-                        )
-
-                    # Step 4b: Insert the sprint row using real data from Jira
-                    # sprint_id has no AUTO_INCREMENT — Jira ID is the PK.
-                    if jira_sprint_id and sprint_1_in_jira:
-
-                        # Map Jira state (lowercase) → our DB enum (title case)
-                        jira_state_map = {
-                            "future": "Future",
-                            "active": "Active",
-                            "closed": "Closed",
-                        }
-                        raw_state    = sprint_1_in_jira.get("state", "future").lower()
-                        sprint_state = jira_state_map.get(raw_state, "Future")
-
-                        # Use Jira's sprint name (e.g. "Sprint 1") — not hardcoded
-                        real_sprint_name = sprint_1_in_jira.get("name", "Sprint 1")
-
-                        # Use Jira's dates when set; fall back to our calculated values
-                        from datetime import datetime as _dt
-
-                        def _parse_jira_date(val):
-                            """Parse ISO-8601 date string from Jira → date object, or None."""
-                            if not val:
-                                return None
-                            try:
-                                return _dt.fromisoformat(
-                                    val.replace("Z", "+00:00")
-                                ).date()
-                            except Exception:
-                                return None
-
-                        jira_start = _parse_jira_date(sprint_1_in_jira.get("startDate"))
-                        jira_end   = _parse_jira_date(sprint_1_in_jira.get("endDate"))
-
-                        real_start = jira_start or start_date
-                        real_end   = jira_end   or sprint_end_date
-
-                        await self.sprint_repo.create_sprint(
-                            tenant_name=tenant_name,
-                            sprint_id=jira_sprint_id,     # Jira ID → PK (required)
-                            project_id=project_id,
-                            sprint_name=real_sprint_name, # real name from Jira
-                            start_date=real_start,        # Jira start date (or fallback)
-                            end_date=real_end,            # Jira end date   (or fallback)
-                            sprint_status=sprint_state    # mapped from Jira state
-                        )
-                        logger.info(
-                            f"Sprint '{real_sprint_name}' (id={jira_sprint_id}, "
-                            f"state={sprint_state}) saved for project {project_id}"
-                        )
-                    else:
-                        logger.warning(
-                            f"Skipped local Sprint 1 creation for project {project_id} "
-                            f"because Jira sprint ID could not be resolved."
-                        )
-
+                    await self.sprint_service.prepare_next_sprint(
+                        tenant_name=tenant_name,
+                        project_id=project_id,
+                        board_id=board_id
+                    )
+                    logger.info(f"Initial sprint successfully prepared for project {project_id}")
                 except Exception as sprint_err:
-                    logger.error(f"Project created but failed to create first sprint: {str(sprint_err)}")
+                    logger.error(f"Project created but failed to prepare first sprint: {str(sprint_err)}")
                     # Non-fatal – project itself is saved successfully
 
             # Step 5: Create a default chat channel for the project

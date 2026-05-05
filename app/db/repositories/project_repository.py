@@ -600,3 +600,18 @@ class ProjectRepository:
         except Exception as e:
             logger.error(f"Error updating next sprint date: {str(e)}")
             return None
+
+    async def update_project_board_id(
+        self,
+        tenant_name: str,
+        project_id: int,
+        board_id: int
+    ) -> bool:
+        """Update the board_id for a project."""
+        try:
+            query = "UPDATE projects SET board_id = %s, updated_at = NOW() WHERE project_id = %s"
+            await self.db.execute_query(query, (board_id, project_id), commit=True, schema=tenant_name)
+            return True
+        except Exception as e:
+            logger.error(f"Error updating board_id for project {project_id}: {e}")
+            return False

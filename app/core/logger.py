@@ -173,6 +173,15 @@ def setup_logger(
             backupCount=30  # Keep 30 days
         )
         daily_log_handler.setLevel(logging.INFO)
+
+        # Specialized Sprint Event log
+        sprint_log_handler = TimedRotatingFileHandler(
+            LOG_DIR / "sprint_events.log",
+            when="midnight",
+            interval=1,
+            backupCount=90  # Keep 90 days for audit
+        )
+        sprint_log_handler.setLevel(logging.INFO)
         
         # Set formatters
         if json_format:
@@ -186,10 +195,16 @@ def setup_logger(
         app_log_handler.setFormatter(formatter)
         error_log_handler.setFormatter(formatter)
         daily_log_handler.setFormatter(formatter)
+        sprint_log_handler.setFormatter(formatter)
         
         logger.addHandler(app_log_handler)
         logger.addHandler(error_log_handler)
         logger.addHandler(daily_log_handler)
+
+        # Create a dedicated logger for sprints and add the handler
+        sprint_logger = logging.getLogger("agile_mind.sprint")
+        sprint_logger.addHandler(sprint_log_handler)
+        sprint_logger.propagate = False # Don't send to app.log to keep it clean
     
     return logger
 

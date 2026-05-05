@@ -34,7 +34,7 @@ class TemplateService:
                     sections LONGTEXT NOT NULL,
                     styles LONGTEXT NULL,
                     is_default BOOLEAN DEFAULT FALSE,
-                    created_by BIGINT NULL,
+                    created_by VARCHAR(50) NULL,
                     tenant_schema VARCHAR(255) NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -59,7 +59,7 @@ class TemplateService:
         self,
         template_data: TemplateCreate,
         tenant_schema: str,
-        created_by: Optional[int] = None
+        created_by: Optional[str] = None
     ) -> TemplateResponse:
         """Create a new report template"""
         try:

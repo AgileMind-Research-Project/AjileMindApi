@@ -1013,7 +1013,7 @@ async def sync_review_tasks(
                     credentials = await jira_service.get_credentials(tenant_name)
                     if credentials:
                         import aiohttp, base64
-                        from app.utils.secrets import get_secret
+                        from app.utils.jwt import get_secret
                         jira_url = credentials["jira_url"]
                         email = credentials["email"]
                         secret_name = (

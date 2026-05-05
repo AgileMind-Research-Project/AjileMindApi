@@ -12,14 +12,6 @@ from app.core.logger import logger, log_database_query
 import time
 
 
-class QueryResult(int):
-    """Custom result object that behaves like an int (lastrowid) but has a rowcount attribute"""
-    def __new__(cls, lastrowid, rowcount):
-        obj = super(QueryResult, cls).__new__(cls, lastrowid or 0)
-        obj.lastrowid = lastrowid
-        obj.rowcount = rowcount
-        return obj
-
 class Database:
     """Database connection manager"""
     
@@ -109,7 +101,7 @@ class Database:
                     elif fetch_all:
                         result = await cursor.fetchall()
                     elif commit:
-                        result = QueryResult(cursor.lastrowid, cursor.rowcount)
+                        result = cursor.lastrowid
                     else:
                         result = cursor
                     
@@ -169,6 +161,57 @@ class Database:
                     
         except Exception as e:
             logger.exception(f"Batch query failed: {e}")
+            raise
+
+    async def execute_transaction_block(self, ops: List[Dict[str, Any]], schema: str = None) -> bool:
+        """
+        Execute a sequence of queries as a single transaction on one connection.
+
+        ops: list of dicts where each dict is either:
+          {"query": "SQL...", "params": (..optional..)}
+        or a simple control op: {"query": "SET FOREIGN_KEY_CHECKS=0"}
+
+        Returns True on success, raises on failure (and rolls back).
+        """
+        start_time = time.time()
+        if not ops:
+            return True
+
+        try:
+            async with self.get_connection() as conn:
+                # Switch schema if specified
+                if schema:
+                    async with conn.cursor() as temp_cursor:
+                        await temp_cursor.execute(f"USE `{schema}`")
+
+                async with conn.cursor() as cursor:
+                    # Begin explicit transaction (aiomysql uses autocommit=False by default)
+                    try:
+                        for op in ops:
+                            q = op.get("query") if isinstance(op, dict) else None
+                            params = op.get("params") if isinstance(op, dict) else None
+                            if q is None:
+                                continue
+                            if params is not None:
+                                await cursor.execute(q, params)
+                            else:
+                                await cursor.execute(q)
+
+                        await conn.commit()
+                        duration_ms = (time.time() - start_time) * 1000
+                        log_database_query(query="; ".join([str(op.get('query')) for op in ops if isinstance(op, dict)]), duration_ms=duration_ms, rows_affected=cursor.rowcount)
+                        return True
+
+                    except Exception as e:
+                        try:
+                            await conn.rollback()
+                        except Exception:
+                            pass
+                        logger.exception(f"Transaction block failed: {e}")
+                        raise
+
+        except Exception as e:
+            logger.exception(f"execute_transaction_block error: {e}")
             raise
 
 
