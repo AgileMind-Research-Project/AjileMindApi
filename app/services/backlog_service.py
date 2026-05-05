@@ -501,6 +501,7 @@ class BacklogService:
             
             created_parents = []
             synced_count = 0
+            parent_rank_map = {}
             
             if parents:
                 for parent in parents:
@@ -556,6 +557,7 @@ class BacklogService:
                             logger.info(f"Assigned parent {new_jira_key} to sprint {future_sprint_id}")
 
                         created_parents.append(new_jira_key)
+                        parent_rank_map[new_jira_key] = parent.get('rank')
                         synced_count += 1
                             
                     except Exception as e:
@@ -623,14 +625,23 @@ class BacklogService:
                                     commit=True,
                                     schema=tenant_name
                                 )
-                                # Also check if subtask is in priority table (unlikely but possible based on user request)
+                                # Ensure subtask is in priority table with parent's rank and sprint_id
+                                parent_rank = parent_rank_map.get(parent_key)
+                                
                                 await self.db.execute_query(
-                                    "UPDATE project_backlog_priority SET sprint_id = %s WHERE backlog_id = %s",
-                                    (future_sprint_id, new_sub_key),
+                                    """
+                                    INSERT INTO project_backlog_priority (project_id, backlog_id, rank, sprint_id)
+                                    VALUES (%s, %s, %s, %s)
+                                    ON DUPLICATE KEY UPDATE
+                                        rank = VALUES(rank),
+                                        sprint_id = VALUES(sprint_id),
+                                        updated_at = NOW()
+                                    """,
+                                    (project_id, new_sub_key, parent_rank, future_sprint_id),
                                     commit=True,
                                     schema=tenant_name
                                 )
-                                logger.info(f"Assigned subtask {new_sub_key} to sprint {future_sprint_id}")
+                                logger.info(f"Assigned and prioritized subtask {new_sub_key} to sprint {future_sprint_id}")
 
                             synced_count += 1
                             
