@@ -535,7 +535,8 @@ class BacklogService:
                             # Rename local item and mark as is_jira
                             if parent_id != new_jira_key:
                                 await self.backlog_repo.rename_backlog_item(tenant_name, parent_id, new_jira_key)
-                                await self.backlog_repo.update_task_jira_info(tenant_name, new_jira_key, new_jira_key)
+                                # Update children and task Jira info: pass old id then new key
+                                await self.backlog_repo.update_task_jira_info(tenant_name, parent_id, new_jira_key)
                         
                         # Update sprint_id in both tables if sprint exists
                         if future_sprint_id:
@@ -613,7 +614,8 @@ class BacklogService:
                                 
                                 if sub_id != new_sub_key:
                                     await self.backlog_repo.rename_backlog_item(tenant_name, sub_id, new_sub_key)
-                                    await self.backlog_repo.update_task_jira_info(tenant_name, new_sub_key, new_sub_key)
+                                    # Ensure children (if any) and the subtask record are updated correctly
+                                    await self.backlog_repo.update_task_jira_info(tenant_name, sub_id, new_sub_key)
                             
                             # Assign subtask to sprint
                             if future_sprint_id:

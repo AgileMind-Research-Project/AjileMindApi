@@ -8,6 +8,7 @@ Includes tenant isolation for multi-tenant chat system.
 import redis
 import json
 import logging
+import os
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from uuid import uuid4
@@ -20,24 +21,31 @@ class RedisChatClient:
     
     def __init__(
         self,
-        host: str = 'redis-12930.crce182.ap-south-1-1.ec2.cloud.redislabs.com',
-        port: int = 12930,
-        password: str = 'psPSNesjowZCqBOyeuoLPhy6ql4a29t9',
-        username: str = 'default',
-        db: int = 0,
+        host: str = None,
+        port: int = None,
+        password: str = None,
+        username: str = None,
+        db: int = None,
         decode_responses: bool = True
     ):
         """
         Initialize Redis client for chat
         
         Args:
-            host: Redis host
-            port: Redis port
-            password: Redis password
-            username: Redis username
-            db: Redis database number
+            host: Redis host (defaults to REDIS_HOST env var)
+            port: Redis port (defaults to REDIS_PORT env var)
+            password: Redis password (defaults to REDIS_PASSWORD env var)
+            username: Redis username (defaults to REDIS_USERNAME env var)
+            db: Redis database number (defaults to REDIS_DB env var)
             decode_responses: Auto-decode responses to strings
         """
+        # Use environment variables with fallbacks
+        host = host or os.getenv('REDIS_HOST', 'localhost')
+        port = port or int(os.getenv('REDIS_PORT', 6379))
+        password = password or os.getenv('REDIS_PASSWORD', '')
+        username = username or os.getenv('REDIS_USERNAME', 'default')
+        db = db if db is not None else int(os.getenv('REDIS_DB', 0))
+        
         try:
             self.client = redis.Redis(
                 host=host,
