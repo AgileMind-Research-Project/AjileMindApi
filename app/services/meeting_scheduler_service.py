@@ -94,10 +94,13 @@ class MeetingSchedulerService:
                 if not table_res:
                     continue
 
+                has_sprint_id = await self._meetings_has_column(tenant, "sprint_id")
+                sprint_select = "sprint_id" if has_sprint_id else "NULL AS sprint_id"
+
                 # 2. Update status and Finalize (move to ended and save transcript)
                 # Select meetings that SHOULD be ended but are still SCHEDULED or ONGOING
                 to_end_query = f"""
-                    SELECT meeting_id, project_id, sprint_id, title
+                    SELECT meeting_id, project_id, {sprint_select}, title
                     FROM `{tenant}`.`meetings`
                     WHERE status IN ('SCHEDULED', 'ONGOING')
                     AND (meeting_date < %s OR (meeting_date = %s AND end_time <= %s))
@@ -121,7 +124,7 @@ class MeetingSchedulerService:
 
                 # 3. Query scheduled meetings for reminder notifications
                 query = f"""
-                    SELECT meeting_id, project_id, sprint_id, title, start_time, meeting_link, status
+                    SELECT meeting_id, project_id, {sprint_select}, title, start_time, meeting_link, status
                     FROM `{tenant}`.`meetings`
                     WHERE meeting_date = %s
                     AND status IN ('SCHEDULED', 'ONGOING')
@@ -224,6 +227,23 @@ class MeetingSchedulerService:
         except Exception as e:
             logger.error(f"Tenant discovery failed: {e}")
             return []
+
+    async def _meetings_has_column(self, tenant: str, column_name: str) -> bool:
+        """Check if a tenant's meetings table has a given column."""
+        try:
+            column_query = """
+                SELECT 1
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s
+                  AND TABLE_NAME = 'meetings'
+                  AND COLUMN_NAME = %s
+                LIMIT 1
+            """
+            result = await db.execute_query(column_query, (tenant, column_name), fetch_all=True)
+            return bool(result)
+        except Exception as e:
+            logger.warning(f"Column check failed for {tenant}.meetings.{column_name}: {e}")
+            return False
 
     async def _finalize_meeting(self, tenant: str, meeting_data: Dict[str, Any]):
         """Mark as ENDED in SQL/Redis and attempt to save transcript"""
