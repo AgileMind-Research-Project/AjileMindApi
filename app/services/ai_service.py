@@ -135,9 +135,8 @@ class AIService:
         # ── Step 3: OpenAI fallback ───────────────────────────────────────────
         logger.info("[STEP 3] Trying OpenAI cloud fallback ...")
         ai_ok = (
-            self.openai_api_key
-            and "your-openai-key" not in self.openai_api_key
-            # and self.openai_api_key != "sk-your-openai-key-here"
+            self.ai
+            and self.ai
         )
         if not ai_ok:
             logger.error(
