@@ -268,9 +268,9 @@ class AIService:
         # ── Compiled patterns ──────────────────────────────────────────────────
 
         # Timestamp + email (most specific — try first)
-        # Matches any email: any local part, any domain, any TLD
+        # Handles: [10:00] email@domain.com, [10:00] [email@domain.com](mailto:...), [10:00] [email@domain.com]
         ts_email_re = re.compile(
-            r"\[?\d{1,2}:\d{2}\]?\s+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})",
+            r"\[?\d{1,2}:\d{2}\]?\s+(?:\[)?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})(?:\])?(?:\(mailto:[^)]+\))?",
             re.IGNORECASE,
         )
         # Timestamp + any display name (generic fallback)
@@ -278,9 +278,9 @@ class AIService:
             r"^\[?\d{1,2}:\d{2}\]?\s+(.+?)(?:\s+\([A-Z_]{2,20}\))?\s*$",
             re.IGNORECASE,
         )
-        # Bare "email" or "email (ROLE)" on its own line
+        # Bare "email" or "email (ROLE)" on its own line (handles markdown links and bullets/dashes)
         bare_email_re = re.compile(
-            r"^([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\s*(?:\(\w+\))?\s*$",
+            r"^(?:[-*]\s+)?(?:\[)?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})(?:\])?(?:\(mailto:[^)]+\))?\s*(?:\(\w+\))?\s*$",
             re.IGNORECASE,
         )
         # Role-only line, e.g. " (DEVELOPER)"
@@ -435,23 +435,23 @@ class AIService:
         leaves:   list = []
         seen_ids: set  = set()
 
-        task_id_re  = re.compile(r"\b([A-Z]{1,10}-\d+)\b", re.IGNORECASE)
+        task_id_re  = re.compile(r"\b([A-Z]{1,10}-\d+(?:-[A-Z0-9-]+)?)\b", re.IGNORECASE)
         # Comma-continuation: 'TAM-223, 222, 224, 225' or 'TAM-75, 76, 77'
-        short_id_re = re.compile(r"\b([A-Z]{1,10})-(\d+)(?:\s*,\s*(\d+))+", re.IGNORECASE)
+        short_id_re = re.compile(r"\b([A-Z]{1,10})-(\d+)(?:\s*(?:,|\band\b)\s*(\d+))+", re.IGNORECASE)
         effort_re   = re.compile(
             r"(\d+(?:\.\d+)?)\s*(hours?|h\b|story\s*points?|sp\b|days?)",
             re.IGNORECASE,
         )
         accept_re   = re.compile(
-            r"\b(yes|sure|can do|i can|i'll|i will|will do|ok\b|okay|absolutely|definitely)\b",
+            r"\b(yes|sure|can do|i can|i'll|i will|will do|ok\b|okay|absolutely|definitely|complete|completed|finish|finished|resolved|closed|done)\b",
             re.IGNORECASE,
         )
-        self_re     = re.compile(r"\b(i will|i'll|i can|i am going to|i'm going to)\b", re.IGNORECASE)
-        bare_email_re = re.compile(r"^([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\s*(?:\([A-Z_]+\))?\s*$", re.IGNORECASE)
-        ts_email_re   = re.compile(r"^\[?\d{1,2}:\d{2}\]?\s+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})", re.IGNORECASE)
-        # Range: "on leave from March 10 to March 11, 2026"
+        self_re     = re.compile(r"\b(i will|i'll|i can|i am going to|i'm going to|my first task|my next task|i worked on|i handled|i improved|i implemented|i also worked)\b", re.IGNORECASE)
+        bare_email_re = re.compile(r"^(?:\*\s+)?(?:\[)?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})(?:\])?(?:\(mailto:[^)]+\))?\s*(?:\([A-Z_]+\))?\s*$", re.IGNORECASE)
+        ts_email_re   = re.compile(r"^\[?\d{1,2}:\d{2}\]?\s+(?:\[)?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})", re.IGNORECASE)
+        # Range: "on leave from May 10 to May 11, 2026" or "leave from 10 to 12 May"
         leave_range_re = re.compile(
-            r"(?:on\s+leave|leave)\s+from\s+(\w+)\s+(\d{1,2})\s+to\s+(?:\w+\s+)?(\d{1,2})(?:,?\s*(\d{4}))?",
+            r"(?:on\s+leave|leave)\s+from\s+(?:(\w+)\s+)?(\d{1,2})\s+to\s+(?:(\w+)\s+)?(\d{1,2})(?:,?\s*(\d{4}))?",
             re.IGNORECASE,
         )
         # Single day: "on leave March 11, 2026" or "on leave on March 11"
@@ -789,7 +789,9 @@ class AIService:
         has_task_ids = bool(re.search(r"\b[A-Z]{1,10}-\d+\b", transcript))
 
         cat_check = (category or "").lower().replace(" ", "_").strip()
-        is_sprint_review = cat_check == "sprint_review"
+        # If it's a generic 'sprint_meeting', check if the transcript mentions 'Planning' in the header
+        is_planning_content = "planning" in transcript.lower()[:500]
+        is_sprint_review = (cat_check == "sprint_review") or (cat_check == "sprint_meeting" and not is_planning_content)
 
         if is_sprint_review:
             task_rules = (
