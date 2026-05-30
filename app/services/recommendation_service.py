@@ -66,13 +66,8 @@ OUTPUT REQUIREMENTS:
         
         ⚠️ 100% AI-ONLY - NO HARDCODED FALLBACK RULES!
         
-        This method ONLY uses Ollama LLM (via LangChain) to generate recommendations.
+        This method uses the configured LLM provider to generate recommendations.
         If the LLM is unavailable, it returns an empty list.
-        
-        Requirements:
-        - Ollama must be running
-        - AI model (llama3.2) must be downloaded
-        - LangChain packages must be installed
         
         Args:
             risk_type: The type of risk (e.g., 'uncompleted_tasks', 'detected_bugs')
@@ -94,7 +89,7 @@ OUTPUT REQUIREMENTS:
                 return []
             
             # USE AI TO GENERATE RECOMMENDATIONS
-            print(f"🤖 Using AI (Ollama + Llama3.2) to generate recommendations for {risk_type}")
+            print(f"🤖 Using AI (LLM provider) to generate recommendations for {risk_type}")
             
             llm_recommendations = await llm_service.generate_recommendations(
                 risk_type=risk_type,

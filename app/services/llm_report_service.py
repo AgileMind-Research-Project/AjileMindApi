@@ -1,13 +1,13 @@
 """
 LLM Report Service
 
-Service for generating AI reports using LLaMA 3.2 via Ollama.
+Service for generating AI reports using OpenAI.
 """
 
-from langchain_ollama import OllamaLLM
 from app.core.config import settings
 from app.core.logger import logger
 from app.schemas.report import DailyStandupReport, SprintMeetingReport, RetrospectiveReport, BrainstormingMeetingReport
+from app.services.llm_utils import LLMFactory
 from typing import Dict, Any, Union, List
 import json
 import re
@@ -17,20 +17,65 @@ class LLMReportService:
     """Service for generating reports using LLM"""
     
     def __init__(self):
-        """Initialize Ollama LLM"""
+        """Initialize OpenAI LLM"""
         try:
-            ollama_base_url = f"{settings.OLLAMA_HOST}:{settings.OLLAMA_PORT}"
-            self.llm = OllamaLLM(
-                base_url=ollama_base_url,
-                model=settings.OLLAMA_MODEL,
-                temperature=0.3,  # Lower temperature for structured output
-                num_predict=6000
-            )
-            self.available = True
-            logger.info(f"LLM Report Service initialized with {settings.OLLAMA_MODEL}")
+            if (settings.LLM_PROVIDER or "").strip().lower() != "openai":
+                logger.warning("LLM_PROVIDER is not openai; forcing OpenAI for report generation.")
+
+            self.llm = LLMFactory.create_openai_llm()
+            if not self.llm:
+                self.llm = self._create_openai_fallback()
+
+            self.available = bool(self.llm)
+            if self.available:
+                logger.info(f"LLM Report Service initialized with {settings.OPENAI_MODEL}")
+            else:
+                logger.error("OpenAI LLM is not available for report generation.")
         except Exception as e:
             logger.error(f"Error initializing LLM Report Service: {e}")
             self.available = False
+
+    def _create_openai_fallback(self):
+        """Create a minimal OpenAI client wrapper if LangChain isn't available."""
+        api_key = settings.OPENAI_API_KEY
+        if not api_key or api_key == "sk-your-openai-key-here":
+            logger.error("OPENAI_API_KEY not configured for report generation.")
+            return None
+
+        try:
+            from openai import OpenAI
+        except Exception as e:
+            logger.error(f"OpenAI SDK not available: {e}")
+            return None
+
+        model = settings.OPENAI_MODEL or "gpt-4"
+        temperature = float(settings.OPENAI_TEMPERATURE or 0.3)
+        max_tokens = int(settings.OPENAI_MAX_TOKENS or 2000)
+
+        class _OpenAIInvoker:
+            def __init__(self, client, model_name, temp, max_out):
+                self._client = client
+                self._model = model_name
+                self._temp = temp
+                self._max_out = max_out
+
+            def invoke(self, prompt: str) -> str:
+                response = self._client.chat.completions.create(
+                    model=self._model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a meeting analyst. Output ONLY valid JSON.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=self._temp,
+                    max_tokens=self._max_out,
+                )
+                return response.choices[0].message.content or ""
+
+        client = OpenAI(api_key=api_key)
+        return _OpenAIInvoker(client, model, temperature, max_tokens)
     
     def _extract_json_from_response(self, response: str) -> Dict[str, Any]:
         """Extract JSON from LLM response with robust parsing"""
@@ -456,10 +501,13 @@ JSON Response:
             
             # Normalize next_steps: LLM may return plain strings instead of ActionItem objects
             if 'next_steps' in report_data and report_data['next_steps']:
-                report_data['next_steps'] = [
-                    s if isinstance(s, dict) else {'task': str(s)}
-                    for s in report_data['next_steps']
-                ]
+                normalized_steps = []
+                for step in report_data['next_steps']:
+                    step_dict = step if isinstance(step, dict) else {'task': str(step)}
+                    if 'due_date' in step_dict and step_dict['due_date'] is not None:
+                        step_dict['due_date'] = str(step_dict['due_date'])
+                    normalized_steps.append(step_dict)
+                report_data['next_steps'] = normalized_steps
             
             # Normalize ideas_generated: LLM may return plain strings
             if 'ideas_generated' in report_data and report_data['ideas_generated']:

@@ -1,43 +1,46 @@
 ﻿"""
-LLM Service for AI-Powered Recommendations using Ollama + LangChain
+LLM Service for AI-Powered Recommendations using Ollama or OpenAI.
 """
 from typing import Dict, Any, List, Optional
-from langchain_ollama import OllamaLLM
-from langchain_core.prompts import PromptTemplate
 import json
+
+import aiohttp
+
+from app.core.config import settings
 
 
 class LLMRecommendationService:
     """
-    Service for generating AI-powered recommendations using local Ollama LLM.
+    Service for generating AI-powered recommendations using the configured LLM provider.
     No hardcoded rules - all recommendations are generated dynamically by AI.
     """
     
     def __init__(self, model_name: str = "llama3.2", base_url: str = "http://localhost:11434"):
         """
-        Initialize LLM service with Ollama.
+        Initialize the LLM service using the configured provider.
         
         Args:
             model_name: Ollama model to use (llama3.2, mistral, codellama, etc.)
             base_url: Ollama API endpoint
         """
-        self.model_name = model_name
+        self.provider = "openai"
+        self.model_name = settings.OPENAI_MODEL
         self.base_url = base_url
         self.llm = None
         self._initialize_llm()
     
     def _initialize_llm(self):
-        """Initialize the Ollama LLM connection"""
+        """Initialize the configured LLM connection"""
         try:
-            self.llm = OllamaLLM(
-                model=self.model_name,
-                base_url=self.base_url,
-                temperature=0.7,  # Creative but not random
-                num_predict=500,  # Max tokens per response
-            )
-            print(f"âœ… LLM Service initialized with {self.model_name}")
+            if not settings.OPENAI_API_KEY or settings.OPENAI_API_KEY == "sk-your-openai-key-here":
+                print("WARNING: OPENAI_API_KEY is not configured")
+                self.llm = None
+                return
+
+            self.llm = True
+            print(f"LLM Service initialized with OpenAI model {self.model_name}")
         except Exception as e:
-            print(f"âš ï¸ Failed to initialize LLM: {e}")
+            print(f"WARNING: Failed to initialize LLM: {e}")
             print("   Recommendations will fall back to rule-based system")
             self.llm = None
     
@@ -213,9 +216,41 @@ Generate 3-5 specific, actionable recommendations to mitigate this risk."""
     async def _call_llm(self, prompt: str) -> str:
         """Call the LLM and get response"""
         try:
-            # Ollama is synchronous, but we wrap in async context
-            response = self.llm.invoke(prompt)
-            return response
+            if self.provider == "openai":
+                headers = {
+                    "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                }
+                body = {
+                    "model": self.model_name,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are an expert Agile project management consultant. "
+                                "Return only the recommendation text as a numbered list."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": settings.OPENAI_TEMPERATURE or 0.7,
+                    "max_tokens": settings.OPENAI_MAX_TOKENS or 2000,
+                }
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        "https://api.openai.com/v1/chat/completions",
+                        headers=headers,
+                        json=body,
+                        timeout=aiohttp.ClientTimeout(total=120),
+                    ) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            raise RuntimeError(f"OpenAI HTTP {response.status}: {error_text[:300]}")
+
+                        result = await response.json()
+                        return result["choices"][0]["message"]["content"] or ""
+
         except Exception as e:
             print(f"âŒ LLM API call failed: {e}")
             raise

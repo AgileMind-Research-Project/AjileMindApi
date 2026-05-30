@@ -1,0 +1,82 @@
+name: Deploy AjileMindApi to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ajilemindapi-backend
+      DEPLOY_DIR: /opt/ajilemind-api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: AjileMindApi
+          file: AjileMindApi/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Upload compose file
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: AjileMindApi/docker-compose.prod.yml
+          target: ${{ env.DEPLOY_DIR }}
+
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            mkdir -p ${{ env.DEPLOY_DIR }}
+            cd ${{ env.DEPLOY_DIR }}
+
+            if [ ! -f .env ]; then
+              cat > .env <<'EOF'
+            GHCR_OWNER=${{ github.repository_owner }}
+            IMAGE_TAG=latest
+            MYSQL_ROOT_PASSWORD=change-me
+            MYSQL_DATABASE=agilemind_saas
+            MYSQL_USER=agilemind
+            MYSQL_PASSWORD=change-me
+            DB_USER=agilemind
+            DB_PASSWORD=change-me
+            DB_NAME=agilemind_saas
+            JWT_SECRET=change-me
+            REFRESH_SECRET=change-me
+            FRONTEND_URL=https://app.agilemind.com
+            AI_SERVICE_URL=
+            EOF
+            fi
+
+            docker login ghcr.io -u ${{ github.repository_owner }} -p ${{ secrets.GHCR_PAT }}
+            docker pull ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
+            docker compose -f docker-compose.prod.yml up -d
+            docker image prune -f

@@ -613,44 +613,22 @@ def create_rag_service():
     Create RAG service instance based on configuration
     
     Priority:
-    1. Ollama/Llama (local, free, recommended)
-    2. OpenAI (requires API key)
-    3. Simple RAG (fallback, no LLM needed)
+    1. OpenAI (requires API key)
+    2. Simple RAG (fallback, no LLM needed)
     
     Returns appropriate RAG service based on LLM_PROVIDER configuration
     """
-    provider = (settings.LLM_PROVIDER or "ollama").lower()
-    
-    if provider == "ollama":
-        logger.info("Using Ollama RAG Service (Local Llama)")
-        try:
-            return RAGServiceWithOllama()
-        except Exception as e:
-            logger.warning(f"Ollama not available: {e}, trying OpenAI...")
-            try:
-                return RAGServiceWithOpenAI()
-            except Exception as e2:
-                logger.warning(f"OpenAI not available: {e2}, using Simple RAG")
-                return SimpleRAGService()
-    
-    elif provider == "openai":
-        logger.info("Using OpenAI RAG Service")
-        try:
-            return RAGServiceWithOpenAI()
-        except Exception as e:
-            logger.warning(f"OpenAI not available: {e}, trying Ollama...")
-            try:
-                return RAGServiceWithOllama()
-            except Exception as e2:
-                logger.warning(f"Ollama not available: {e2}, using Simple RAG")
-                return SimpleRAGService()
-    
-    else:
-        logger.warning(f"Unknown provider: {provider}, defaulting to Ollama")
-        try:
-            return RAGServiceWithOllama()
-        except:
-            return SimpleRAGService()
+    provider = (settings.LLM_PROVIDER or "openai").lower()
+
+    if provider != "openai":
+        logger.warning(f"LLM_PROVIDER={provider} ignored; forcing OpenAI for RAG.")
+
+    logger.info("Using OpenAI RAG Service")
+    try:
+        return RAGServiceWithOpenAI()
+    except Exception as e:
+        logger.warning(f"OpenAI not available: {e}, using Simple RAG")
+        return SimpleRAGService()
 
 
 _default_rag_service = None

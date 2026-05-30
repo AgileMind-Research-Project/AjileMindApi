@@ -39,6 +39,7 @@ OPENAI_TOTAL_TIMEOUT   = 120
 class AIService:
 
     def __init__(self):
+        self.provider = (settings.LLM_PROVIDER or "ollama").strip().lower()
         self.openai_api_key  = settings.OPENAI_API_KEY
         self.openai_model    = settings.OPENAI_MODEL
         self.ollama_base_url = settings.OLLAMA_BASE_URL.rstrip("/")
@@ -47,8 +48,9 @@ class AIService:
 
         logger.info(
             "[AIService] Ready | "
-            f"Primary: Ollama {self.local_model} @ {self.ollama_base_url} (ctx=4096) | "
-            f"Cloud fallback: OpenAI {self.openai_model}"
+            f"Provider={self.provider} | "
+            f"Ollama {self.local_model} @ {self.ollama_base_url} (ctx=4096) | "
+            f"OpenAI {self.openai_model}"
         )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -73,27 +75,47 @@ class AIService:
         logger.info(f"  Length      : {len(tc)} chars | {line_count} lines")
         logger.info(f"  Type        : {transcript_type}")
         logger.info(f"  Task IDs    : {task_id_count} found")
-        logger.info(f"  Strategy    : LLM first → Regex fallback → OpenAI fallback")
-        logger.info(f"  Model       : {self.local_model} @ {self.ollama_base_url}")
+        if self.provider == "openai":
+            logger.info("  Strategy    : OpenAI LLM first → Regex fallback")
+            logger.info(f"  Model       : {self.openai_model} (OpenAI)")
+        else:
+            logger.info("  Strategy    : Ollama LLM first → Regex fallback → OpenAI fallback")
+            logger.info(f"  Model       : {self.local_model} @ {self.ollama_base_url}")
         logger.info(f"  Timeout     : {OLLAMA_READ_TIMEOUT}s")
         logger.info("=" * 70)
 
-        # ── Step 1: Always try LLM first ─────────────────────────────────────
-        logger.info("[STEP 1] Sending to Ollama LLM ...")
         prompt = self._build_llm_prompt(tc, category)
-        result = await self._call_ollama(prompt)
-        if result and (result.get("tasks") or result.get("leave_info") or result.get("bugs")):
-            result = self._deduplicate(result)
-            logger.info(
-                f"[RESULT] ✓ Source=OLLAMA_LLM | "
-                f"tasks={len(result.get('tasks', []))} | "
-                f"leaves={len(result.get('leave_info', []))} | "
-                f"bugs={len(result.get('bugs', []))}"
-            )
-            logger.info("=" * 70)
-            return result
+        result = None
 
-        logger.warning("[STEP 1] Ollama LLM returned empty or timed out.")
+        # ── Step 1: LLM (provider-specific) ──────────────────────────────────
+        if self.provider == "openai":
+            logger.info("[STEP 1] Sending to OpenAI LLM ...")
+            result = await self._call_openai(prompt)
+            if result and (result.get("tasks") or result.get("leave_info") or result.get("bugs")):
+                result = self._deduplicate(result)
+                logger.info(
+                    f"[RESULT] ✓ Source=OPENAI_LLM | "
+                    f"tasks={len(result.get('tasks', []))} | "
+                    f"leaves={len(result.get('leave_info', []))} | "
+                    f"bugs={len(result.get('bugs', []))}"
+                )
+                logger.info("=" * 70)
+                return result
+            logger.warning("[STEP 1] OpenAI LLM returned empty or timed out.")
+        else:
+            logger.info("[STEP 1] Sending to Ollama LLM ...")
+            result = await self._call_ollama(prompt)
+            if result and (result.get("tasks") or result.get("leave_info") or result.get("bugs")):
+                result = self._deduplicate(result)
+                logger.info(
+                    f"[RESULT] ✓ Source=OLLAMA_LLM | "
+                    f"tasks={len(result.get('tasks', []))} | "
+                    f"leaves={len(result.get('leave_info', []))} | "
+                    f"bugs={len(result.get('bugs', []))}"
+                )
+                logger.info("=" * 70)
+                return result
+            logger.warning("[STEP 1] Ollama LLM returned empty or timed out.")
 
         # ── Step 2: Regex fallback ────────────────────────────────────────────
         logger.info("[STEP 2] Trying regex parsers as fallback ...")
@@ -132,7 +154,12 @@ class AIService:
 
         logger.warning("[STEP 2] Regex parsers returned nothing.")
 
-        # ── Step 3: OpenAI fallback ───────────────────────────────────────────
+        # ── Step 3: OpenAI fallback (only when Ollama is the provider) ───────
+        if self.provider == "openai":
+            logger.warning("[STEP 3] OpenAI already tried. No additional fallback configured.")
+            logger.info("=" * 70)
+            return empty
+
         logger.info("[STEP 3] Trying OpenAI cloud fallback ...")
         openai_ok = (
             self.openai_api_key

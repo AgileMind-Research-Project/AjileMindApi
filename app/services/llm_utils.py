@@ -126,8 +126,8 @@ class LLMFactory:
         elif provider.lower() == "gemini":
             return LLMFactory.create_gemini_llm()
         else:
-            logger.warning(f"Unknown LLM provider: {provider}, falling back to Ollama")
-            return LLMFactory.create_ollama_llm()  # Fallback to Ollama (local)
+            logger.warning(f"Unknown LLM provider: {provider}, falling back to OpenAI")
+            return LLMFactory.create_openai_llm()
 
 
 class PromptTemplates:
