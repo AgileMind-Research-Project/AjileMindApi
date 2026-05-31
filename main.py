@@ -133,6 +133,11 @@ app.add_middleware(
 if settings.AUDIT_LOGGING_ENABLED:
     app.add_middleware(AuditLoggingMiddleware)
 
+# Simple health check for load balancers and Docker healthcheck
+@app.get("/api/health", tags=["Health"])
+async def health():
+    return {"status": "ok"}
+
 # Health check endpoint
 @app.get("/", tags=["Health"])
 async def root():
