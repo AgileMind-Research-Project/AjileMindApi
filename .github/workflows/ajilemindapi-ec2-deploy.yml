@@ -192,8 +192,7 @@ jobs:
             MAX_UPLOAD_SIZE_MB=10
             ALLOWED_EXTENSIONS=.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif
 
-            # Celery (URLs built from vars above to avoid heredoc line-break issues)
-            CELERY_BROKER_URL=amqp://${{ secrets.RABBITMQ_USER }}:${{ secrets.RABBITMQ_PASSWORD }}@rabbitmq:5672/
+            # Celery URLs are built after EOF from individual vars to avoid secret masking line-breaks
 
             # Monitoring
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
@@ -201,8 +200,10 @@ jobs:
             SENTRY_TRACES_SAMPLE_RATE=0.1
             EOF
 
-            # Append Celery Redis URL separately to avoid heredoc line-break from secret masking
-            echo "CELERY_RESULT_BACKEND=redis://${{ secrets.REDIS_USERNAME }}:${{ secrets.REDIS_PASSWORD }}@${{ secrets.REDIS_HOST }}:${{ secrets.REDIS_PORT }}/1" >> .env
+            # Build Celery URLs on the server from individual vars already in .env
+            source .env
+            echo "CELERY_BROKER_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/" >> .env
+            echo "CELERY_RESULT_BACKEND=redis://${REDIS_USERNAME}:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/1" >> .env
 
             echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io \
               -u ${{ steps.owner.outputs.name }} \
