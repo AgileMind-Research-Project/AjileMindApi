@@ -3,7 +3,7 @@ name: Deploy AjileMindApi to EC2
 on:
   push:
     branches:
-      - main
+      - lahiru_new
 
 permissions:
   contents: read
