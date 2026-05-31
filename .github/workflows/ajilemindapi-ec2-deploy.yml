@@ -12,6 +12,7 @@ permissions:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+
     env:
       REGISTRY: ghcr.io
       IMAGE_NAME: ajilemindapi-backend
@@ -31,8 +32,8 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: AjileMindApi
-          file: AjileMindApi/Dockerfile
+          context: .
+          file: Dockerfile
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
@@ -44,7 +45,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: AjileMindApi/docker-compose.prod.yml
+          source: docker-compose.prod.yml
           target: ${{ env.DEPLOY_DIR }}
 
       - name: Deploy on EC2
@@ -55,15 +56,19 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
+
             mkdir -p ${{ env.DEPLOY_DIR }}
             cd ${{ env.DEPLOY_DIR }}
 
-            cat > .env << 'ENVEOF'
+            cat > .env << 'EOF'
+            # Docker image
             GHCR_OWNER=${{ github.repository_owner }}
             IMAGE_TAG=latest
 
-            # App
+            # Application
             ENVIRONMENT=production
+            APP_NAME=AgileMind
+            APP_VERSION=1.0.0
             HOST=0.0.0.0
             PORT=8000
             API_PREFIX=/api/v1
@@ -77,22 +82,36 @@ jobs:
             ACCESS_TOKEN_EXPIRE_MINUTES=1440
             REFRESH_TOKEN_EXPIRE_DAYS=30
 
-            # Database
-            MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}
-            MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}
-            MYSQL_USER=${{ secrets.MYSQL_USER }}
-            MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+            # Password Policy
+            PASSWORD_MIN_LENGTH=8
+            PASSWORD_REQUIRE_UPPERCASE=true
+            PASSWORD_REQUIRE_LOWERCASE=true
+            PASSWORD_REQUIRE_NUMBERS=true
+            PASSWORD_REQUIRE_SYMBOLS=true
+            DEFAULT_PASSWORD_SUFFIX=@123
+
+            # Database - app connection vars (backend reads DB_*)
             DB_HOST=mysql
             DB_PORT=3306
             DB_NAME=${{ secrets.MYSQL_DATABASE }}
             DB_USER=${{ secrets.MYSQL_USER }}
             DB_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+            DB_POOL_SIZE=10
+            DB_MAX_OVERFLOW=20
 
-            # Redis
-            REDIS_HOST=redis
-            REDIS_PORT=6379
+            # Database - Docker MySQL container vars
+            MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}
+            MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}
+            MYSQL_USER=${{ secrets.MYSQL_USER }}
+            MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+
+            # Redis - Cloud RedisLabs
+            REDIS_HOST=${{ secrets.REDIS_HOST }}
+            REDIS_PORT=${{ secrets.REDIS_PORT }}
             REDIS_DB=0
             REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+            REDIS_USERNAME=${{ secrets.REDIS_USERNAME }}
+            REDIS_MAX_CONNECTIONS=50
 
             # RabbitMQ
             RABBITMQ_HOST=rabbitmq
@@ -100,8 +119,6 @@ jobs:
             RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
             RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
             RABBITMQ_VHOST=/
-            CELERY_BROKER_URL=amqp://${{ secrets.RABBITMQ_USER }}:${{ secrets.RABBITMQ_PASSWORD }}@rabbitmq:5672/
-            CELERY_RESULT_BACKEND=redis://redis:6379/1
 
             # Email
             SMTP_HOST=smtp.gmail.com
@@ -112,29 +129,76 @@ jobs:
             SMTP_FROM_EMAIL=${{ secrets.SMTP_USER }}
             SMTP_FROM_NAME=AgileMind Platform
 
-            # URLs
-            FRONTEND_URL=${{ secrets.FRONTEND_URL }}
-            PLATFORM_HOME_URL=${{ secrets.FRONTEND_URL }}
-            CORS_ORIGINS=${{ secrets.FRONTEND_URL }}
+            # Email Templates
+            WELCOME_EMAIL_SUBJECT=Welcome to AgileMind - Your Login Details
+            PASSWORD_RESET_SUBJECT=AgileMind - Password Reset Request
+            TENANT_CREATED_SUBJECT=Welcome to AgileMind - Your Tenant Account is Ready
 
-            # AI
-            AI_SERVICE_URL=${{ secrets.AI_SERVICE_URL }}
+            # Platform URLs
+            PLATFORM_HOME_URL=${{ secrets.FRONTEND_URL }}
+            AGILEMIND_PLATFORM_URL=${{ secrets.FRONTEND_URL }}
+            FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+
+            # CORS
+            CORS_ORIGINS=${{ secrets.FRONTEND_URL }}
+            CORS_CREDENTIALS=true
+            CORS_METHODS=GET,POST,PUT,DELETE,PATCH,OPTIONS
+            CORS_HEADERS=*
+
+            # Logging
+            LOG_LEVEL=INFO
+            LOG_TO_CONSOLE=true
+            LOG_TO_FILE=true
+            LOG_FORMAT=json
+            LOG_ROTATION=true
+            LOG_RETENTION_DAYS=30
+
+            # AI/ML
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-            OPENAI_MODEL=gpt-4
+            OPENAI_MODEL=gpt-4o-mini
             OPENAI_MAX_TOKENS=2000
             OPENAI_TEMPERATURE=0.7
+            LLM_PROVIDER=openai
+            USE_RAG_WITH_LLM=true
+            RAG_CHUNK_SIZE=1000
+            RAG_OVERLAP=100
+            RAG_TOP_K_RESULTS=5
 
-            # Integrations
-            JIRA_CLIENT_ID=${{ secrets.JIRA_CLIENT_ID }}
-            JIRA_CLIENT_SECRET=${{ secrets.JIRA_CLIENT_SECRET }}
-            JIRA_REDIRECT_URI=${{ secrets.FRONTEND_URL }}/api/v1/integrations/jira/callback
-            TEAMS_CLIENT_ID=${{ secrets.TEAMS_CLIENT_ID }}
-            TEAMS_CLIENT_SECRET=${{ secrets.TEAMS_CLIENT_SECRET }}
-            GITHUB_CLIENT_ID=${{ secrets.GITHUB_CLIENT_ID }}
-            GITHUB_CLIENT_SECRET=${{ secrets.GITHUB_CLIENT_SECRET }}
-            ENVEOF
+            # AI Service
+            AI_SERVICE_URL=${{ secrets.AI_SERVICE_URL }}
 
-            docker login ghcr.io -u ${{ github.repository_owner }} -p ${{ secrets.GHCR_PAT }}
+            # Rate Limiting
+            RATE_LIMIT_ENABLED=true
+            RATE_LIMIT_PER_MINUTE=60
+            RATE_LIMIT_PER_HOUR=1000
+
+            # Session
+            SESSION_TIMEOUT_MINUTES=60
+            MAX_LOGIN_ATTEMPTS=5
+            LOCKOUT_DURATION_MINUTES=15
+
+            # File Upload
+            MAX_UPLOAD_SIZE_MB=10
+            ALLOWED_EXTENSIONS=.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif
+
+            # Celery
+            CELERY_BROKER_URL=amqp://${{ secrets.RABBITMQ_USER }}:${{ secrets.RABBITMQ_PASSWORD }}@rabbitmq:5672/
+            CELERY_RESULT_BACKEND=redis://${{ secrets.REDIS_USERNAME }}:${{ secrets.REDIS_PASSWORD }}@${{ secrets.REDIS_HOST }}:${{ secrets.REDIS_PORT }}/1
+
+            # Monitoring
+            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
+            SENTRY_ENVIRONMENT=production
+            SENTRY_TRACES_SAMPLE_RATE=0.1
+            EOF
+
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io \
+              -u ${{ github.repository_owner }} \
+              --password-stdin
+
             docker pull ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
+
+            docker compose -f docker-compose.prod.yml down || true
             docker compose -f docker-compose.prod.yml up -d
+
             docker image prune -f
+            docker ps
