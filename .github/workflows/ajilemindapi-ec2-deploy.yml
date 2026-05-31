@@ -58,23 +58,81 @@ jobs:
             mkdir -p ${{ env.DEPLOY_DIR }}
             cd ${{ env.DEPLOY_DIR }}
 
-            if [ ! -f .env ]; then
-              cat > .env <<'EOF'
+            cat > .env << 'ENVEOF'
             GHCR_OWNER=${{ github.repository_owner }}
             IMAGE_TAG=latest
-            MYSQL_ROOT_PASSWORD=change-me
-            MYSQL_DATABASE=agilemind_saas
-            MYSQL_USER=agilemind
-            MYSQL_PASSWORD=change-me
-            DB_USER=agilemind
-            DB_PASSWORD=change-me
-            DB_NAME=agilemind_saas
-            JWT_SECRET=change-me
-            REFRESH_SECRET=change-me
-            FRONTEND_URL=https://app.agilemind.com
-            AI_SERVICE_URL=
-            EOF
-            fi
+
+            # App
+            ENVIRONMENT=production
+            HOST=0.0.0.0
+            PORT=8000
+            API_PREFIX=/api/v1
+            DEBUG=false
+
+            # Security
+            SECRET_KEY=${{ secrets.JWT_SECRET }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            REFRESH_SECRET=${{ secrets.REFRESH_SECRET }}
+            ALGORITHM=HS256
+            ACCESS_TOKEN_EXPIRE_MINUTES=1440
+            REFRESH_TOKEN_EXPIRE_DAYS=30
+
+            # Database
+            MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}
+            MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}
+            MYSQL_USER=${{ secrets.MYSQL_USER }}
+            MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+            DB_HOST=mysql
+            DB_PORT=3306
+            DB_NAME=${{ secrets.MYSQL_DATABASE }}
+            DB_USER=${{ secrets.MYSQL_USER }}
+            DB_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+
+            # Redis
+            REDIS_HOST=redis
+            REDIS_PORT=6379
+            REDIS_DB=0
+            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+
+            # RabbitMQ
+            RABBITMQ_HOST=rabbitmq
+            RABBITMQ_PORT=5672
+            RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
+            RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
+            RABBITMQ_VHOST=/
+            CELERY_BROKER_URL=amqp://${{ secrets.RABBITMQ_USER }}:${{ secrets.RABBITMQ_PASSWORD }}@rabbitmq:5672/
+            CELERY_RESULT_BACKEND=redis://redis:6379/1
+
+            # Email
+            SMTP_HOST=smtp.gmail.com
+            SMTP_PORT=587
+            SMTP_SECURE=false
+            SMTP_USER=${{ secrets.SMTP_USER }}
+            SMTP_APP_PASSWORD=${{ secrets.SMTP_APP_PASSWORD }}
+            SMTP_FROM_EMAIL=${{ secrets.SMTP_USER }}
+            SMTP_FROM_NAME=AgileMind Platform
+
+            # URLs
+            FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+            PLATFORM_HOME_URL=${{ secrets.FRONTEND_URL }}
+            CORS_ORIGINS=${{ secrets.FRONTEND_URL }}
+
+            # AI
+            AI_SERVICE_URL=${{ secrets.AI_SERVICE_URL }}
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            OPENAI_MODEL=gpt-4
+            OPENAI_MAX_TOKENS=2000
+            OPENAI_TEMPERATURE=0.7
+
+            # Integrations
+            JIRA_CLIENT_ID=${{ secrets.JIRA_CLIENT_ID }}
+            JIRA_CLIENT_SECRET=${{ secrets.JIRA_CLIENT_SECRET }}
+            JIRA_REDIRECT_URI=${{ secrets.FRONTEND_URL }}/api/v1/integrations/jira/callback
+            TEAMS_CLIENT_ID=${{ secrets.TEAMS_CLIENT_ID }}
+            TEAMS_CLIENT_SECRET=${{ secrets.TEAMS_CLIENT_SECRET }}
+            GITHUB_CLIENT_ID=${{ secrets.GITHUB_CLIENT_ID }}
+            GITHUB_CLIENT_SECRET=${{ secrets.GITHUB_CLIENT_SECRET }}
+            ENVEOF
 
             docker login ghcr.io -u ${{ github.repository_owner }} -p ${{ secrets.GHCR_PAT }}
             docker pull ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
