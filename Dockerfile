@@ -14,6 +14,12 @@ RUN apt-get update && apt-get install -y \
     default-libmysqlclient-dev \
     pkg-config \
     curl \
+    libffi-dev \
+    libssl-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    libjpeg-dev \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set work directory
