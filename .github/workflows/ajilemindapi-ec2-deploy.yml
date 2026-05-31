@@ -201,7 +201,12 @@ jobs:
             EOF
 
             # Build Celery URLs on the server from individual vars already in .env
-            source .env
+            RABBITMQ_USER=$(grep '^RABBITMQ_USER=' .env | cut -d'=' -f2)
+            RABBITMQ_PASSWORD=$(grep '^RABBITMQ_PASSWORD=' .env | cut -d'=' -f2)
+            REDIS_USERNAME=$(grep '^REDIS_USERNAME=' .env | cut -d'=' -f2)
+            REDIS_PASSWORD=$(grep '^REDIS_PASSWORD=' .env | cut -d'=' -f2)
+            REDIS_HOST=$(grep '^REDIS_HOST=' .env | cut -d'=' -f2)
+            REDIS_PORT=$(grep '^REDIS_PORT=' .env | cut -d'=' -f2)
             echo "CELERY_BROKER_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/" >> .env
             echo "CELERY_RESULT_BACKEND=redis://${REDIS_USERNAME}:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/1" >> .env
 
